@@ -1,0 +1,302 @@
+/* ============================================================
+   FONTS
+   ============================================================ */
+@font-face {
+  font-family: 'Geist';
+  src: url('/fonts/Geist-Variable.woff2') format('woff2-variations');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: block;
+}
+
+/* ============================================================
+   DESIGN TOKENS — Dark theme (default)
+   To add light mode: override these vars inside [data-theme="light"]
+   ============================================================ */
+:root {
+  /* Background layers */
+  --color-bg-base:        #0a0c10;   /* app shell background */
+  --color-bg-surface:     #111318;   /* cards, panels */
+  --color-bg-elevated:    #1a1f2e;   /* dropdowns, tooltips */
+  --color-bg-overlay:     #232938;   /* hover states */
+
+  /* Sidebar */
+  --color-sidebar-bg:     #0d0f14;
+  --color-sidebar-border: #1e2330;
+  --color-sidebar-width:  240px;
+
+  /* Borders */
+  --color-border:         #1e2330;
+  --color-border-subtle:  #161b27;
+
+  /* Text */
+  --color-text-primary:   #fbfbfc;
+  --color-text-secondary: #9aa3bc;
+  --color-text-muted:     #9aa3b8;
+  --color-text-inverse:   #0a0c10;
+
+  /* Brand / Accent */
+  --color-accent:         #0e97a1;
+  --color-accent-hover:   #3d5ce5;
+  --color-accent-subtle:  rgba(79, 110, 247, 0.12);
+
+  /* Status colors */
+  --color-critical:       #ef4444;
+  --color-critical-bg:    rgba(239, 68, 68, 0.12);
+  --color-warn:           #f59e0b;
+  --color-warn-bg:        rgba(245, 158, 11, 0.12);
+  --color-ok:             #22c55e;
+  --color-ok-bg:          rgba(34, 197, 94, 0.12);
+  --color-info:           #32b3e6;
+  --color-info-bg:        rgba(50, 179, 230, 0.12);
+
+  /* Officer marker colors */
+  --color-marker-active:    #22c55e;
+  --color-marker-responding:#4f6ef7;
+  --color-marker-idle:      #f59e0b;
+  --color-marker-offduty:   #4d5568;
+
+  /* Typography */
+  --font-family:          'Geist', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-variation:        'wght' 400;
+  --font-feature:         'cv11', 'ss01';
+  --font-size-xs:         10px;
+  --font-size-sm:         11px;
+  --font-size-base:       12px;
+  --font-size-md:         14px;
+  --font-size-lg:         16px;
+  --font-size-xl:         19px;
+  --font-size-2xl:        23px;
+  --line-height-base:     1.5;
+
+  /* Spacing */
+  --space-1:  4px;
+  --space-2:  8px;
+  --space-3:  12px;
+  --space-4:  16px;
+  --space-5:  20px;
+  --space-6:  24px;
+  --space-7:  28px;
+  --space-8:  32px;
+  --space-10: 40px;
+
+  /* Radius */
+  --radius-sm:  4px;
+  --radius-md:  6px;
+  --radius-lg:  8px;
+  --radius-xl:  12px;
+  --radius-full: 9999px;
+
+  /* Shadows */
+  --shadow-sm:  0 1px 3px rgba(0, 0, 0, 0.4);
+  --shadow-md:  0 4px 12px rgba(0, 0, 0, 0.5);
+  --shadow-lg:  0 8px 24px rgba(0, 0, 0, 0.6);
+
+  /* Transitions */
+  --transition-fast:   100ms ease;
+  --transition-base:   150ms ease;
+  --transition-slow:   250ms ease;
+}
+
+/* ============================================================
+   LIGHT MODE — override tokens when [data-theme="light"] is set
+   on <html> or <body>. Not active yet, ready for future use.
+   ============================================================ */
+[data-theme="light"] {
+  --color-bg-base:        #f4f5f7;
+  --color-bg-surface:     #ffffff;
+  --color-bg-elevated:    #ffffff;
+  --color-bg-overlay:     #f0f2f5;
+
+  --color-sidebar-bg:     #1a1f2e;
+  --color-sidebar-border: #252d40;
+
+  --color-border:         #e2e5ec;
+  --color-border-subtle:  #edf0f5;
+
+  --color-text-primary:   #111318;
+  --color-text-secondary: #b9bec9;
+  --color-text-muted:     #9aa3b8;
+  --color-text-inverse:   #ffffff;
+
+  --shadow-sm:  0 1px 3px rgba(0, 0, 0, 0.08);
+  --shadow-md:  0 4px 12px rgba(0, 0, 0, 0.1);
+  --shadow-lg:  0 8px 24px rgba(0, 0, 0, 0.12);
+}
+
+/* ============================================================
+   RESET & BASE
+   ============================================================ */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body {
+  height: 100%;
+  font-family: var(--font-family);
+  font-feature-settings: var(--font-feature);
+  font-size: var(--font-size-md);
+  font-weight: 420;
+  line-height: var(--line-height-base);
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-base);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#__nuxt {
+  height: 100%;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+button {
+  cursor: pointer;
+  font-family: inherit;
+  font-size: inherit;
+  border: none;
+  background: none;
+}
+
+input, textarea, select {
+  font-family: inherit;
+  font-size: inherit;
+}
+
+/* ============================================================
+   SHARED UTILITY CLASSES
+   ============================================================ */
+
+/* --- Status pills --- */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-full);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  white-space: nowrap;
+  line-height: 1.6;
+}
+.pill--critical { background: var(--color-critical-bg); color: var(--color-critical); }
+.pill--warn     { background: var(--color-warn-bg);     color: var(--color-warn); }
+.pill--ok       { background: var(--color-ok-bg);       color: var(--color-ok); }
+.pill--info     { background: var(--color-info-bg);     color: var(--color-info); }
+.pill--accent   { background: var(--color-accent-subtle); color: var(--color-accent); }
+.pill--ghost    { background: var(--color-bg-overlay);  color: var(--color-text-secondary); }
+
+/* --- Cards --- */
+.card {
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+}
+.card--pad {
+  padding: var(--space-4);
+}
+
+/* --- Buttons --- */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-md);
+  font-weight: 500;
+  transition: background var(--transition-base), color var(--transition-base), border-color var(--transition-base);
+  white-space: nowrap;
+}
+.btn--primary {
+  background: var(--color-accent);
+  color: #fff;
+}
+.btn--primary:hover {
+  background: var(--color-accent-hover);
+}
+.btn--ghost {
+  background: transparent;
+  color: var(--color-text-secondary);
+  border: 1px solid var(--color-border);
+}
+.btn--ghost:hover {
+  background: var(--color-bg-overlay);
+  color: var(--color-text-primary);
+}
+.btn--danger {
+  background: var(--color-critical-bg);
+  color: var(--color-critical);
+  border: 1px solid transparent;
+}
+.btn--danger:hover {
+  background: var(--color-critical);
+  color: #fff;
+}
+.btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* --- Form inputs --- */
+.input {
+  width: 100%;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-2) var(--space-3);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-md);
+  outline: none;
+  transition: border-color var(--transition-base), box-shadow var(--transition-base);
+}
+.input::placeholder {
+  color: var(--color-text-muted);
+}
+.input:focus {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px var(--color-accent-subtle);
+}
+.input--error {
+  border-color: var(--color-critical);
+}
+.input--error:focus {
+  box-shadow: 0 0 0 3px var(--color-critical-bg);
+}
+
+/* --- Labels --- */
+.label {
+  display: block;
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  margin-bottom: var(--space-1);
+}
+
+/* --- Divider --- */
+.divider {
+  border: none;
+  border-top: 1px solid var(--color-border);
+  margin: var(--space-4) 0;
+}
+
+/* --- Text helpers --- */
+.text-white    { color: #fff; }
+.text-muted    { color: var(--color-text-muted); }
+.text-secondary{ color: var(--color-text-secondary); }
+.text-primary  { color: var(--color-text-primary); }
+.text-accent   { color: var(--color-accent); }
+.text-critical { color: var(--color-critical); }
+.text-ok       { color: var(--color-ok); }
+.text-warn     { color: var(--color-warn); }
+.text-sm       { font-size: var(--font-size-sm); }
+.text-xs       { font-size: var(--font-size-xs); }
+.text-base     { font-size: var(--font-size-base); }
+.font-medium   { font-weight: 500; }
+.font-semibold { font-weight: 600; }
