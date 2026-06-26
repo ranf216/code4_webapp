@@ -1,25 +1,38 @@
 <script setup lang="ts">
-import { ref, reactive } from 'vue'
+import { ref, reactive, onMounted } from 'vue'
+import { communityApi } from '~/api/community'
+import type { FeaturedOfficer } from '~/api/community'
+import { fileToBase64 } from '~/composables/useFileApi'
 
 const props = defineProps<{
   communityId: string
   communityName: string
 }>()
 
+// Emit events to parent
+const emit = defineEmits<{
+  success: [message: string]
+  cancel: []
+}>()
+
 const { t } = useTranslation()
 const router = useRouter()
 
-// Mock current banner data - in real app fetch from API
-const hasBanner = ref(true)
+// Banner data state
+const hasBanner = ref(false)
+const featuredOfficer = ref<FeaturedOfficer | null>(null)
+const isLoading = ref(true)
 const isSubmitting = ref(false)
 const isDeleting = ref(false)
 const showDeleteModal = ref(false)
+const showNoBannerModal = ref(false)
+const errorMessage = ref<string | null>(null)
 
 const form = reactive({
-  description: 'Officer John Martinez has been protecting our community for over 8 years. His dedication and commitment to safety make him a cornerstone of our security team.',
+  description: '',
   imageUrl: '',
   imageFile: null as File | null,
-  imagePreview: 'https://placehold.co/600x300/1e2a3a/6ee7b7?text=Featured+Officer',
+  imagePreview: '',
 })
 
 const errors = reactive<Record<string, string>>({})
@@ -62,40 +75,123 @@ function validate(): boolean {
   return !errors.description && !errors.image
 }
 
+function openDeleteModal() {
+  showDeleteModal.value = true
+}
+
 function handleCancel() {
-  router.push(`/communities/edit/${props.communityId}`)
+  emit('cancel')
+}
+
+// Load existing banner on mount
+async function loadFeaturedOfficer() {
+  try {
+    const response = await communityApi.getFeaturedOfficer(Number(props.communityId))
+    if (response.rc === 0 && response.featured_officer) {
+      featuredOfficer.value = response.featured_officer
+      form.description = response.featured_officer.description
+      form.imageUrl = response.featured_officer.image_url
+      form.imagePreview = response.featured_officer.image_url
+      hasBanner.value = true
+    } else if (response.rc === 506) {
+      // No banner exists - show empty form with info modal
+      hasBanner.value = false
+      featuredOfficer.value = null
+      showNoBannerModal.value = true
+    }
+  } catch (error) {
+    console.error('Error loading featured officer:', error)
+    errorMessage.value = 'Failed to load featured officer banner'
+  } finally {
+    isLoading.value = false
+  }
+}
+
+onMounted(() => {
+  loadFeaturedOfficer()
+})
+
+async function handleDelete() {
+  isDeleting.value = true
+  errorMessage.value = null
+  
+  try {
+    const response = await communityApi.deleteFeaturedOfficer(Number(props.communityId))
+    
+    if (response.rc === 0) {
+      showDeleteModal.value = false
+      // Reset form to empty state
+      hasBanner.value = false
+      featuredOfficer.value = null
+      form.description = ''
+      form.imagePreview = ''
+      form.imageFile = null
+      form.imageUrl = ''
+    } else if (response.rc === 506) {
+      // Banner doesn't exist - just reset UI
+      showDeleteModal.value = false
+      hasBanner.value = false
+      featuredOfficer.value = null
+    }
+  } catch (error) {
+    console.error('Error deleting featured officer:', error)
+    errorMessage.value = 'Failed to delete featured officer banner'
+  } finally {
+    isDeleting.value = false
+  }
 }
 
 async function handleSubmit() {
   if (!validate()) return
 
   isSubmitting.value = true
-  await new Promise(r => setTimeout(r, 500))
-  isSubmitting.value = false
-  hasBanner.value = true
-}
-
-function openDeleteModal() {
-  showDeleteModal.value = true
-}
-
-async function handleDelete() {
-  isDeleting.value = true
-  await new Promise(r => setTimeout(r, 400))
-  isDeleting.value = false
-  showDeleteModal.value = false
-
-  // Reset to empty/default
-  hasBanner.value = false
-  form.description = ''
-  form.imagePreview = ''
-  form.imageFile = null
-  form.imageUrl = ''
+  errorMessage.value = null
+  
+  try {
+    // Convert image to base64 if file is selected
+    let imageBase64 = form.imageUrl
+    if (form.imageFile) {
+      imageBase64 = await fileToBase64(form.imageFile)
+    }
+    
+    const response = await communityApi.setFeaturedOfficer(
+      Number(props.communityId),
+      imageBase64,
+      form.description
+    )
+    
+    if (response.rc === 0) {
+      // Show success message and emit success event
+      const successMessage = hasBanner.value 
+        ? 'Featured officer banner updated successfully!' 
+        : 'Featured officer banner created successfully!'
+      emit('success', successMessage)
+    }
+  } catch (error) {
+    console.error('Error saving featured officer:', error)
+    errorMessage.value = 'Failed to save featured officer banner'
+  } finally {
+    isSubmitting.value = false
+  }
 }
 </script>
 
 <template>
   <div class="featured-officer">
+    <!-- Loading State -->
+    <div v-if="isLoading" class="loading-state">
+      <Icon name="lucide:loader-2" :size="24" class="spin" />
+      <span>Loading featured officer...</span>
+    </div>
+
+    <!-- Error Message -->
+    <div v-if="errorMessage" class="error-banner">
+      <Icon name="lucide:alert-circle" :size="16" />
+      <span>{{ errorMessage }}</span>
+    </div>
+
+    <!-- Content -->
+    <template v-if="!isLoading">
     <!-- Header -->
     <div class="form-header">
       <h2 class="form-title">{{ t('featured_officer.title') }}</h2>
@@ -214,12 +310,49 @@ async function handleDelete() {
       @cancel="showDeleteModal = false"
       @ok="handleDelete"
     />
+
+    <!-- No Banner Info Modal -->
+    <AppModal
+      :show="showNoBannerModal"
+      title="No Active Banner"
+      message="This community currently has no active featured officer banner. You can create one by uploading an image and adding a description."
+      :cancel-text="undefined"
+      ok-text="Got it"
+      @close="showNoBannerModal = false"
+      @ok="showNoBannerModal = false"
+    />
+    </template>
   </div>
 </template>
 
 <style scoped>
 .featured-officer {
   width: 100%;
+}
+
+/* Loading State */
+.loading-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-8);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+/* Error Banner */
+.error-banner {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  margin-bottom: var(--space-4);
+  background: color-mix(in srgb, var(--color-critical) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-critical) 30%, transparent);
+  border-radius: var(--radius-md);
+  color: var(--color-critical);
+  font-size: var(--font-size-sm);
 }
 
 .form-header {

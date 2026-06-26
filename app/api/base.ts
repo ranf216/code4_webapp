@@ -138,6 +138,12 @@ export class BaseApiClient {
           throw new ApiError(102, 'Session expired. Please log in again.', response.data, 'authentication')
         }
 
+        // Allow certain non-zero RC codes to be handled by the caller
+        const allowedNonZeroRCs = [506] // featured officer not found, etc.
+        if (allowedNonZeroRCs.includes(response.data.rc)) {
+          return response.data
+        }
+
         const { getErrorMessage, getErrorType } = await import('~/utils/errors')
         const messageType = getErrorType(response.data.rc)
         const userMessage = getErrorMessage(response.data.rc, response.data.message)

@@ -55,7 +55,16 @@ async function fetchCommunities(searchText?: string, includeInactive?: boolean, 
   }
 }
 
-onMounted(() => fetchCommunities())
+onMounted(() => {
+  // Check if we need to refresh (coming back from featured officer save)
+  const route = useRoute()
+  const router = useRouter()
+  if (route.query.refresh === 'true') {
+    // Clear the refresh parameter
+    router.replace({ query: { ...route.query, refresh: undefined } })
+  }
+  fetchCommunities()
+})
 
 const statusFilter = ref('all')
 const searchQuery = ref('')
@@ -168,7 +177,7 @@ const filteredCommunities = computed(() => {
   let result = communities.value
 
   if (statusFilter.value !== 'all') {
-    result = result.filter(c => c.status === statusFilter.value)
+    result = result.filter((c: CommunityWithNames) => c.status === statusFilter.value)
   }
 
   return result
@@ -355,10 +364,9 @@ const statusOptions = [
               </span>
             </td>
             <td class="col-featured">
-              <NuxtLink v-if="community.featuredOfficer" :to="`/communities/${community.id}/featured-officer`" class="action-btn action-btn--show">
-                Show
+              <NuxtLink :to="`/communities/${community.id}/featured-officer?from=list`" class="action-btn action-btn--show">
+                Manage
               </NuxtLink>
-              <span v-else class="text-muted">—</span>
             </td>
             <td class="col-actions">
               <div class="action-group">
@@ -694,6 +702,7 @@ const statusOptions = [
   align-items: center;
   justify-content: center;
   gap: var(--space-1);
+  flex-wrap: nowrap;
 }
 
 .action-btn {
