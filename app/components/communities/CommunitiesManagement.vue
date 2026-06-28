@@ -15,6 +15,7 @@ const communities = ref<CommunityWithNames[]>([])
 const loading = ref(false)
 const isSearching = ref(false)
 const fetchError = ref<string | null>(null)
+const successMessage = ref<string | null>(null)
 
 function mapCommunity(c: ApiCommunity): CommunityWithNames {
   return {
@@ -107,6 +108,11 @@ async function handleDeleteConfirm() {
     const response = await communityApi.deleteCommunity(Number(communityToDelete.value.id))
     if (response.rc === 0) {
       closeDeleteModal()
+      successMessage.value = t('communities.delete_success')
+      await fetchCommunities(searchQuery.value, statusFilter.value !== 'active', true)
+    } else if (response.rc === 500) {
+      fetchError.value = t('communities.not_found_error')
+      closeDeleteModal()
       await fetchCommunities(searchQuery.value, statusFilter.value !== 'active', true)
     } else if (response.rc === 502 || response.rc === 503 || response.rc === 504) {
       // Has active officers / residents / calls → offer deactivation instead
@@ -145,6 +151,7 @@ async function handleDeactivateConfirm() {
     })
     if (response.rc === 0) {
       closeDeactivateModal()
+      successMessage.value = t('communities.deactivate_success')
       await fetchCommunities(searchQuery.value, statusFilter.value !== 'active', true)
     } else {
       fetchError.value = response.message || 'Failed to deactivate community'
@@ -276,6 +283,24 @@ const statusOptions = [
           <AppButton :text="t('communities.add_community')" icon="lucide:plus" type="primary" />
         </NuxtLink>
       </div>
+    </div>
+
+    <!-- Success Message -->
+    <div v-if="successMessage" class="success-banner">
+      <Icon name="lucide:check-circle" :size="16" />
+      <span>{{ successMessage }}</span>
+      <button class="success-banner__close" @click="successMessage = null">
+        <Icon name="lucide:x" :size="14" />
+      </button>
+    </div>
+
+    <!-- Error Message -->
+    <div v-if="fetchError" class="error-banner">
+      <Icon name="lucide:alert-circle" :size="16" />
+      <span>{{ fetchError }}</span>
+      <button class="error-banner__close" @click="fetchError = null">
+        <Icon name="lucide:x" :size="14" />
+      </button>
     </div>
 
     <!-- Table -->
@@ -451,6 +476,48 @@ const statusOptions = [
   display: flex;
   flex-direction: column;
   gap: var(--space-5);
+}
+
+/* Status banners */
+.success-banner,
+.error-banner {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+}
+
+.success-banner {
+  background: color-mix(in srgb, var(--color-success, #22c55e) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-success, #22c55e) 30%, transparent);
+  color: var(--color-success, #22c55e);
+}
+
+.error-banner {
+  background: color-mix(in srgb, var(--color-critical) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-critical) 30%, transparent);
+  color: var(--color-critical);
+}
+
+.success-banner__close,
+.error-banner__close {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  opacity: 0.7;
+  transition: opacity var(--transition-base);
+}
+
+.success-banner__close:hover,
+.error-banner__close:hover {
+  opacity: 1;
 }
 
 /* Header */
