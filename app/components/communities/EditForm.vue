@@ -4,15 +4,6 @@ import { communityApi } from '~/api/community'
 import ImageUpload from '~/components/ImageUpload.vue'
 import type { CommunityEditFormData } from '~/types/community'
 
-declare global {
-  interface Window {
-    ksc?: {
-      maptool?: {
-        importCoordinates: (coordinates: string) => void
-      }
-    }
-  }
-}
 
 const props = defineProps<{
   communityId: string

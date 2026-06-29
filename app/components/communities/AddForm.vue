@@ -2,16 +2,8 @@
 import { nextTick, onMounted, onUnmounted, ref } from 'vue'
 import { communityApi } from '~/api/community'
 import ImageUpload from '~/components/ImageUpload.vue'
+import { getPlacePredictions, getPlaceDetails, type PlacePrediction } from '~/composables/useGooglePlaces'
 
-declare global {
-  interface Window {
-    ksc?: {
-      maptool?: {
-        importCoordinates: (coordinates: string) => void
-      }
-    }
-  }
-}
 
 const { t } = useTranslation()
 const router = useRouter()
@@ -21,6 +13,14 @@ const form = reactive({
   area: '',
   mapImage: '',
 })
+
+// Autocomplete state for area/address
+const areaPredictions = ref<PlacePrediction[]>([])
+const showAreaPredictions = ref(false)
+const isSearchingArea = ref(false)
+const selectedArea = ref<PlaceDetails | null>(null)
+
+let areaSearchTimer: ReturnType<typeof setTimeout> | null = null
 
 const showMapTool = ref(true)
 const mapToolLoaded = ref(false)
@@ -117,14 +117,29 @@ function waitForMapTool(callback: () => void, attempts = 0) {
   setTimeout(() => waitForMapTool(callback, attempts + 1), 100)
 }
 
+function cleanupMapTool() {
+  if (!window.ksc?.maptool) return
+
+  // Gọi map.remove() để Leaflet tự dọn _leaflet_id trên container
+  try {
+    window.ksc.maptool.map?.remove()
+  } catch (_) {
+    // Nếu remove() thất bại, xóa _leaflet_id thủ công
+    const container = document.getElementById('wrapper') as (HTMLElement & { _leaflet_id?: number }) | null
+    if (container) {
+      delete container._leaflet_id
+    }
+  }
+
+  delete window.ksc.maptool
+}
+
 function loadMapTool() {
   if (mapToolLoaded.value) return
   mapToolLoaded.value = true
 
-  // Remove existing map tool instance so it re-binds to the current #map element
-  if (window.ksc?.maptool) {
-    delete window.ksc.maptool
-  }
+  cleanupMapTool()
+
   const oldScript = document.querySelector('script[src="/map/maptool.min.js"]')
   if (oldScript) {
     oldScript.remove()
@@ -163,6 +178,63 @@ function isValidPolygonString(value: string): boolean {
   }
 }
 
+function handleAreaInput() {
+  selectedArea.value = null
+  if (areaSearchTimer) clearTimeout(areaSearchTimer)
+
+  if (!form.area.trim()) {
+    areaPredictions.value = []
+    showAreaPredictions.value = false
+    return
+  }
+
+  areaSearchTimer = setTimeout(async () => {
+    isSearchingArea.value = true
+    try {
+      areaPredictions.value = await getPlacePredictions(form.area)
+      showAreaPredictions.value = areaPredictions.value.length > 0
+    } catch (err) {
+      console.error('[AddCommunity] Area autocomplete search failed:', err)
+      areaPredictions.value = []
+      showAreaPredictions.value = false
+    } finally {
+      isSearchingArea.value = false
+    }
+  }, 400)
+}
+
+function hideAreaPredictions() {
+  // Delay so click on prediction can fire first
+  setTimeout(() => {
+    showAreaPredictions.value = false
+  }, 200)
+}
+
+function flyMapToLocation(lat: number, lng: number) {
+  waitForMapTool(() => {
+    window.ksc?.maptool?.map?.setView([lat, lng], 15)
+  })
+}
+
+async function selectAreaPrediction(prediction: PlacePrediction) {
+  try {
+    isSearchingArea.value = true
+    const details = await getPlaceDetails(prediction)
+    selectedArea.value = details
+    form.area = details.formatted_address || details.location_name
+    areaPredictions.value = []
+    showAreaPredictions.value = false
+    flyMapToLocation(details.latitude, details.longitude)
+  } catch (err) {
+    console.error(`[AddCommunity] Failed to get place details for placeId=${prediction.place_id}:`, err)
+    form.area = prediction.description
+    areaPredictions.value = []
+    showAreaPredictions.value = false
+  } finally {
+    isSearchingArea.value = false
+  }
+}
+
 async function handleSubmit() {
   if (!validate()) return
 
@@ -172,11 +244,20 @@ async function handleSubmit() {
     const payload: {
       name: string
       area: string
+      latitude?: number
+      longitude?: number
+      location_name?: string
       map_image?: string
       map_boundaries?: string
     } = {
       name: form.name.trim(),
       area: form.area.trim(),
+    }
+
+    if (selectedArea.value) {
+      payload.latitude = selectedArea.value.latitude
+      payload.longitude = selectedArea.value.longitude
+      payload.location_name = selectedArea.value.location_name
     }
 
     const mapImageBase64 = extractBase64FromDataUrl(form.mapImage)
@@ -257,15 +338,36 @@ async function handleSubmit() {
           </div>
 
           <div class="form-row">
-            <div class="form-field form-field--required" :class="{ 'form-field--error': errors.area }">
+            <div class="form-field form-field--required form-field--autocomplete" :class="{ 'form-field--error': errors.area }">
               <label class="form-field__label">{{ t('communities.area') }}</label>
-              <textarea
-                v-model="form.area"
-                class="form-field__textarea"
-                rows="3"
-                required
-                :placeholder="t('communities.area_placeholder')"
-              />
+              <div class="autocomplete-wrapper">
+                <textarea
+                  v-model="form.area"
+                  class="form-field__textarea"
+                  rows="3"
+                  required
+                  :placeholder="t('communities.area_placeholder')"
+                  @input="handleAreaInput"
+                  @blur="hideAreaPredictions"
+                />
+                <Icon
+                  v-if="isSearchingArea"
+                  name="lucide:loader-2"
+                  :size="16"
+                  class="autocomplete-loading spin"
+                />
+                <ul v-if="showAreaPredictions" class="autocomplete-dropdown">
+                  <li
+                    v-for="prediction in areaPredictions"
+                    :key="prediction.place_id"
+                    class="autocomplete-dropdown__item"
+                    @mousedown="selectAreaPrediction(prediction)"
+                  >
+                    <strong class="autocomplete-dropdown__main">{{ prediction.main_text }}</strong>
+                    <span class="autocomplete-dropdown__secondary">{{ prediction.secondary_text }}</span>
+                  </li>
+                </ul>
+              </div>
               <!-- <span class="form-field__hint">
                 {{ t('communities.area_hint') }}
               </span> -->
@@ -337,14 +439,6 @@ async function handleSubmit() {
               >
                 <Icon name="lucide:hexagon" :size="14" />
                 <span>{{ t('communities.draw_boundary') }}</span>
-              </button>
-              <button type="button" class="map-tools__btn">
-                <Icon name="lucide:door-open" :size="14" />
-                <span>{{ t('communities.add_doors') }}</span>
-              </button>
-              <button type="button" class="map-tools__btn">
-                <Icon name="lucide:layout-grid" :size="14" />
-                <span>{{ t('communities.add_windows') }}</span>
               </button>
             </div>
           </div>
@@ -497,6 +591,63 @@ async function handleSubmit() {
   }
 }
 
+/* Autocomplete */
+.form-field--autocomplete {
+  position: relative;
+}
+
+.autocomplete-wrapper {
+  position: relative;
+}
+
+.autocomplete-loading {
+  position: absolute;
+  right: var(--space-3);
+  top: var(--space-3);
+  color: var(--color-text-muted);
+}
+
+.autocomplete-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 10;
+  margin: var(--space-1) 0 0;
+  padding: var(--space-1) 0;
+  list-style: none;
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.autocomplete-dropdown__item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--space-2) var(--space-3);
+  cursor: pointer;
+  transition: background var(--transition-base);
+}
+
+.autocomplete-dropdown__item:hover {
+  background: var(--color-bg-overlay);
+}
+
+.autocomplete-dropdown__main {
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  color: var(--color-text-primary);
+}
+
+.autocomplete-dropdown__secondary {
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
 /* Form Field */
 .form-field {
   display: flex;
@@ -522,6 +673,8 @@ async function handleSubmit() {
 
 .form-field__input,
 .form-field__textarea {
+  width: 100%;
+  box-sizing: border-box;
   padding: var(--space-3) var(--space-4);
   background: var(--color-bg-base);
   border: 1px solid var(--color-border);

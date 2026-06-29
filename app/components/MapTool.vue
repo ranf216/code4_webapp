@@ -1,15 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, watch, nextTick } from 'vue'
 
-declare global {
-  interface Window {
-    ksc?: {
-      maptool?: {
-        importCoordinates: (coordinates: string) => void
-      }
-    }
-  }
-}
 
 interface Props {
   modelValue?: string
