@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { UserType, UserTypeLabels } from '~/constants/userTypes'
 
-type BadgeType = 'status' | 'userType' | 'active' | 'report' | 'review' | 'taskPriority' | 'taskStatus' | 'shiftStatus' | 'shiftCount' | 'postOrderStatus'
+type BadgeType = 'status' | 'userType' | 'active' | 'report' | 'review' | 'taskPriority' | 'taskStatus' | 'shiftStatus' | 'shiftCount' | 'postOrderStatus' | 'poiType' | 'poiThreat' | 'poiStatus' | 'templateStatus' | 'templateCategory'
 
 const props = defineProps<{
   type: BadgeType
@@ -82,6 +82,53 @@ const label = computed((): string => {
     return labels[String(props.value)] || String(props.value)
   }
 
+  if (props.type === 'poiType') {
+    const labels: Record<string, string> = {
+      poi: 'POI',
+      trespass: 'Trespass',
+      metro_red_card: 'Metro Red Card',
+    }
+    return labels[String(props.value)] || String(props.value)
+  }
+
+  if (props.type === 'poiThreat') {
+    const labels: Record<string, string> = {
+      low: 'Low',
+      medium: 'Medium',
+      high: 'High',
+      critical: 'Critical',
+    }
+    return labels[String(props.value)] || String(props.value)
+  }
+
+  if (props.type === 'poiStatus') {
+    const labels: Record<string, string> = {
+      draft: 'Draft',
+      active: 'Active',
+      expired: 'Expired',
+      inactive: 'Inactive',
+      archived: 'Archived',
+    }
+    return labels[String(props.value)] || String(props.value)
+  }
+
+  if (props.type === 'templateStatus') {
+    const labels: Record<string, string> = {
+      draft: 'Draft',
+      active: 'Active',
+      archived: 'Archived',
+    }
+    return labels[String(props.value)] || String(props.value)
+  }
+
+  if (props.type === 'templateCategory') {
+    const labels: Record<string, string> = {
+      incident: 'Incident',
+      daily_activity: 'Daily Activity',
+    }
+    return labels[String(props.value)] || String(props.value)
+  }
+
   // status type - uppercase the value
   return String(props.value).toUpperCase()
 })
@@ -117,6 +164,21 @@ const badgeClass = computed((): string => {
   if (props.type === 'postOrderStatus') {
     return `badge--po-${props.value}`
   }
+  if (props.type === 'poiType') {
+    return `badge--poi-type-${props.value}`
+  }
+  if (props.type === 'poiThreat') {
+    return `badge--poi-threat-${props.value}`
+  }
+  if (props.type === 'poiStatus') {
+    return `badge--poi-status-${props.value}`
+  }
+  if (props.type === 'templateStatus') {
+    return `badge--tpl-status-${props.value}`
+  }
+  if (props.type === 'templateCategory') {
+    return `badge--tpl-cat-${props.value}`
+  }
   return ''
 })
 </script>
@@ -133,7 +195,7 @@ const badgeClass = computed((): string => {
   align-items: center;
   padding: 4px 10px;
   border-radius: var(--radius-md);
-  font-size: 11px;
+  font-size: var(--font-size-sm);
   font-weight: 600;
   text-transform: uppercase;
 }
@@ -365,5 +427,112 @@ const badgeClass = computed((): string => {
   background: rgba(59, 130, 246, 0.15);
   color: #60a5fa;
   border: 1px solid rgba(59, 130, 246, 0.3);
+}
+
+/* POI Type variants */
+.badge--poi-type-poi {
+  background: rgba(139, 92, 246, 0.15);
+  color: #8b5cf6;
+  border: 1px solid rgba(139, 92, 246, 0.3);
+}
+
+.badge--poi-type-trespass {
+  background: rgba(249, 115, 22, 0.15);
+  color: #f97316;
+  border: 1px solid rgba(249, 115, 22, 0.3);
+}
+
+.badge--poi-type-metro_red_card {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+/* POI Threat variants */
+.badge--poi-threat-low {
+  background: rgba(148, 163, 184, 0.12);
+  color: #94a3b8;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+}
+
+.badge--poi-threat-medium {
+  background: rgba(234, 179, 8, 0.15);
+  color: #ca8a04;
+  border: 1px solid rgba(234, 179, 8, 0.3);
+}
+
+.badge--poi-threat-high {
+  background: rgba(249, 115, 22, 0.15);
+  color: #ea580c;
+  border: 1px solid rgba(249, 115, 22, 0.3);
+}
+
+.badge--poi-threat-critical {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+/* POI Status variants */
+.badge--poi-status-draft {
+  background: rgba(156, 163, 175, 0.12);
+  color: #9ca3af;
+  border: 1px solid rgba(156, 163, 175, 0.25);
+}
+
+.badge--poi-status-active {
+  background: rgba(34, 197, 94, 0.15);
+  color: #22c55e;
+  border: 1px solid rgba(34, 197, 94, 0.3);
+}
+
+.badge--poi-status-expired {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.badge--poi-status-inactive {
+  background: rgba(139, 92, 246, 0.12);
+  color: #a78bfa;
+  border: 1px solid rgba(139, 92, 246, 0.25);
+}
+
+.badge--poi-status-archived {
+  background: rgba(107, 114, 128, 0.12);
+  color: #6b7280;
+  border: 1px solid rgba(107, 114, 128, 0.25);
+}
+
+/* Template Status variants */
+.badge--tpl-status-active {
+  background: rgba(34, 197, 94, 0.15);
+  color: #22c55e;
+  border: 1px solid rgba(34, 197, 94, 0.3);
+}
+
+.badge--tpl-status-draft {
+  background: rgba(234, 179, 8, 0.15);
+  color: #ca8a04;
+  border: 1px solid rgba(234, 179, 8, 0.3);
+}
+
+.badge--tpl-status-archived {
+  background: rgba(107, 114, 128, 0.12);
+  color: #6b7280;
+  border: 1px solid rgba(107, 114, 128, 0.25);
+}
+
+/* Template Category variants */
+.badge--tpl-cat-incident {
+  background: rgba(239, 68, 68, 0.12);
+  color: #ef4444;
+  border: 1px solid rgba(239, 68, 68, 0.25);
+}
+
+.badge--tpl-cat-daily_activity {
+  background: rgba(99, 102, 241, 0.12);
+  color: #6366f1;
+  border: 1px solid rgba(99, 102, 241, 0.25);
 }
 </style>

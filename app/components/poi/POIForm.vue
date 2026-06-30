@@ -3,6 +3,41 @@ import { ref, computed, reactive } from 'vue'
 
 type RecordType = 'poi' | 'trespass' | 'metro_red_card'
 
+interface POIRecord {
+  id?: string
+  recordType: RecordType | ''
+  status: string
+  firstName: string
+  lastName: string
+  aliases: string
+  dateOfBirth: string
+  gender: string
+  physicalDescription: string
+  summary: string
+  internalNotes: string
+  sites: string[]
+  threatLevel: string
+  relatedIncidentIds: string
+  incidentHistorySummary: string
+  watchLevelReviewDate: string
+  associatedIndividuals: string
+  trespassNoticeNumber: string
+  trespassIssuingAuthority: string
+  propertyAreaCovered: string
+  trespassIssueDate: string
+  trespassExpiryDate: string
+  trespassRenewalReminder: number | null
+  lawEnforcementContact: string
+  conditions: string
+  redCardNumber: string
+  metroIssuingAuthority: string
+  metroIssueDate: string
+  metroExpiryDate: string
+  metroLines: string
+  metroRenewalReminder: number | null
+  existingPhotos?: string[]
+}
+
 interface POIFormData {
   // Common
   recordType: RecordType | ''
@@ -42,6 +77,7 @@ interface POIFormData {
 
 const props = defineProps<{
   mode: 'create' | 'edit'
+  record?: POIRecord
 }>()
 
 const { t } = useTranslation()
@@ -49,43 +85,51 @@ const router = useRouter()
 
 const isSubmitting = ref(false)
 const photoFiles = ref<File[]>([])
-const photoPreviewUrls = ref<string[]>([])
+const photoPreviewUrls = ref<string[]>([...(props.record?.existingPhotos ?? [])])
 const trespassDocFile = ref<File | null>(null)
 const metroCardFile = ref<File | null>(null)
 const exportFiles = ref<File[]>([])
 
-const form = reactive<POIFormData>({
-  recordType: '',
-  status: 'draft',
-  firstName: '',
-  lastName: '',
-  aliases: '',
-  dateOfBirth: '',
-  gender: '',
-  physicalDescription: '',
-  summary: '',
-  internalNotes: '',
-  sites: [],
-  threatLevel: '',
-  relatedIncidentIds: '',
-  incidentHistorySummary: '',
-  watchLevelReviewDate: '',
-  associatedIndividuals: '',
-  trespassNoticeNumber: '',
-  trespassIssuingAuthority: '',
-  propertyAreaCovered: '',
-  trespassIssueDate: '',
-  trespassExpiryDate: '',
-  trespassRenewalReminder: 14,
-  lawEnforcementContact: '',
-  conditions: '',
-  redCardNumber: '',
-  metroIssuingAuthority: '',
-  metroIssueDate: '',
-  metroExpiryDate: '',
-  metroLines: '',
-  metroRenewalReminder: 14,
-})
+const isEdit = computed(() => props.mode === 'edit')
+const pageTitle = computed(() => isEdit.value ? t('poi.form_title_edit') : t('poi.form_title_create'))
+
+function buildInitialForm(): POIFormData {
+  const r = props.record
+  return {
+    recordType: r?.recordType ?? '',
+    status: r?.status ?? 'draft',
+    firstName: r?.firstName ?? '',
+    lastName: r?.lastName ?? '',
+    aliases: r?.aliases ?? '',
+    dateOfBirth: r?.dateOfBirth ?? '',
+    gender: r?.gender ?? '',
+    physicalDescription: r?.physicalDescription ?? '',
+    summary: r?.summary ?? '',
+    internalNotes: r?.internalNotes ?? '',
+    sites: r?.sites ? [...r.sites] : [],
+    threatLevel: r?.threatLevel ?? '',
+    relatedIncidentIds: r?.relatedIncidentIds ?? '',
+    incidentHistorySummary: r?.incidentHistorySummary ?? '',
+    watchLevelReviewDate: r?.watchLevelReviewDate ?? '',
+    associatedIndividuals: r?.associatedIndividuals ?? '',
+    trespassNoticeNumber: r?.trespassNoticeNumber ?? '',
+    trespassIssuingAuthority: r?.trespassIssuingAuthority ?? '',
+    propertyAreaCovered: r?.propertyAreaCovered ?? '',
+    trespassIssueDate: r?.trespassIssueDate ?? '',
+    trespassExpiryDate: r?.trespassExpiryDate ?? '',
+    trespassRenewalReminder: r?.trespassRenewalReminder ?? 14,
+    lawEnforcementContact: r?.lawEnforcementContact ?? '',
+    conditions: r?.conditions ?? '',
+    redCardNumber: r?.redCardNumber ?? '',
+    metroIssuingAuthority: r?.metroIssuingAuthority ?? '',
+    metroIssueDate: r?.metroIssueDate ?? '',
+    metroExpiryDate: r?.metroExpiryDate ?? '',
+    metroLines: r?.metroLines ?? '',
+    metroRenewalReminder: r?.metroRenewalReminder ?? 14,
+  }
+}
+
+const form = reactive<POIFormData>(buildInitialForm())
 
 const errors = reactive<Partial<Record<keyof POIFormData, string>>>({})
 const photoError = ref('')
@@ -170,7 +214,8 @@ function handlePublish() {
 
 function submitForm() {
   isSubmitting.value = true
-  console.log('[POIForm] submit', form)
+  const action = isEdit.value ? 'update' : 'create'
+  console.log(`[POIForm] ${action}`, props.record?.id ?? 'new', form)
   setTimeout(() => {
     isSubmitting.value = false
     router.push('/poi')
@@ -199,7 +244,7 @@ function toggleSite(site: string) {
         <Icon name="lucide:arrow-left" :size="16" />
       </button>
       <div>
-        <h1 class="poi-form__page-title">{{ t('poi.form_title_create') }}</h1>
+        <h1 class="poi-form__page-title">{{ pageTitle }}</h1>
         <p class="poi-form__page-sub">{{ t('poi.form_subtitle') }}</p>
       </div>
     </div>
@@ -545,14 +590,14 @@ function toggleSite(site: string) {
             {{ t('common.cancel') }}
           </button>
           <div class="footer-actions-right">
-            <button type="button" class="btn-draft" :disabled="isSubmitting" @click="handleSaveDraft">
+            <button v-if="!isEdit" type="button" class="btn-draft" :disabled="isSubmitting" @click="handleSaveDraft">
               <Icon name="lucide:save" :size="15" />
               {{ t('poi.save_draft') }}
             </button>
             <button type="button" class="btn-publish" :disabled="isSubmitting" @click="handlePublish">
               <Icon v-if="isSubmitting" name="lucide:loader-2" :size="15" class="spin" />
-              <Icon v-else name="lucide:send" :size="15" />
-              {{ t('poi.publish') }}
+              <Icon v-else :name="isEdit ? 'lucide:save' : 'lucide:send'" :size="15" />
+              {{ isEdit ? t('poi.save_changes') : t('poi.publish') }}
             </button>
           </div>
         </div>
@@ -661,7 +706,7 @@ function toggleSite(site: string) {
 }
 
 .section-type-badge {
-  font-size: 11px;
+  font-size: var(--font-size-sm);
   font-weight: 600;
   padding: 2px var(--space-2);
   border-radius: var(--radius-sm);
@@ -861,7 +906,7 @@ function toggleSite(site: string) {
   justify-content: center;
   gap: 4px;
   color: var(--color-text-muted);
-  font-size: 10px;
+  font-size: var(--font-size-xs);
   cursor: pointer;
   transition: border-color var(--transition-base);
 }

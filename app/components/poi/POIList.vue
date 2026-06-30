@@ -22,6 +22,37 @@ const { t } = useTranslation()
 const router = useRouter()
 
 const loading = ref(false)
+const inactiveTargetId = ref<string | null>(null)
+const inactiveReason = ref('')
+const inactiveReasonError = ref('')
+const isInactivating = ref(false)
+
+function openInactiveModal(id: string) {
+  inactiveTargetId.value = id
+  inactiveReason.value = ''
+  inactiveReasonError.value = ''
+}
+
+function closeInactiveModal() {
+  inactiveTargetId.value = null
+}
+
+function confirmInactive() {
+  if (!inactiveReason.value.trim()) {
+    inactiveReasonError.value = t('validation.required')
+    return
+  }
+  isInactivating.value = true
+  setTimeout(() => {
+    const idx = records.value.findIndex(r => r.id === inactiveTargetId.value)
+    if (idx !== -1) {
+      const existing = records.value[idx]
+      if (existing) records.value[idx] = { ...existing, status: 'inactive' }
+    }
+    isInactivating.value = false
+    inactiveTargetId.value = null
+  }, 600)
+}
 const searchQuery = ref('')
 const filterType = ref<RecordType | 'all'>('all')
 const filterStatus = ref<RecordStatus | 'all'>('all')
@@ -36,6 +67,7 @@ const DEMO_RECORDS: POIRecord[] = [
     threatLevel: 'high',
     status: 'active',
     sites: ['Central Hub', 'North Gate'],
+    photoUrl: 'https://picsum.photos/seed/poi001/60/60',
     lastUpdated: '2026-06-20T10:30:00Z',
   },
   {
@@ -46,6 +78,7 @@ const DEMO_RECORDS: POIRecord[] = [
     threatLevel: 'medium',
     status: 'active',
     sites: ['South Plaza'],
+    photoUrl: 'https://picsum.photos/seed/ti002/60/60',
     expiryDate: '2026-07-15T00:00:00Z',
     lastUpdated: '2026-06-18T08:15:00Z',
   },
@@ -57,6 +90,7 @@ const DEMO_RECORDS: POIRecord[] = [
     threatLevel: 'critical',
     status: 'active',
     sites: ['Metro Station A', 'Metro Station B'],
+    photoUrl: 'https://picsum.photos/seed/mrc003/60/60',
     expiryDate: '2026-06-30T00:00:00Z',
     lastUpdated: '2026-06-10T14:00:00Z',
   },
@@ -122,6 +156,10 @@ function navigateToNew() {
 
 function navigateToDetail(id: string) {
   router.push(`/poi/${id}`)
+}
+
+function navigateToEdit(id: string) {
+  router.push(`/poi/${id}/edit`)
 }
 </script>
 
@@ -217,7 +255,9 @@ function navigateToDetail(id: string) {
               <div v-if="record.photoUrl" class="photo-thumb">
                 <img :src="record.photoUrl" :alt="record.firstName" />
               </div>
-              <div v-else class="photo-initials">{{ getInitials(record) }}</div>
+              <div v-else class="photo-placeholder">
+                <Icon name="lucide:image" :size="25" />
+              </div>
             </td>
             <td class="col-id">
               <span class="record-id">{{ record.id }}</span>
@@ -226,22 +266,16 @@ function navigateToDetail(id: string) {
               <span class="record-name">{{ record.firstName }} {{ record.lastName }}</span>
             </td>
             <td class="col-type">
-              <span class="type-badge" :class="`type-badge--${record.type}`">
-                {{ record.type === 'poi' ? t('poi.type_poi') : record.type === 'trespass' ? t('poi.type_trespass') : t('poi.type_metro') }}
-              </span>
+              <Badge type="poiType" :value="record.type" />
             </td>
             <td class="col-threat">
-              <span class="threat-badge" :class="`threat-badge--${record.threatLevel}`">
-                {{ t(`poi.threat_${record.threatLevel}`) }}
-              </span>
+              <Badge type="poiThreat" :value="record.threatLevel" />
             </td>
             <td class="col-sites">
               <span class="sites-list">{{ record.sites.join(', ') }}</span>
             </td>
             <td class="col-status">
-              <span class="status-badge" :class="`status-badge--${record.status}`">
-                {{ t(`poi.status_${record.status}`) }}
-              </span>
+              <Badge type="poiStatus" :value="record.status" />
             </td>
             <td class="col-expiry">
               <span
@@ -264,13 +298,14 @@ function navigateToDetail(id: string) {
                 <button class="action-btn action-btn--icon" :title="t('common.view')" @click="navigateToDetail(record.id)">
                   <Icon name="lucide:eye" :size="14" />
                 </button>
-                <button class="action-btn action-btn--icon" :title="t('common.edit')">
+                <button class="action-btn action-btn--icon" :title="t('common.edit')" @click.stop="navigateToEdit(record.id)">
                   <Icon name="lucide:pencil" :size="14" />
                 </button>
                 <button
                   v-if="record.status === 'active'"
                   class="action-btn action-btn--icon action-btn--danger"
                   :title="t('poi.action_inactive')"
+                  @click.stop="openInactiveModal(record.id)"
                 >
                   <Icon name="lucide:ban" :size="14" />
                 </button>
@@ -281,6 +316,37 @@ function navigateToDetail(id: string) {
       </table>
     </div>
   </div>
+  <!-- ── Inactive Modal ── -->
+  <Teleport to="body">
+    <div v-if="inactiveTargetId" class="modal-overlay" @click.self="closeInactiveModal">
+      <div class="modal">
+        <div class="modal__header">
+          <Icon name="lucide:ban" :size="18" class="modal__icon--danger" />
+          <h3 class="modal__title">{{ t('poi.modal_inactive_title') }}</h3>
+        </div>
+        <div class="modal__body">
+          <p class="modal__desc">{{ t('poi.modal_inactive_desc') }}</p>
+          <div class="form-field" :class="{ 'form-field--error': inactiveReasonError }">
+            <label class="form-field__label">{{ t('poi.modal_inactive_reason') }} <span class="req">*</span></label>
+            <textarea
+              v-model="inactiveReason"
+              class="form-field__textarea"
+              rows="3"
+              :placeholder="t('poi.modal_inactive_reason_placeholder')"
+            />
+            <span v-if="inactiveReasonError" class="field-error">{{ inactiveReasonError }}</span>
+          </div>
+        </div>
+        <div class="modal__footer">
+          <button class="btn-cancel" @click="closeInactiveModal">{{ t('common.cancel') }}</button>
+          <button class="btn-danger-solid" :disabled="isInactivating" @click="confirmInactive">
+            <Icon v-if="isInactivating" name="lucide:loader-2" :size="14" class="spin" />
+            {{ t('poi.modal_inactive_confirm') }}
+          </button>
+        </div>
+      </div>
+    </div>
+  </Teleport>
 </template>
 
 <style scoped>
@@ -464,9 +530,9 @@ function navigateToDetail(id: string) {
 
 /* ── Photo ── */
 .photo-thumb {
-  width: 32px;
-  height: 32px;
-  border-radius: var(--radius-full);
+  width: 60px;
+  height: 60px;
+  border-radius: var(--radius-md);
   overflow: hidden;
   flex-shrink: 0;
 }
@@ -477,24 +543,23 @@ function navigateToDetail(id: string) {
   object-fit: cover;
 }
 
-.photo-initials {
-  width: 32px;
-  height: 32px;
-  border-radius: var(--radius-full);
-  background: var(--color-bg-overlay);
+.photo-placeholder {
+  width: 60px;
+  height: 60px;
+  border-radius: var(--radius-md);
+  background: var(--color-bg-elevated);
   border: 1px solid var(--color-border);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 11px;
-  font-weight: 700;
-  color: var(--color-text-secondary);
+  color: var(--color-text-muted);
+  flex-shrink: 0;
 }
 
 /* ── Text cells ── */
 .record-id {
   font-family: monospace;
-  font-size: 12px;
+  font-size: var(--font-size-base);
   color: var(--color-text-muted);
 }
 
@@ -518,7 +583,7 @@ function navigateToDetail(id: string) {
   display: inline-block;
   padding: 2px var(--space-2);
   border-radius: var(--radius-sm);
-  font-size: 11px;
+  font-size: var(--font-size-sm);
   font-weight: 600;
   white-space: nowrap;
 }
@@ -543,7 +608,7 @@ function navigateToDetail(id: string) {
   display: inline-block;
   padding: 2px var(--space-2);
   border-radius: var(--radius-sm);
-  font-size: 11px;
+  font-size: var(--font-size-sm);
   font-weight: 600;
   white-space: nowrap;
 }
@@ -573,7 +638,7 @@ function navigateToDetail(id: string) {
   display: inline-block;
   padding: 2px var(--space-2);
   border-radius: var(--radius-sm);
-  font-size: 11px;
+  font-size: var(--font-size-sm);
   font-weight: 600;
   white-space: nowrap;
 }
@@ -682,6 +747,117 @@ function navigateToDetail(id: string) {
 .empty-state__icon {
   opacity: 0.3;
 }
+
+/* ── Modal ── */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.modal {
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  width: 440px;
+  max-width: calc(100vw - var(--space-8));
+}
+
+.modal__header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.modal__icon--danger { color: var(--color-critical, #ef4444); }
+
+.modal__title {
+  font-size: var(--font-size-base);
+  font-weight: 600;
+  color: var(--color-text-primary);
+  margin: 0;
+}
+
+.modal__body {
+  padding: var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.modal__desc {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  margin: 0;
+}
+
+.modal__footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+  border-top: 1px solid var(--color-border);
+}
+
+.form-field { display: flex; flex-direction: column; gap: var(--space-1); }
+.form-field__label { font-size: var(--font-size-sm); font-weight: 500; color: var(--color-text-secondary); }
+.form-field__textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-bg-base);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+  outline: none;
+  resize: vertical;
+  transition: border-color var(--transition-base);
+  font-family: var(--font-family);
+}
+.form-field__textarea:focus { border-color: var(--color-accent); }
+.form-field--error .form-field__textarea { border-color: var(--color-critical); }
+.field-error { font-size: var(--font-size-xs); color: var(--color-critical); }
+.req { color: var(--color-critical); }
+
+.btn-cancel {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  cursor: pointer;
+  background: transparent;
+  border: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+  transition: all var(--transition-base);
+}
+.btn-cancel:hover { border-color: var(--color-text-secondary); color: var(--color-text-primary); }
+
+.btn-danger-solid {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  cursor: pointer;
+  background: var(--color-critical, #ef4444);
+  border: none;
+  color: white;
+  transition: opacity var(--transition-base);
+}
+.btn-danger-solid:hover { opacity: 0.88; }
+.btn-danger-solid:disabled { opacity: 0.5; cursor: not-allowed; }
 
 /* ── Spin animation ── */
 .spin {

@@ -206,7 +206,7 @@ function closePanicModal() {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 10px;
+  font-size: var(--font-size-sm);
   font-weight: 800;
   color: white;
   flex-shrink: 0;
@@ -313,7 +313,7 @@ function closePanicModal() {
   background: var(--color-bg-elevated);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-full);
-  font-size: 10px;
+  font-size: var(--font-size-sm);
   font-weight: 600;
   color: var(--color-text-secondary);
   display: flex;
