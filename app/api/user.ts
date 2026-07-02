@@ -1,6 +1,6 @@
 import { BaseApiClient } from './base'
 import type { ApiResponse } from './base'
-import type { LoginRequest, LoginResponse } from './types/user'
+import type { LoginRequest, LoginResponse, MandatoryChangePasswordResponse } from './types/user'
 
 export class UserApi extends BaseApiClient {
   /**
@@ -45,6 +45,25 @@ export class UserApi extends BaseApiClient {
     }
     
     return this.requestWithToken(request, token)
+  }
+
+  /**
+   * Mandatory password change after first login with restricted token (X-token)
+   * @param xToken Restricted token from login response when need_change_password is true
+   * @param password New password (must meet password criteria)
+   * @returns Response with normal token
+   */
+  async mandatoryChangePassword(
+    xToken: string,
+    password: string
+  ): Promise<ApiResponse<MandatoryChangePasswordResponse>> {
+    const request = {
+      '#request': 'User/mandatory_change_password',
+      '#token': xToken,
+      password,
+    }
+
+    return this.request<MandatoryChangePasswordResponse>(request)
   }
 
   /**

@@ -81,14 +81,18 @@ export const useAuth = () => {
               first_name: loginData.first_name,
               last_name: loginData.last_name,
             },
-            false // need_change_password not available in direct login
+            loginData.need_change_password ?? false
           )
 
           currentStep.value = 'success'
-          
-          // Redirect to dashboard
-          await router.push('/dashboard')
-          
+
+          // Redirect based on password change requirement
+          if (loginData.need_change_password) {
+            await router.push('/change-password')
+          } else {
+            await router.push('/dashboard')
+          }
+
           return { success: true, requiresTwoFactor: false }
         }
       } else {

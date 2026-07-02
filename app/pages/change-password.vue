@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { twoFactorAuthApi } from '~/api/twoFactor'
+import { userApi } from '~/api/user'
 
 definePageMeta({
   layout: 'auth',
@@ -17,17 +17,14 @@ onMounted(() => {
 })
 
 // Form state
-const currentPassword = ref('')
 const newPassword = ref('')
 const confirmPassword = ref('')
 
 // Show/hide password toggles
-const showCurrentPassword = ref(false)
 const showNewPassword = ref(false)
 const showConfirmPassword = ref(false)
 
 // Error states
-const currentPasswordError = ref('')
 const newPasswordError = ref('')
 const confirmPasswordError = ref('')
 const globalError = ref('')
@@ -35,19 +32,24 @@ const globalError = ref('')
 // Loading state
 const isLoading = ref(false)
 
-// Validation functions
-function validateCurrentPassword(value: string): string {
-  if (!value) return t('auth.password_required')
-  return ''
-}
+// Real-time password criteria checklist
+const passwordCriteria = computed(() => {
+  const pwd = newPassword.value
+  return [
+    { key: 'length', label: t('auth.password_min_length'), met: pwd.length >= 8 },
+    { key: 'lowercase', label: t('auth.password_lowercase'), met: /[a-z]/.test(pwd) },
+    { key: 'uppercase', label: t('auth.password_uppercase'), met: /[A-Z]/.test(pwd) },
+    { key: 'digit', label: t('auth.password_digit'), met: /\d/.test(pwd) },
+    { key: 'special', label: t('auth.password_special'), met: /[^A-Za-z0-9]/.test(pwd) },
+  ] as { key: string; label: string; met: boolean }[]
+})
 
+const isPasswordValid = computed(() => passwordCriteria.value.every((c: { met: boolean }) => c.met))
+
+// Validation functions
 function validateNewPassword(value: string): string {
   if (!value) return t('auth.password_required')
-  if (value.length < 8) return t('auth.password_min_length')
-  if (!/[A-Z]/.test(value)) return t('auth.password_uppercase')
-  if (!/[a-z]/.test(value)) return t('auth.password_lowercase')
-  if (!/[0-9]/.test(value)) return t('auth.password_digit')
-  if (!/[!@#$%^&*(),.?":{}|<>]/.test(value)) return t('auth.password_special')
+  if (!isPasswordValid.value) return t('auth.password_requirements')
   return ''
 }
 
@@ -57,35 +59,36 @@ function validateConfirmPassword(value: string): string {
   return ''
 }
 
+const isFormValid = computed(() => {
+  return isPasswordValid.value && confirmPassword.value === newPassword.value && confirmPassword.value.length > 0
+})
+
 // Handle form submission
 async function handleSubmit() {
   // Reset errors
-  currentPasswordError.value = ''
   newPasswordError.value = ''
   confirmPasswordError.value = ''
   globalError.value = ''
 
   // Validate
-  currentPasswordError.value = validateCurrentPassword(currentPassword.value)
   newPasswordError.value = validateNewPassword(newPassword.value)
   confirmPasswordError.value = validateConfirmPassword(confirmPassword.value)
 
-  if (currentPasswordError.value || newPasswordError.value || confirmPasswordError.value) {
+  if (newPasswordError.value || confirmPasswordError.value) {
     return
   }
 
   try {
     isLoading.value = true
 
-    // Call change password API with restricted token
-    const response = await twoFactorAuthApi.changePassword(
+    // Call mandatory change password API with restricted token (X-token)
+    const response = await userApi.mandatoryChangePassword(
       authStore.token!,
-      currentPassword.value,
       newPassword.value
     )
 
     if (response.rc === 0) {
-      // Update auth store with new token
+      // Update auth store with normal token
       authStore.setAuth(
         response.token,
         {
@@ -93,13 +96,17 @@ async function handleSubmit() {
           first_name: response.first_name,
           last_name: response.last_name,
         },
-        false
+        response.need_change_password ?? false
       )
 
       // Redirect to dashboard
       await router.push('/dashboard')
     } else {
-      globalError.value = response.message || t('auth.change_password_error')
+      if (response.rc === 242) {
+        newPasswordError.value = response.message || t('auth.password_requirements')
+      } else {
+        globalError.value = response.message || t('auth.change_password_error')
+      }
     }
   } catch (err: any) {
     globalError.value = err.message || t('auth.change_password_error')
@@ -109,7 +116,6 @@ async function handleSubmit() {
 }
 
 // Clear errors on input
-watch(currentPassword, () => { currentPasswordError.value = '' })
 watch(newPassword, () => { newPasswordError.value = '' })
 watch(confirmPassword, () => { confirmPasswordError.value = '' })
 </script>
@@ -137,36 +143,6 @@ watch(confirmPassword, () => { confirmPasswordError.value = '' })
       </p>
 
       <form class="change-password-form" @submit.prevent="handleSubmit" novalidate>
-        <!-- Current Password -->
-        <div class="form-field">
-          <div style="display: flex; flex-direction: row;">
-            <Icon name="lucide:lock" :size="16" class="input-icon" style="margin-right: 10px;" />
-            <label class="label" for="current-password">{{ t('auth.current_password') }}</label>
-          </div>
-          <div class="input-wrap">
-            <input
-              id="current-password"
-              v-model="currentPassword"
-              :type="showCurrentPassword ? 'text' : 'password'"
-              class="input input--with-icon input--with-suffix"
-              :class="{ 'input--error': currentPasswordError }"
-              :placeholder="t('auth.current_password_placeholder')"
-              autocomplete="current-password"
-            />
-            <button
-              type="button"
-              class="input-suffix-btn"
-              @click="showCurrentPassword = !showCurrentPassword"
-            >
-              <Icon
-                :name="showCurrentPassword ? 'lucide:eye-off' : 'lucide:eye'"
-                :size="16"
-              />
-            </button>
-          </div>
-          <span v-if="currentPasswordError" class="input-error">{{ currentPasswordError }}</span>
-        </div>
-
         <!-- New Password -->
         <div class="form-field">
           <div style="display: flex; flex-direction: row;">
@@ -195,9 +171,22 @@ watch(confirmPassword, () => { confirmPasswordError.value = '' })
             </button>
           </div>
           <span v-if="newPasswordError" class="input-error">{{ newPasswordError }}</span>
-          <p class="text-xs text-muted mt-2">
-            {{ t('auth.password_requirements') }}
-          </p>
+
+          <div class="password-criteria">
+            <div
+              v-for="criterion in passwordCriteria"
+              :key="criterion.key"
+              class="password-criteria__item"
+              :class="{ 'password-criteria__item--met': criterion.met }"
+            >
+              <Icon
+                :name="criterion.met ? 'lucide:check' : 'lucide:x'"
+                :size="12"
+                class="password-criteria__icon"
+              />
+              <span>{{ criterion.label }}</span>
+            </div>
+          </div>
         </div>
 
         <!-- Confirm Password -->
@@ -240,7 +229,7 @@ watch(confirmPassword, () => { confirmPasswordError.value = '' })
         <button
           type="submit"
           class="btn btn--primary change-password-submit"
-          :disabled="isLoading"
+          :disabled="isLoading || !isFormValid"
         >
           <Icon v-if="isLoading" name="lucide:loader-circle" :size="16" class="spin" />
           <Icon v-else name="lucide:check" :size="16" />
@@ -288,6 +277,33 @@ watch(confirmPassword, () => { confirmPasswordError.value = '' })
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
+}
+
+.password-criteria {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-1) var(--space-2);
+  margin-top: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-bg-elevated);
+  border-radius: var(--radius-md);
+}
+
+.password-criteria__item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: 12px;
+  color: var(--color-text-muted);
+  transition: color var(--transition-base);
+}
+
+.password-criteria__item--met {
+  color: var(--color-ok);
+}
+
+.password-criteria__icon {
+  flex-shrink: 0;
 }
 
 .input-suffix-btn {

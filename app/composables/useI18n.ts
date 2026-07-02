@@ -1096,6 +1096,7 @@ const translations: Record<string, Record<string, string>> = {
     // Users
     'users.management_title': 'Users Management',
     'users.search_placeholder': 'Search users...',
+    'users.include_inactive': 'Include Inactive',
     'users.add_user': 'Add User',
     'users.add_title': 'Add New User',
     'users.edit_title': 'Edit User',
@@ -1120,6 +1121,17 @@ const translations: Record<string, Record<string, string>> = {
     'users.reset_password_failed': 'Failed to reset password. Please try again.',
     'users.delete_title': 'Delete User',
     'users.delete_message': 'Are you sure you want to delete {name}? This action cannot be undone.',
+    'users.invalid_role': 'Invalid role selected',
+    'users.first_name_required': 'First name is required',
+    'users.email_exists': 'A user with this email already exists',
+    'users.initial_password': 'Initial Password',
+    'users.initial_password_hint': 'Required when changing email. The user will be logged out and must change this password on their next login.',
+    'users.email_change_warning': 'Changing the email will immediately log this user out. They must log back in with the new email and initial password, then set a new permanent password.',
+    'users.deactivate_warning': 'Deactivating this user will immediately log them out and prevent them from logging in until reactivated.',
+    'users.user_not_found': 'User not found — they may have been deleted.',
+    'users.last_admin_deactivate': 'Cannot deactivate — this user is the last active admin in the system.',
+    'users.cannot_change_own_role': 'You cannot change your own role.',
+    'users.role_super_admin_only': 'Only Super Admin can change user roles.',
   }
 }
 

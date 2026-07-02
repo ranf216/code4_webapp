@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { UserType, UserTypeLabels } from '~/constants/userTypes'
 
-type BadgeType = 'status' | 'userType' | 'active' | 'report' | 'review' | 'taskPriority' | 'taskStatus' | 'shiftStatus' | 'shiftCount' | 'postOrderStatus' | 'poiType' | 'poiThreat' | 'poiStatus' | 'templateStatus' | 'templateCategory'
+type BadgeType = 'status' | 'userType' | 'adminRole' | 'active' | 'report' | 'review' | 'taskPriority' | 'taskStatus' | 'shiftStatus' | 'shiftCount' | 'postOrderStatus' | 'poiType' | 'poiThreat' | 'poiStatus' | 'templateStatus' | 'templateCategory'
 
 const props = defineProps<{
   type: BadgeType
@@ -15,6 +15,17 @@ const label = computed((): string => {
       return UserTypeLabels[typeNum as UserType] ?? 'Unknown'
     }
     return 'Unknown'
+  }
+
+  if (props.type === 'adminRole') {
+    const adminRoleLabels: Record<number, string> = {
+      2: 'Super Admin',
+      3: 'Manager',
+      4: 'Planning',
+      5: 'Logistics',
+      6: 'Finance',
+    }
+    return adminRoleLabels[props.value as number] ?? '—'
   }
 
   if (props.type === 'active') {
@@ -140,6 +151,9 @@ const badgeClass = computed((): string => {
   if (props.type === 'userType') {
     return `badge--type-${props.value}`
   }
+  if (props.type === 'adminRole') {
+    return `badge--admin-role-${props.value}`
+  }
   if (props.type === 'active') {
     return props.value ? 'badge--active-yes' : 'badge--active-no'
   }
@@ -245,6 +259,37 @@ const badgeClass = computed((): string => {
 }
 
 .badge--type-5 { /* Finance */
+  background: rgba(139, 92, 246, 0.15);
+  color: #8b5cf6;
+  border: 1px solid rgba(139, 92, 246, 0.3);
+}
+
+/* Admin User Role variants */
+.badge--admin-role-2 { /* Super Admin */
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.badge--admin-role-3 { /* Manager */
+  background: rgba(59, 130, 246, 0.15);
+  color: #3b82f6;
+  border: 1px solid rgba(59, 130, 246, 0.3);
+}
+
+.badge--admin-role-4 { /* Planning */
+  background: rgba(16, 185, 129, 0.15);
+  color: #10b981;
+  border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.badge--admin-role-5 { /* Logistics */
+  background: rgba(245, 158, 11, 0.15);
+  color: #f59e0b;
+  border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+.badge--admin-role-6 { /* Finance */
   background: rgba(139, 92, 246, 0.15);
   color: #8b5cf6;
   border: 1px solid rgba(139, 92, 246, 0.3);

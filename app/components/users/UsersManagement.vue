@@ -1,32 +1,40 @@
 <script setup lang="ts">
-import { UserType, UserTypeLabels } from '~/constants/userTypes'
-import { usersApi, type UserItem } from '~/api/users'
+import { AdminUserRole, type AdminUserRoleValue, type UpdateAdminUserParams } from '~/api/types/adminUser'
+import { adminUserApi } from '~/api/adminUser'
+import { useAuthStore } from '~/stores/auth'
 
 const { t } = useTranslation()
+const authStore = useAuthStore()
 
-// User interface matching API response
+// User interface matching AdminUser API response
 interface User {
-  id: string
+  user_id: string
   first_name: string
   last_name: string
-  mobile: string
+  phone_num: string
   email: string
-  password: string
-  type: UserType
-  registration_date: string
-  active: boolean
+  role: AdminUserRoleValue
+  created_on: string
+  last_login: string | null
+  is_active: boolean
+}
+
+function isValidEmail(email: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())
 }
 
 // Users data from API
 const users = ref<User[]>([])
+const totalCount = ref(0)
 const loading = ref(false)
+const isSearching = ref(false)
 
 const searchQuery = ref('')
-const roleFilter = ref('all')
-const statusFilter = ref('all')
+const includeInactive = ref(false)
 
 // Sorting state - default by first name as per SDS
-const sortKey = ref<'first_name' | 'last_name' | 'mobile' | 'email' | 'type' | 'registration_date' | 'active'>('first_name')
+// Only sortable columns per UI guide: first_name, last_name, email, role, created_on
+const sortKey = ref<'first_name' | 'last_name' | 'email' | 'role' | 'created_on'>('first_name')
 const sortOrder = ref<'asc' | 'desc'>('asc')
 
 function toggleSort(key: typeof sortKey.value) {
@@ -36,43 +44,39 @@ function toggleSort(key: typeof sortKey.value) {
     sortKey.value = key
     sortOrder.value = 'asc'
   }
+  fetchUsers(true)
 }
 
-// Filter options
-const roleOptions = [
-  { value: 'all', label: 'All Roles' },
-  { value: String(UserType.ADMIN), label: UserTypeLabels[UserType.ADMIN] },
-  { value: String(UserType.MANAGER), label: UserTypeLabels[UserType.MANAGER] },
-  { value: String(UserType.PLANNING), label: UserTypeLabels[UserType.PLANNING] },
-  { value: String(UserType.LOGISTICS), label: UserTypeLabels[UserType.LOGISTICS] },
-  { value: String(UserType.FINANCE), label: UserTypeLabels[UserType.FINANCE] },
-]
+// Debounce timer for search
+let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null
 
-const statusOptions = [
-  { value: 'all', label: 'All Status' },
-  { value: 'active', label: 'Active' },
-  { value: 'inactive', label: 'Inactive' },
-]
+function onSearchInput() {
+  if (searchDebounceTimer) {
+    clearTimeout(searchDebounceTimer)
+  }
+  searchDebounceTimer = setTimeout(() => {
+    fetchUsers(true)
+  }, 400)
+}
+
+function onIncludeInactiveChange() {
+  fetchUsers(true)
+}
 
 // Fetch users from API
-async function fetchUsers() {
+async function fetchUsers(isSearch = false) {
+  if (isSearch) isSearching.value = true
+  else loading.value = true
   try {
-    loading.value = true
-    const response = await usersApi.getUsers()
+    const response = await adminUserApi.getAdminUsers({
+      include_inactive: includeInactive.value,
+      search_text: searchQuery.value.trim(),
+      sort_by: sortKey.value,
+      sort_dir: sortOrder.value,
+    }, { showLoading: !isSearch })
     if (response.rc === 0) {
-      // API returns { rc, message, users: [...] }
-      const userList = (response as any).users || []
-      users.value = userList.map((item: any) => ({
-        id: item.user_id,
-        first_name: item.first_name,
-        last_name: item.last_name || '',
-        mobile: item.mobile || '',
-        email: item.email,
-        password: item.password,
-        type: item.type as UserType,
-        registration_date: item.create || item.registration_date || '',
-        active: item.status === 1 || item.active === true,
-      }))
+      users.value = response.users || []
+      totalCount.value = response.total_count || users.value.length
     } else {
       alert(response.message || 'Failed to load users')
     }
@@ -80,87 +84,14 @@ async function fetchUsers() {
     console.error('Error fetching users:', err)
     alert('Failed to load users')
   } finally {
-    loading.value = false
+    if (isSearch) isSearching.value = false
+    else loading.value = false
   }
 }
 
 // Load users on mount
 onMounted(() => {
-  fetchUsers()
-})
-
-// Filtered and sorted users
-const filteredUsers = computed(() => {
-  let result = users.value
-
-  // Filter by role
-  if (roleFilter.value !== 'all') {
-    result = result.filter((u: User) => u.type === Number(roleFilter.value))
-  }
-
-  // Filter by status
-  if (statusFilter.value !== 'all') {
-    result = result.filter((u: User) => u.active === (statusFilter.value === 'active'))
-  }
-
-  // Filter by search query
-  if (searchQuery.value.trim()) {
-    const query = searchQuery.value.toLowerCase().trim()
-    result = result.filter((u: User) =>
-      u.first_name.toLowerCase().includes(query) ||
-      u.last_name.toLowerCase().includes(query) ||
-      u.email.toLowerCase().includes(query) ||
-      u.mobile.toLowerCase().includes(query)
-    )
-  }
-
-  return result
-})
-
-const sortedUsers = computed(() => {
-  const result = [...filteredUsers.value].sort((a, b) => {
-    let aVal: string | number
-    let bVal: string | number
-
-    switch (sortKey.value) {
-      case 'first_name':
-        aVal = a.first_name.toLowerCase()
-        bVal = b.first_name.toLowerCase()
-        break
-      case 'last_name':
-        aVal = a.last_name.toLowerCase()
-        bVal = b.last_name.toLowerCase()
-        break
-      case 'mobile':
-        aVal = a.mobile.toLowerCase()
-        bVal = b.mobile.toLowerCase()
-        break
-      case 'email':
-        aVal = a.email.toLowerCase()
-        bVal = b.email.toLowerCase()
-        break
-      case 'type':
-        aVal = a.type
-        bVal = b.type
-        break
-      case 'registration_date':
-        aVal = new Date(a.registration_date).getTime()
-        bVal = new Date(b.registration_date).getTime()
-        break
-      case 'active':
-        aVal = a.active ? 1 : 0
-        bVal = b.active ? 1 : 0
-        break
-      default:
-        return 0
-    }
-
-    if (aVal < bVal) return sortOrder.value === 'asc' ? -1 : 1
-    if (aVal > bVal) return sortOrder.value === 'asc' ? 1 : -1
-    return 0
-  })
-
-  return result
+  fetchUsers(false)
 })
 
 // Delete modal state
@@ -181,9 +112,9 @@ async function handleDeleteConfirm() {
   if (!userToDelete.value) return
 
   try {
-    const response = await usersApi.deleteUser(userToDelete.value.id)
+    const response = await adminUserApi.deleteAdminUser(userToDelete.value.user_id)
     if (response.rc === 0) {
-      await fetchUsers()
+      await fetchUsers(true)
     } else {
       alert(response.message || 'Failed to delete user')
     }
@@ -216,7 +147,10 @@ async function handleResetPasswordConfirm() {
 
   isResettingPassword.value = true
   try {
-    const response = await usersApi.resetUserPassword(userToReset.value.id)
+    const response = await adminUserApi.resetAdminUserPassword({
+      user_id: userToReset.value.user_id,
+      password: '', // TODO: collect password from reset dialog (Section 5)
+    })
     if (response.rc === 0) {
       alert(t('users.reset_password_success'))
       closeResetPasswordModal()
@@ -233,46 +167,124 @@ async function handleResetPasswordConfirm() {
 
 // Add user modal
 const showAddModal = ref(false)
-const addForm = reactive({
+const addForm = reactive<{
+  first_name: string
+  last_name: string
+  phone_num: string
+  email: string
+  password: string
+  role: AdminUserRoleValue
+}>({
   first_name: '',
   last_name: '',
-  mobile: '',
+  phone_num: '',
   email: '',
   password: '',
-  role: UserType.ADMIN,
+  role: AdminUserRole.MANAGER,
 })
 const addErrors = reactive<Record<string, string>>({})
 const isAdding = ref(false)
+const showAddPassword = ref(false)
+
+const addPasswordCriteria = computed(() => {
+  const pwd = addForm.password
+  return [
+    { key: 'length', label: t('auth.password_min_length'), met: pwd.length >= 8 },
+    { key: 'lowercase', label: t('auth.password_lowercase'), met: /[a-z]/.test(pwd) },
+    { key: 'uppercase', label: t('auth.password_uppercase'), met: /[A-Z]/.test(pwd) },
+    { key: 'digit', label: t('auth.password_digit'), met: /\d/.test(pwd) },
+    { key: 'special', label: t('auth.password_special'), met: /[^A-Za-z0-9]/.test(pwd) },
+  ] as { key: string; label: string; met: boolean }[]
+})
+
+const isAddPasswordValid = computed(() => addPasswordCriteria.value.every((c: { met: boolean }) => c.met))
+const isAddFormValid = computed(() => {
+  return (
+    addForm.first_name.trim().length > 0 &&
+    isValidEmail(addForm.email) &&
+    isAddPasswordValid.value &&
+    addForm.role !== undefined
+  )
+})
 
 // Edit user modal
 const showEditModal = ref(false)
 const editingId = ref<string | null>(null)
-const editForm = reactive({
+const originalEditUser = ref<User | null>(null)
+const showEditPassword = ref(false)
+const editForm = reactive<{
+  first_name: string
+  last_name: string
+  phone_num: string
+  email: string
+  role: AdminUserRoleValue
+  is_active: boolean
+  initial_password: string
+}>({
   first_name: '',
   last_name: '',
-  mobile: '',
+  phone_num: '',
   email: '',
-  role: UserType.ADMIN,
-  active: true,
+  role: AdminUserRole.MANAGER,
+  is_active: true,
+  initial_password: '',
 })
 const editErrors = reactive<Record<string, string>>({})
 const isEditing = ref(false)
+const isLoadingEditUser = ref(false)
+
+const editPasswordCriteria = computed(() => {
+  const pwd = editForm.initial_password
+  return [
+    { key: 'length', label: t('auth.password_min_length'), met: pwd.length >= 8 },
+    { key: 'lowercase', label: t('auth.password_lowercase'), met: /[a-z]/.test(pwd) },
+    { key: 'uppercase', label: t('auth.password_uppercase'), met: /[A-Z]/.test(pwd) },
+    { key: 'digit', label: t('auth.password_digit'), met: /\d/.test(pwd) },
+    { key: 'special', label: t('auth.password_special'), met: /[^A-Za-z0-9]/.test(pwd) },
+  ] as { key: string; label: string; met: boolean }[]
+})
+
+const isEditPasswordValid = computed(() => editPasswordCriteria.value.every((c: { met: boolean }) => c.met))
+const isEditEmailChanged = computed(() => originalEditUser.value !== null && editForm.email.trim() !== originalEditUser.value.email)
+const isEditOwnAccount = computed(() => {
+  if (!originalEditUser.value || !authStore.user?.email) return false
+  return originalEditUser.value.email === authStore.user.email
+})
+const isCurrentUserSuperAdmin = computed(() => {
+  if (!authStore.user?.email) return false
+  const currentUser = users.value.find((u: User) => u.email === authStore.user!.email)
+  return currentUser?.role === AdminUserRole.SUPER_ADMIN
+})
+const isEditRoleDisabled = computed(() => !isCurrentUserSuperAdmin.value)
+const isEditFormValid = computed(() => {
+  if (!originalEditUser.value) return false
+  const baseValid =
+    editForm.first_name.trim().length > 0 &&
+    isValidEmail(editForm.email) &&
+    editForm.role !== undefined
+  const emailPasswordValid = !isEditEmailChanged.value || isEditPasswordValid.value
+  return baseValid && emailPasswordValid
+})
+
+const showEditDeactivateWarning = computed(() => {
+  return originalEditUser.value !== null && originalEditUser.value.is_active && !editForm.is_active
+})
 
 const addRoleOptions = [
-  { value: UserType.ADMIN, label: UserTypeLabels[UserType.ADMIN] },
-  { value: UserType.MANAGER, label: UserTypeLabels[UserType.MANAGER] },
-  { value: UserType.PLANNING, label: UserTypeLabels[UserType.PLANNING] },
-  { value: UserType.LOGISTICS, label: UserTypeLabels[UserType.LOGISTICS] },
-  { value: UserType.FINANCE, label: UserTypeLabels[UserType.FINANCE] },
+  { value: AdminUserRole.SUPER_ADMIN, label: 'Super Admin' },
+  { value: AdminUserRole.MANAGER, label: 'Manager' },
+  { value: AdminUserRole.PLANNING, label: 'Planning' },
+  { value: AdminUserRole.LOGISTICS, label: 'Logistics' },
+  { value: AdminUserRole.FINANCE, label: 'Finance' },
 ]
 
 function openAddModal() {
   addForm.first_name = ''
   addForm.last_name = ''
-  addForm.mobile = ''
+  addForm.phone_num = ''
   addForm.email = ''
   addForm.password = ''
-  addForm.role = UserType.ADMIN
+  addForm.role = AdminUserRole.MANAGER
   Object.keys(addErrors).forEach(k => delete addErrors[k])
   showAddModal.value = true
 }
@@ -288,9 +300,16 @@ function validateAddForm(): boolean {
   }
   if (!addForm.email.trim()) {
     addErrors.email = t('validation.required')
+  } else if (!isValidEmail(addForm.email)) {
+    addErrors.email = t('auth.error_invalid_email')
   }
-  if (!addForm.password.trim()) {
+  if (!addForm.password) {
     addErrors.password = t('validation.required')
+  } else if (!isAddPasswordValid.value) {
+    addErrors.password = t('auth.password_requirements')
+  }
+  if (!addForm.role) {
+    addErrors.role = t('validation.required')
   }
   return Object.keys(addErrors).length === 0
 }
@@ -299,19 +318,45 @@ async function handleAddSubmit() {
   if (!validateAddForm()) return
   isAdding.value = true
   try {
-    const response = await usersApi.addUser(
-      addForm.first_name,
-      addForm.last_name,
-      addForm.email,
-      addForm.mobile,
-      addForm.role,
-      addForm.password
-    )
+    const response = await adminUserApi.addAdminUser({
+      first_name: addForm.first_name,
+      last_name: addForm.last_name,
+      email: addForm.email,
+      phone_num: addForm.phone_num,
+      role: addForm.role,
+      password: addForm.password,
+    })
     if (response.rc === 0) {
-      await fetchUsers()
+      await fetchUsers(true)
       closeAddModal()
-    } else {
-      alert(response.message || 'Failed to add user')
+      return
+    }
+
+    Object.keys(addErrors).forEach(k => delete addErrors[k])
+    switch (response.rc) {
+      case 102:
+        addErrors.first_name = t('validation.required')
+        addErrors.email = t('validation.required')
+        addErrors.password = t('validation.required')
+        addErrors.role = t('validation.required')
+        break
+      case 106:
+        addErrors.role = t('users.invalid_role')
+        break
+      case 213:
+        addErrors.first_name = t('users.first_name_required')
+        break
+      case 235:
+        addErrors.email = t('auth.error_invalid_email')
+        break
+      case 240:
+        addErrors.email = t('users.email_exists')
+        break
+      case 242:
+        addErrors.password = response.message || t('auth.password_requirements')
+        break
+      default:
+        alert(response.message || 'Failed to add user')
     }
   } catch (err) {
     console.error('Error adding user:', err)
@@ -322,21 +367,46 @@ async function handleAddSubmit() {
 }
 
 // Edit user functions
-function openEditModal(user: User) {
-  editingId.value = user.id
-  editForm.first_name = user.first_name
-  editForm.last_name = user.last_name
-  editForm.mobile = user.mobile
-  editForm.email = user.email
-  editForm.role = user.type
-  editForm.active = user.active
+async function openEditModal(user: User) {
+  editingId.value = user.user_id
+  originalEditUser.value = null
   Object.keys(editErrors).forEach(k => delete editErrors[k])
+  isLoadingEditUser.value = true
   showEditModal.value = true
+
+  try {
+    const response = await adminUserApi.getAdminUser(user.user_id)
+    if (response.rc === 0 && response.user) {
+      const data = response.user
+      originalEditUser.value = data
+      editForm.first_name = data.first_name
+      editForm.last_name = data.last_name
+      editForm.phone_num = data.phone_num
+      editForm.email = data.email
+      editForm.role = data.role
+      editForm.is_active = data.is_active
+      editForm.initial_password = ''
+      showEditPassword.value = false
+    } else {
+      alert(response.message || 'Failed to load user details')
+      closeEditModal()
+    }
+  } catch (err) {
+    console.error('Error loading user details:', err)
+    alert('Failed to load user details')
+    closeEditModal()
+  } finally {
+    isLoadingEditUser.value = false
+  }
 }
 
 function closeEditModal() {
   showEditModal.value = false
   editingId.value = null
+  originalEditUser.value = null
+  editForm.initial_password = ''
+  showEditPassword.value = false
+  Object.keys(editErrors).forEach(k => delete editErrors[k])
 }
 
 function validateEditForm(): boolean {
@@ -346,28 +416,92 @@ function validateEditForm(): boolean {
   }
   if (!editForm.email.trim()) {
     editErrors.email = t('validation.required')
+  } else if (!isValidEmail(editForm.email)) {
+    editErrors.email = t('auth.error_invalid_email')
+  }
+  if (isEditEmailChanged.value && !isEditPasswordValid.value) {
+    editErrors.initial_password = t('auth.password_requirements')
   }
   return Object.keys(editErrors).length === 0
 }
 
 async function handleEditSubmit() {
   if (!validateEditForm()) return
+  if (!originalEditUser.value) return
+
   isEditing.value = true
   try {
-    const response = await usersApi.updateUser(
-      editingId.value!,
-      editForm.first_name,
-      editForm.last_name,
-      editForm.email,
-      editForm.mobile,
-      editForm.role,
-      editForm.active
-    )
-    if (response.rc === 0) {
-      await fetchUsers()
+    const original = originalEditUser.value
+    const payload: UpdateAdminUserParams = { user_id: editingId.value! }
+
+    if (editForm.first_name.trim() !== original.first_name) {
+      payload.first_name = editForm.first_name.trim()
+    }
+    if (editForm.last_name.trim() !== original.last_name) {
+      payload.last_name = editForm.last_name.trim()
+    }
+    if (editForm.phone_num.trim() !== original.phone_num) {
+      payload.phone_num = editForm.phone_num.trim()
+    }
+    if (editForm.email.trim() !== original.email) {
+      payload.email = editForm.email.trim()
+      payload.initial_password = editForm.initial_password
+    }
+    if (editForm.is_active !== original.is_active) {
+      payload.is_active = editForm.is_active
+    }
+
+    const hasUserChanges = Object.keys(payload).length > 1
+    let userResponse = null
+    if (hasUserChanges) {
+      userResponse = await adminUserApi.updateAdminUser(payload)
+    }
+
+    let roleResponse = null
+    if (editForm.role !== original.role) {
+      roleResponse = await adminUserApi.changeAdminUserRole({
+        user_id: editingId.value!,
+        role: editForm.role,
+      })
+    }
+
+    if ((!userResponse || userResponse.rc === 0) && (!roleResponse || roleResponse.rc === 0)) {
+      await fetchUsers(true)
       closeEditModal()
-    } else {
-      alert(response.message || 'Failed to update user')
+      return
+    }
+
+    Object.keys(editErrors).forEach(k => delete editErrors[k])
+    const response = userResponse && userResponse.rc !== 0 ? userResponse : roleResponse
+    switch (response?.rc) {
+      case 770:
+        alert(t('users.user_not_found'))
+        closeEditModal()
+        await fetchUsers(true)
+        break
+      case 771:
+        editErrors.is_active = t('users.last_admin_deactivate')
+        break
+      case 772:
+        editErrors.role = t('users.cannot_change_own_role')
+        break
+      case 102:
+        editErrors.initial_password = t('users.initial_password_required')
+        break
+      case 106:
+        editErrors.role = t('users.invalid_role')
+        break
+      case 235:
+        editErrors.email = t('auth.error_invalid_email')
+        break
+      case 240:
+        editErrors.email = t('users.email_exists')
+        break
+      case 242:
+        editErrors.initial_password = response?.message || t('auth.password_requirements')
+        break
+      default:
+        alert(response?.message || 'Failed to update user')
     }
   } catch (err) {
     console.error('Error updating user:', err)
@@ -377,7 +511,7 @@ async function handleEditSubmit() {
   }
 }
 
-const totalUsers = computed(() => users.value.length)
+const totalUsers = computed(() => totalCount.value)
 </script>
 
 <template>
@@ -399,20 +533,24 @@ const totalUsers = computed(() => users.value.length)
             type="text"
             :placeholder="t('users.search_placeholder')"
             class="users-management__search-input"
+            @input="onSearchInput"
+          />
+          <Icon
+            v-if="isSearching"
+            name="lucide:loader-2"
+            :size="16"
+            class="users-management__search-loading spin"
           />
         </div>
 
-        <select v-model="roleFilter" class="users-management__filter">
-          <option v-for="opt in roleOptions" :key="opt.value" :value="opt.value">
-            {{ opt.label }}
-          </option>
-        </select>
-
-        <select v-model="statusFilter" class="users-management__filter">
-          <option v-for="opt in statusOptions" :key="opt.value" :value="opt.value">
-            {{ opt.label }}
-          </option>
-        </select>
+        <label class="users-management__filter users-management__filter--checkbox">
+          <input
+            v-model="includeInactive"
+            type="checkbox"
+            @change="onIncludeInactiveChange"
+          />
+          <span>{{ t('users.include_inactive') }}</span>
+        </label>
 
         <AppButton :text="t('users.add_user')" icon="lucide:plus" type="primary" @click="openAddModal" />
       </div>
@@ -420,7 +558,7 @@ const totalUsers = computed(() => users.value.length)
 
     <!-- Table -->
     <div class="users-management__table-container">
-      <div v-if="loading" class="loading-overlay">
+      <div v-if="loading && !isSearching" class="loading-overlay">
         <Icon name="lucide:loader-2" :size="32" class="animate-spin" />
         <span>{{ t('common.loading') }}</span>
       </div>
@@ -439,12 +577,7 @@ const totalUsers = computed(() => users.value.length)
                 <Icon v-if="sortKey === 'last_name'" :name="sortOrder === 'asc' ? 'lucide:chevron-up' : 'lucide:chevron-down'" :size="14" />
               </span>
             </th>
-            <th class="col-mobile sortable" :class="{ 'sorted': sortKey === 'mobile', 'asc': sortKey === 'mobile' && sortOrder === 'asc', 'desc': sortKey === 'mobile' && sortOrder === 'desc' }" @click="toggleSort('mobile')">
-              <span class="sortable-content">
-                <span>{{ t('users.mobile') }}</span>
-                <Icon v-if="sortKey === 'mobile'" :name="sortOrder === 'asc' ? 'lucide:chevron-up' : 'lucide:chevron-down'" :size="14" />
-              </span>
-            </th>
+            <th class="col-mobile">{{ t('users.mobile') }}</th>
             <th class="col-email sortable" :class="{ 'sorted': sortKey === 'email', 'asc': sortKey === 'email' && sortOrder === 'asc', 'desc': sortKey === 'email' && sortOrder === 'desc' }" @click="toggleSort('email')">
               <span class="sortable-content">
                 <span>{{ t('users.email') }}</span>
@@ -452,52 +585,55 @@ const totalUsers = computed(() => users.value.length)
               </span>
             </th>
             <th class="col-password">{{ t('users.password') }}</th>
-            <th class="col-role sortable" :class="{ 'sorted': sortKey === 'type', 'asc': sortKey === 'type' && sortOrder === 'asc', 'desc': sortKey === 'type' && sortOrder === 'desc' }" @click="toggleSort('type')">
+            <th class="col-role sortable" :class="{ 'sorted': sortKey === 'role', 'asc': sortKey === 'role' && sortOrder === 'asc', 'desc': sortKey === 'role' && sortOrder === 'desc' }" @click="toggleSort('role')">
               <span class="sortable-content">
                 <span>{{ t('users.role') }}</span>
-                <Icon v-if="sortKey === 'type'" :name="sortOrder === 'asc' ? 'lucide:chevron-up' : 'lucide:chevron-down'" :size="14" />
+                <Icon v-if="sortKey === 'role'" :name="sortOrder === 'asc' ? 'lucide:chevron-up' : 'lucide:chevron-down'" :size="14" />
               </span>
             </th>
-            <th class="col-date sortable" :class="{ 'sorted': sortKey === 'registration_date', 'asc': sortKey === 'registration_date' && sortOrder === 'asc', 'desc': sortKey === 'registration_date' && sortOrder === 'desc' }" @click="toggleSort('registration_date')">
+            <th class="col-date sortable" :class="{ 'sorted': sortKey === 'created_on', 'asc': sortKey === 'created_on' && sortOrder === 'asc', 'desc': sortKey === 'created_on' && sortOrder === 'desc' }" @click="toggleSort('created_on')">
               <span class="sortable-content">
                 <span>{{ t('users.registration_date') }}</span>
-                <Icon v-if="sortKey === 'registration_date'" :name="sortOrder === 'asc' ? 'lucide:chevron-up' : 'lucide:chevron-down'" :size="14" />
+                <Icon v-if="sortKey === 'created_on'" :name="sortOrder === 'asc' ? 'lucide:chevron-up' : 'lucide:chevron-down'" :size="14" />
               </span>
             </th>
-            <th class="col-active sortable" :class="{ 'sorted': sortKey === 'active', 'asc': sortKey === 'active' && sortOrder === 'asc', 'desc': sortKey === 'active' && sortOrder === 'desc' }" @click="toggleSort('active')">
-              <span class="sortable-content">
-                <span>{{ t('users.active') }}</span>
-                <Icon v-if="sortKey === 'active'" :name="sortOrder === 'asc' ? 'lucide:chevron-up' : 'lucide:chevron-down'" :size="14" />
-              </span>
-            </th>
+            <th class="col-active">{{ t('users.active') }}</th>
             <th class="col-actions">{{ t('common.actions') }}</th>
           </tr>
         </thead>
         <tbody>
-          <tr v-for="user in sortedUsers" :key="user.id">
+          <tr v-for="user in users" :key="user.user_id">
             <td class="col-first-name">
               <span class="user-name">{{ user.first_name }}</span>
             </td>
             <td class="col-last-name">{{ user.last_name }}</td>
-            <td class="col-mobile">{{ user.mobile }}</td>
+            <td class="col-mobile">{{ user.phone_num }}</td>
             <td class="col-email">{{ user.email }}</td>
-            <td class="col-password">{{ user.password }}</td>
-            <td class="col-role">
-              <Badge type="userType" :value="user.type" />
+            <td class="col-password">
+              <span class="password-mask">•••••••</span>
+              <span v-if="!user.last_login" class="password-initial">Initial</span>
             </td>
-            <td class="col-date">{{ user.registration_date }}</td>
+            <td class="col-role">
+              <Badge type="adminRole" :value="user.role" />
+            </td>
+            <td class="col-date">{{ user.created_on }}</td>
             <td class="col-active">
-              <Badge type="status" :value="user.active ? 'active' : 'inactive'" />
+              <Badge type="active" :value="user.is_active" />
             </td>
             <td class="col-actions">
               <div class="action-group">
-                <button class="action-btn action-btn--icon" :title="t('users.reset_password')" @click="openResetPasswordModal(user)">
-                  <Icon name="lucide:key" :size="14" />
-                </button>
                 <button class="action-btn action-btn--icon" :title="t('common.edit')" @click="openEditModal(user)">
                   <Icon name="lucide:pencil" :size="14" />
                 </button>
-                <button class="action-btn action-btn--icon" :title="t('common.delete')" @click="openDeleteModal(user)">
+                <button class="action-btn action-btn--icon" :title="t('users.reset_password')" @click="openResetPasswordModal(user)">
+                  <Icon name="lucide:key" :size="14" />
+                </button>
+                <button
+                  v-if="user.email !== authStore.user?.email"
+                  class="action-btn action-btn--icon"
+                  :title="t('common.delete')"
+                  @click="openDeleteModal(user)"
+                >
                   <Icon name="lucide:trash-2" :size="14" />
                 </button>
               </div>
@@ -567,7 +703,7 @@ const totalUsers = computed(() => users.value.length)
             <div class="form-group">
               <label class="form-label">{{ t('users.mobile') }}</label>
               <input
-                v-model="addForm.mobile"
+                v-model="addForm.phone_num"
                 type="tel"
                 class="form-input"
                 :placeholder="t('users.mobile')"
@@ -595,23 +731,56 @@ const totalUsers = computed(() => users.value.length)
                 {{ t('users.password') }}
                 <span class="required">*</span>
               </label>
-              <input
-                v-model="addForm.password"
-                type="password"
-                class="form-input"
-                :placeholder="t('auth.password_placeholder') || 'Enter password'"
-              />
+              <div class="password-input-wrapper">
+                <input
+                  v-model="addForm.password"
+                  :type="showAddPassword ? 'text' : 'password'"
+                  class="form-input password-input"
+                  :placeholder="t('auth.password_placeholder') || 'Enter password'"
+                />
+                <button
+                  type="button"
+                  class="password-toggle-btn"
+                  @click="showAddPassword = !showAddPassword"
+                >
+                  <Icon :name="showAddPassword ? 'lucide:eye-off' : 'lucide:eye'" :size="16" />
+                </button>
+              </div>
               <span v-if="addErrors.password" class="error-message">{{ addErrors.password }}</span>
               <span class="hint">{{ t('users.password_hint') || 'Initial password. User must change on first login.' }}</span>
             </div>
 
             <div class="form-group">
-              <label class="form-label">{{ t('users.role') }}</label>
+              <label class="form-label">
+                {{ t('users.role') }}
+                <span class="required">*</span>
+              </label>
               <select v-model="addForm.role" class="form-select">
                 <option v-for="opt in addRoleOptions" :key="opt.value" :value="opt.value">
                   {{ opt.label }}
                 </option>
               </select>
+              <span v-if="addErrors.role" class="error-message">{{ addErrors.role }}</span>
+            </div>
+          </div>
+
+          <div v-if="addForm.password.length > 0" class="form-row">
+            <div class="form-group form-group--full">
+              <div class="password-criteria">
+                <div
+                  v-for="criterion in addPasswordCriteria"
+                  :key="criterion.key"
+                  class="password-criteria__item"
+                  :class="{ 'password-criteria__item--met': criterion.met }"
+                >
+                  <Icon
+                    :name="criterion.met ? 'lucide:check' : 'lucide:x'"
+                    :size="12"
+                    class="password-criteria__icon"
+                  />
+                  <span>{{ criterion.label }}</span>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -638,7 +807,7 @@ const totalUsers = computed(() => users.value.length)
           :text="isAdding ? t('common.saving') : t('common.save')"
           type="primary"
           icon="lucide:save"
-          :disabled="isAdding"
+          :disabled="isAdding || !isAddFormValid"
           @click="handleAddSubmit"
         />
       </template>
@@ -646,7 +815,11 @@ const totalUsers = computed(() => users.value.length)
 
     <!-- Edit User Modal -->
     <AppDialogModal :show="showEditModal" :title="t('users.edit_title')" @close="closeEditModal">
-      <div class="add-user-form">
+      <div v-if="isLoadingEditUser" class="modal-loading">
+        <Icon name="lucide:loader-2" :size="32" class="spin" />
+        <span>{{ t('common.loading') }}</span>
+      </div>
+      <div v-else class="add-user-form">
         <div class="form-section">
           <h4 class="section-title">{{ t('users.basic_info') }}</h4>
 
@@ -680,7 +853,7 @@ const totalUsers = computed(() => users.value.length)
             <div class="form-group">
               <label class="form-label">{{ t('users.mobile') }}</label>
               <input
-                v-model="editForm.mobile"
+                v-model="editForm.phone_num"
                 type="tel"
                 class="form-input"
                 :placeholder="t('users.mobile')"
@@ -702,23 +875,106 @@ const totalUsers = computed(() => users.value.length)
             </div>
           </div>
 
+          <div v-if="isEditEmailChanged" class="form-row">
+            <div class="form-group form-group--full">
+              <div class="warning-banner">
+                <Icon name="lucide:alert-triangle" :size="16" />
+                <span>{{ t('users.email_change_warning') }}</span>
+              </div>
+            </div>
+          </div>
+
+          <div v-if="isEditEmailChanged" class="form-row">
+            <div class="form-group form-group--full">
+              <label class="form-label">
+                {{ t('users.initial_password') }}
+                <span class="required">*</span>
+              </label>
+              <div class="password-input-wrapper">
+                <input
+                  v-model="editForm.initial_password"
+                  :type="showEditPassword ? 'text' : 'password'"
+                  class="form-input password-input"
+                  :placeholder="t('auth.password_placeholder') || 'Enter password'"
+                />
+                <button
+                  type="button"
+                  class="password-toggle-btn"
+                  @click="showEditPassword = !showEditPassword"
+                >
+                  <Icon :name="showEditPassword ? 'lucide:eye-off' : 'lucide:eye'" :size="16" />
+                </button>
+              </div>
+              <span v-if="editErrors.initial_password" class="error-message">{{ editErrors.initial_password }}</span>
+
+              <div class="password-criteria">
+                <div
+                  v-for="criterion in editPasswordCriteria"
+                  :key="criterion.key"
+                  class="password-criteria__item"
+                  :class="{ 'password-criteria__item--met': criterion.met }"
+                >
+                  <Icon
+                    :name="criterion.met ? 'lucide:check' : 'lucide:x'"
+                    :size="12"
+                    class="password-criteria__icon"
+                  />
+                  <span>{{ criterion.label }}</span>
+                </div>
+              </div>
+
+              <span class="hint">{{ t('users.initial_password_hint') || 'Required when changing email. The user will be logged out and must change this password on their next login.' }}</span>
+            </div>
+          </div>
+
           <div class="form-row">
             <div class="form-group">
-              <label class="form-label">{{ t('users.role') }}</label>
-              <select v-model="editForm.role" class="form-select">
-                <option v-for="opt in addRoleOptions" :key="opt.value" :value="opt.value">
-                  {{ opt.label }}
-                </option>
-              </select>
+              <label class="form-label">
+                {{ t('users.role') }}
+                <span class="required">*</span>
+              </label>
+              <div class="role-select-wrapper">
+                <select
+                  v-model="editForm.role"
+                  class="form-select"
+                  :disabled="isEditRoleDisabled"
+                  :title="isEditRoleDisabled ? (isEditOwnAccount ? t('users.cannot_change_own_role') : t('users.role_super_admin_only')) : ''"
+                >
+                  <option v-for="opt in addRoleOptions" :key="opt.value" :value="opt.value">
+                    {{ opt.label }}
+                  </option>
+                </select>
+                <span v-if="isEditRoleDisabled" class="role-disabled-hint">
+                  {{ isEditOwnAccount ? t('users.cannot_change_own_role') : t('users.role_super_admin_only') }}
+                </span>
+              </div>
+              <span v-if="editErrors.role" class="error-message">{{ editErrors.role }}</span>
             </div>
 
             <div class="form-group">
               <label class="form-label">{{ t('users.status') }}</label>
-              <select v-model="editForm.active" class="form-select">
-                <option :value="true">{{ t('users.status_active') }}</option>
-                <option :value="false">{{ t('users.status_inactive') }}</option>
-              </select>
+              <label class="toggle-switch">
+                <input v-model="editForm.is_active" type="checkbox" />
+                <span class="toggle-switch__track"></span>
+                <span class="toggle-switch__label">{{ editForm.is_active ? t('users.status_active') : t('users.status_inactive') }}</span>
+              </label>
             </div>
+          </div>
+
+          <div v-if="showEditDeactivateWarning" class="form-row">
+            <div class="form-group form-group--full">
+              <div class="warning-banner warning-banner--critical">
+                <Icon name="lucide:alert-triangle" :size="16" />
+                <span>{{ t('users.deactivate_warning') }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="form-section form-section--info">
+          <div class="info-row">
+            <span class="info-label">{{ t('users.registration_date') }}:</span>
+            <span class="info-value">{{ originalEditUser?.created_on ?? '' }}</span>
           </div>
         </div>
       </div>
@@ -733,7 +989,7 @@ const totalUsers = computed(() => users.value.length)
           :text="isEditing ? t('common.saving') : t('common.save')"
           type="primary"
           icon="lucide:save"
-          :disabled="isEditing"
+          :disabled="isEditing || isLoadingEditUser || !isEditFormValid"
           @click="handleEditSubmit"
         />
       </template>
@@ -786,6 +1042,13 @@ const totalUsers = computed(() => users.value.length)
   position: absolute;
   left: var(--space-3);
   color: var(--color-text-muted);
+  pointer-events: none;
+}
+
+.users-management__search-loading {
+  position: absolute;
+  right: var(--space-3);
+  color: var(--color-accent);
 }
 
 .users-management__search-input {
@@ -825,12 +1088,51 @@ const totalUsers = computed(() => users.value.length)
   border-color: var(--color-accent);
 }
 
+.users-management__filter--checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: auto;
+  cursor: pointer;
+  user-select: none;
+}
+
+.users-management__filter--checkbox input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--color-accent);
+  cursor: pointer;
+}
+
 /* Table Container */
 .users-management__table-container {
+  position: relative;
   background: var(--color-bg-surface);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
   overflow: hidden;
+}
+
+.loading-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.loading-overlay::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: var(--color-bg-surface);
+  opacity: 0.9;
 }
 
 /* Table */
@@ -912,6 +1214,20 @@ const totalUsers = computed(() => users.value.length)
   color: var(--color-text-primary);
 }
 
+/* Password column */
+.password-mask {
+  font-family: monospace;
+  letter-spacing: 2px;
+  color: var(--color-text-muted);
+}
+
+.password-initial {
+  display: block;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+  margin-top: 2px;
+}
+
 /* Action buttons */
 .action-group {
   display: flex;
@@ -981,6 +1297,10 @@ const totalUsers = computed(() => users.value.length)
   flex-direction: column;
 }
 
+.form-group--full {
+  grid-column: 1 / -1;
+}
+
 .form-label {
   font-size: 13px;
   font-weight: 500;
@@ -1014,9 +1334,63 @@ const totalUsers = computed(() => users.value.length)
   cursor: pointer;
 }
 
+.password-input-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.password-input {
+  width: 100%;
+  padding-right: 40px;
+}
+
+.password-toggle-btn {
+  position: absolute;
+  right: var(--space-2);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  background: transparent;
+  border: none;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  border-radius: var(--radius-md);
+}
+
+.password-toggle-btn:hover {
+  color: var(--color-text-primary);
+  background: var(--color-bg-overlay);
+}
+
+.password-criteria {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-2) var(--space-4);
+  width: 100%;
+}
+
+.password-criteria__item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--color-critical);
+}
+
+.password-criteria__item--met {
+  color: var(--color-ok);
+}
+
+.password-criteria__icon {
+  flex-shrink: 0;
+}
+
 .error-message {
   font-size: 12px;
-  color: var(--color-error);
+  color: var(--color-critical);
   margin-top: var(--space-1);
 }
 
@@ -1041,5 +1415,100 @@ const totalUsers = computed(() => users.value.length)
   font-size: 13px;
   font-weight: 500;
   color: var(--color-text-primary);
+}
+
+.modal-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-8) 0;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.warning-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  background: var(--color-warn-bg);
+  border: 1px solid var(--color-warn);
+  border-radius: var(--radius-md);
+  color: var(--color-warn);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.warning-banner--critical {
+  background: var(--color-critical-bg);
+  border-color: var(--color-critical);
+  color: var(--color-critical);
+}
+
+.toggle-switch {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  cursor: pointer;
+}
+
+.toggle-switch input {
+  display: none;
+}
+
+.toggle-switch__track {
+  position: relative;
+  width: 40px;
+  height: 22px;
+  background: var(--color-border);
+  border-radius: var(--radius-full);
+  transition: background-color var(--transition-base);
+}
+
+.toggle-switch__track::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  background: var(--color-text-inverse);
+  border-radius: var(--radius-full);
+  transition: transform var(--transition-base);
+}
+
+.toggle-switch input:checked + .toggle-switch__track {
+  background: var(--color-ok);
+}
+
+.toggle-switch input:checked + .toggle-switch__track::after {
+  transform: translateX(18px);
+}
+
+.toggle-switch__label {
+  font-size: 13px;
+  color: var(--color-text-primary);
+}
+
+.role-select-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.role-disabled-hint {
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+
+.spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 </style>

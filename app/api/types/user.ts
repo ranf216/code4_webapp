@@ -13,6 +13,8 @@ export interface LoginSuccessResponse {
   type: number
   first_name: string
   last_name: string
+  need_change_password?: boolean
+  x_token?: string
 }
 
 // Login response with two-factor authentication enabled
@@ -37,6 +39,15 @@ export interface UserProfile {
   fullName: string
   role: string
   active: boolean
+}
+
+// Mandatory password change response (after first login with x-token)
+export interface MandatoryChangePasswordResponse {
+  token: string
+  type: number
+  first_name: string
+  last_name: string
+  need_change_password?: boolean
 }
 
 // User list types (placeholder for future)
