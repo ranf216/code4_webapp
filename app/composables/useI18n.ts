@@ -839,7 +839,7 @@ const translations: Record<string, Record<string, string>> = {
     'settings.tabs.poi_trespass': 'POI & Trespass',
     'settings.tabs.gps_tracking': 'GPS & Tracking',
     'settings.tabs.working_hours': 'Working Hours',
-    'settings.tabs.security': 'Security',
+    'settings.tabs.security': 'Account Settings',
     'settings.titles.service_types': 'Service & Incident Types',
     'settings.titles.asset_types': 'Asset Types',
     'settings.titles.post_orders': 'Post Order Sections',
@@ -847,7 +847,7 @@ const translations: Record<string, Record<string, string>> = {
     'settings.titles.poi_trespass': 'POI & Trespass Settings',
     'settings.titles.gps_tracking': 'GPS & Tracking Settings',
     'settings.titles.working_hours': 'Working Hours',
-    'settings.titles.security': 'Security & Password',
+    'settings.titles.security': 'Account Settings',
 
     // POI & Trespass
     'poi.title': 'Persons of Interest & Trespass',
