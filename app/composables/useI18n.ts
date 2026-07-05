@@ -1133,6 +1133,7 @@ const translations: Record<string, Record<string, string>> = {
     'users.reset_password_warning_change': 'They must change this password on their next login.',
     'users.reset_password_warning_communicate': 'You must communicate the new password to the user through a secure channel.',
     'users.reset_password_success': 'Password reset successfully. The user must change it on their next login.',
+    'users.reset_password_success_title': 'Password Reset Complete',
     'users.reset_password_failed': 'Failed to reset password. Please try again.',
     'users.delete_title': 'Delete User',
     'users.delete_message': 'Are you sure you want to delete {name}? This action cannot be undone.',

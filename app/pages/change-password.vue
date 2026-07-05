@@ -17,14 +17,17 @@ onMounted(() => {
 })
 
 // Form state
+const currentPassword = ref('')
 const newPassword = ref('')
 const confirmPassword = ref('')
 
 // Show/hide password toggles
+const showCurrentPassword = ref(false)
 const showNewPassword = ref(false)
 const showConfirmPassword = ref(false)
 
 // Error states
+const currentPasswordError = ref('')
 const newPasswordError = ref('')
 const confirmPasswordError = ref('')
 const globalError = ref('')
@@ -60,21 +63,32 @@ function validateConfirmPassword(value: string): string {
 }
 
 const isFormValid = computed(() => {
-  return isPasswordValid.value && confirmPassword.value === newPassword.value && confirmPassword.value.length > 0
+  return currentPassword.value.length > 0 && isPasswordValid.value && confirmPassword.value === newPassword.value && confirmPassword.value.length > 0
 })
 
 // Handle form submission
 async function handleSubmit() {
   // Reset errors
+  currentPasswordError.value = ''
   newPasswordError.value = ''
   confirmPasswordError.value = ''
   globalError.value = ''
 
-  // Validate
+  // Validate current password
+  if (!currentPassword.value) {
+    currentPasswordError.value = t('validation.required')
+  }
+
+  // Validate new password
   newPasswordError.value = validateNewPassword(newPassword.value)
   confirmPasswordError.value = validateConfirmPassword(confirmPassword.value)
 
-  if (newPasswordError.value || confirmPasswordError.value) {
+  if (currentPasswordError.value || newPasswordError.value || confirmPasswordError.value) {
+    return
+  }
+
+  if (!authStore.xToken) {
+    globalError.value = t('auth.change_password_error')
     return
   }
 
@@ -83,7 +97,8 @@ async function handleSubmit() {
 
     // Call mandatory change password API with restricted token (X-token)
     const response = await userApi.mandatoryChangePassword(
-      authStore.token!,
+      authStore.xToken,
+      currentPassword.value,
       newPassword.value
     )
 
@@ -104,6 +119,8 @@ async function handleSubmit() {
     } else {
       if (response.rc === 242) {
         newPasswordError.value = response.message || t('auth.password_requirements')
+      } else if (response.rc === 247) {
+        currentPasswordError.value = t('auth.error_wrong_current_password')
       } else {
         globalError.value = response.message || t('auth.change_password_error')
       }
@@ -116,6 +133,7 @@ async function handleSubmit() {
 }
 
 // Clear errors on input
+watch(currentPassword, () => { currentPasswordError.value = '' })
 watch(newPassword, () => { newPasswordError.value = '' })
 watch(confirmPassword, () => { confirmPasswordError.value = '' })
 </script>
@@ -143,6 +161,36 @@ watch(confirmPassword, () => { confirmPasswordError.value = '' })
       </p>
 
       <form class="change-password-form" @submit.prevent="handleSubmit" novalidate>
+        <!-- Current Password -->
+        <div class="form-field">
+          <div style="display: flex; flex-direction: row;">
+            <Icon name="lucide:lock" :size="16" class="input-icon" style="margin-right: 10px;" />
+            <label class="label" for="current-password">{{ t('auth.current_password') }}</label>
+          </div>
+          <div class="input-wrap">
+            <input
+              id="current-password"
+              v-model="currentPassword"
+              :type="showCurrentPassword ? 'text' : 'password'"
+              class="input input--with-icon input--with-suffix"
+              :class="{ 'input--error': currentPasswordError }"
+              :placeholder="t('auth.current_password_placeholder')"
+              autocomplete="current-password"
+            />
+            <button
+              type="button"
+              class="input-suffix-btn"
+              @click="showCurrentPassword = !showCurrentPassword"
+            >
+              <Icon
+                :name="showCurrentPassword ? 'lucide:eye-off' : 'lucide:eye'"
+                :size="16"
+              />
+            </button>
+          </div>
+          <span v-if="currentPasswordError" class="input-error">{{ currentPasswordError }}</span>
+        </div>
+
         <!-- New Password -->
         <div class="form-field">
           <div style="display: flex; flex-direction: row;">

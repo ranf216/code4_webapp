@@ -81,7 +81,8 @@ export const useAuth = () => {
               first_name: loginData.first_name,
               last_name: loginData.last_name,
             },
-            loginData.need_change_password ?? false
+            loginData.need_change_password ?? false,
+            loginData.need_change_password ? loginData.x_token : null
           )
 
           currentStep.value = 'success'
@@ -157,6 +158,8 @@ export const useAuth = () => {
       
       if (response.rc === 0) {
         // Save authentication data to store
+        // For first-time login via 2FA, the response token is the restricted token
+        const restrictedToken = response.need_change_password ? response.token : null
         authStore.setAuth(
           response.token,
           {
@@ -164,7 +167,8 @@ export const useAuth = () => {
             first_name: response.first_name,
             last_name: response.last_name,
           },
-          response.need_change_password
+          response.need_change_password ?? false,
+          restrictedToken
         )
 
         currentStep.value = 'success'

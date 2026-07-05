@@ -129,7 +129,7 @@ class AdminUserApi extends BaseApiClient {
   ): Promise<ApiResponse<AdminUserMutationResponse>> {
     return this.request<AdminUserMutationResponse>(
       {
-        '#request': 'AdminUser/reset_password',
+        '#request': 'AdminUser/reset_admin_user_password',
         ...params,
       },
       options
@@ -145,7 +145,7 @@ class AdminUserApi extends BaseApiClient {
   ): Promise<ApiResponse<AdminUserMutationResponse>> {
     return this.request<AdminUserMutationResponse>(
       {
-        '#request': 'AdminUser/change_password',
+        '#request': 'AdminUser/change_my_password',
         ...params,
       },
       options

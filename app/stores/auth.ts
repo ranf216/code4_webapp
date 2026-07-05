@@ -12,6 +12,7 @@ export interface User {
 // Authentication state interface
 interface AuthState {
   token: string | null
+  xToken: string | null
   user: User | null
   isAuthenticated: boolean
   needChangePassword: boolean
@@ -20,6 +21,7 @@ interface AuthState {
 // Session storage keys for persistence
 const STORAGE_KEYS = {
   TOKEN: 'auth_token',
+  X_TOKEN: 'auth_x_token',
   USER: 'auth_user',
   NEED_CHANGE_PASSWORD: 'auth_need_change_password',
 } as const
@@ -50,6 +52,7 @@ const storage = {
 export const useAuthStore = defineStore('auth', {
   state: (): AuthState => ({
     token: null,
+    xToken: null,
     user: null,
     isAuthenticated: false,
     needChangePassword: false,
@@ -78,9 +81,11 @@ export const useAuthStore = defineStore('auth', {
      * @param token - JWT authentication token
      * @param user - User information
      * @param needChangePassword - Whether user needs to change password
+     * @param xToken - Restricted token for mandatory password change
      */
-    setAuth(token: string, user: User, needChangePassword: boolean = false) {
+    setAuth(token: string, user: User, needChangePassword: boolean = false, xToken?: string | null) {
       this.token = token
+      this.xToken = xToken || null
       this.user = user
       this.isAuthenticated = true
       this.needChangePassword = needChangePassword
@@ -89,11 +94,17 @@ export const useAuthStore = defineStore('auth', {
       storage.set(STORAGE_KEYS.TOKEN, token)
       storage.set(STORAGE_KEYS.USER, JSON.stringify(user))
       storage.set(STORAGE_KEYS.NEED_CHANGE_PASSWORD, needChangePassword.toString())
+      if (xToken) {
+        storage.set(STORAGE_KEYS.X_TOKEN, xToken)
+      } else {
+        storage.remove(STORAGE_KEYS.X_TOKEN)
+      }
     },
 
     /** Clear authentication data and logout user */
     clearAuth() {
       this.token = null
+      this.xToken = null
       this.user = null
       this.isAuthenticated = false
       this.needChangePassword = false
@@ -116,7 +127,9 @@ export const useAuthStore = defineStore('auth', {
     /** Mark password as changed after successful password update */
     passwordChanged() {
       this.needChangePassword = false
+      this.xToken = null
       storage.set(STORAGE_KEYS.NEED_CHANGE_PASSWORD, 'false')
+      storage.remove(STORAGE_KEYS.X_TOKEN)
     },
 
     /**
@@ -125,6 +138,7 @@ export const useAuthStore = defineStore('auth', {
      */
     initializeAuth() {
       const token = storage.get(STORAGE_KEYS.TOKEN)
+      const xToken = storage.get(STORAGE_KEYS.X_TOKEN)
       const userStr = storage.get(STORAGE_KEYS.USER)
       const needChangePassword = storage.get(STORAGE_KEYS.NEED_CHANGE_PASSWORD) === 'true'
 
@@ -132,6 +146,7 @@ export const useAuthStore = defineStore('auth', {
         try {
           const user = JSON.parse(userStr)
           this.token = token
+          this.xToken = xToken
           this.user = user
           this.isAuthenticated = true
           this.needChangePassword = needChangePassword

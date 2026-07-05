@@ -199,6 +199,7 @@ const isResettingPassword = ref(false)
 const resetPassword = ref('')
 const showResetPassword = ref(false)
 const resetPasswordError = ref('')
+const showResetPasswordSuccessModal = ref(false)
 
 const resetPasswordCriteria = computed(() => {
   const pwd = resetPassword.value
@@ -237,6 +238,10 @@ function closeResetPasswordModal() {
   resetPasswordError.value = ''
 }
 
+function closeResetPasswordSuccessModal() {
+  showResetPasswordSuccessModal.value = false
+}
+
 async function handleResetPasswordConfirm() {
   if (!userToReset.value) return
 
@@ -257,8 +262,8 @@ async function handleResetPasswordConfirm() {
       password: resetPassword.value,
     })
     if (response.rc === 0) {
-      alert(t('users.reset_password_success'))
       closeResetPasswordModal()
+      showResetPasswordSuccessModal.value = true
     } else if (response.rc === 242) {
       resetPasswordError.value = response.message || t('auth.password_requirements')
     } else if (response.rc === 770) {
@@ -880,6 +885,19 @@ const totalUsers = computed(() => totalCount.value)
           </ul>
         </div>
       </div>
+    </AppModal>
+
+    <!-- Reset Password Success Modal -->
+    <AppModal
+      :show="showResetPasswordSuccessModal"
+      :title="t('users.reset_password_success_title')"
+      :cancel-text="''"
+      :ok-text="t('common.ok')"
+      @close="closeResetPasswordSuccessModal"
+      @cancel="closeResetPasswordSuccessModal"
+      @ok="closeResetPasswordSuccessModal"
+    >
+      <p class="modal__message">{{ t('users.reset_password_success') }}</p>
     </AppModal>
 
     <!-- Add User Modal -->

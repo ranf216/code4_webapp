@@ -22,8 +22,12 @@ apiClient.interceptors.request.use(
       const token = sessionStorage.getItem('auth_token')
       if (token) {
         // Add token to request data envelope if not already present
+        // Skip public endpoints that do not require authentication
         if (config.data && typeof config.data === 'object') {
-          config.data['#token'] = token
+          const request = config.data['#request']
+          if (!request || !request.toString().startsWith('TwoFactorAuth/')) {
+            config.data['#token'] = token
+          }
         }
       }
     }
