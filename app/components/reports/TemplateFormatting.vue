@@ -788,7 +788,7 @@ const todayFormatted = computed(() => {
   overflow: hidden;
   font-family: Arial, sans-serif;
   color: #1e293b;
-  font-size: 12px;
+  font-size: var(--font-size-base);
 }
 
 /* ── Cover page ── */
@@ -810,7 +810,7 @@ const todayFormatted = computed(() => {
 .preview-cover__logo-wrap { display: flex; justify-content: center; }
 .preview-cover__logo { max-height: 50px; max-width: 150px; object-fit: contain; }
 .preview-cover__title {
-  font-size: 18px;
+  font-size: var(--font-size-xl);
   font-weight: 700;
   color: var(--preview-accent);
   text-align: center;
@@ -820,7 +820,7 @@ const todayFormatted = computed(() => {
   flex-direction: column;
   align-items: center;
   gap: 4px;
-  font-size: 11px;
+  font-size: var(--font-size-sm);
   color: #64748b;
 }
 
@@ -858,19 +858,19 @@ const todayFormatted = computed(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 9px;
+  font-size: var(--font-size-xs);
   font-weight: 700;
   color: #94a3b8;
   letter-spacing: 0.05em;
   flex-shrink: 0;
 }
 .preview-header__report-title { font-size: 13px; font-weight: 700; color: #1e293b; }
-.preview-header__meta { font-size: 10px; color: #64748b; margin-top: 2px; }
+.preview-header__meta { font-size: var(--font-size-xs);; color: #64748b; margin-top: 2px; }
 
 /* ── Sections ── */
 .preview-section { padding: 14px 16px; }
 .preview-section__heading {
-  font-size: 11px;
+  font-size: var(--font-size-sm);
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -903,7 +903,7 @@ const todayFormatted = computed(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 9px;
+  font-size: var(--font-size-xs);
   color: #94a3b8;
   font-style: italic;
   padding: 6px 16px;
@@ -920,7 +920,7 @@ const todayFormatted = computed(() => {
   justify-content: space-between;
   padding: 8px 16px;
   border-top: 1px solid #e2e8f0;
-  font-size: 9px;
+  font-size: var(--font-size-xs);
   color: #94a3b8;
   background: #f8fafc;
   min-height: 26px;

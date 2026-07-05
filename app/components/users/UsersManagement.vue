@@ -97,6 +97,14 @@ onMounted(() => {
 // Delete modal state
 const showDeleteModal = ref(false)
 const userToDelete = ref<User | null>(null)
+const isDeleting = ref(false)
+
+// Constraint prompt (RC 771)
+const showConstraintPrompt = ref(false)
+const isDeactivating = ref(false)
+
+// Last admin informational prompt (deactivation RC 771)
+const showLastAdminPrompt = ref(false)
 
 function openDeleteModal(user: User) {
   userToDelete.value = user
@@ -109,20 +117,78 @@ function closeDeleteModal() {
 }
 
 async function handleDeleteConfirm() {
-  if (!userToDelete.value) return
+  if (!userToDelete.value || isDeleting.value) return
 
+  isDeleting.value = true
   try {
     const response = await adminUserApi.deleteAdminUser(userToDelete.value.user_id)
     if (response.rc === 0) {
+      alert(t('users.delete_success'))
       await fetchUsers(true)
+      closeDeleteModal()
+    } else if (response.rc === 770) {
+      alert(t('users.delete_not_found'))
+      closeDeleteModal()
+      await fetchUsers(true)
+    } else if (response.rc === 771) {
+      closeDeleteModal()
+      showConstraintPrompt.value = true
     } else {
-      alert(response.message || 'Failed to delete user')
+      alert(response.message || t('users.delete_failed'))
+      closeDeleteModal()
     }
   } catch (err) {
     console.error('Error deleting user:', err)
-    alert('Failed to delete user')
-  } finally {
+    alert(t('users.delete_failed'))
     closeDeleteModal()
+  } finally {
+    isDeleting.value = false
+  }
+}
+
+function closeConstraintPrompt() {
+  showConstraintPrompt.value = false
+  userToDelete.value = null
+  isDeactivating.value = false
+}
+
+function openLastAdminPrompt() {
+  showConstraintPrompt.value = false
+  showLastAdminPrompt.value = true
+}
+
+function closeLastAdminPrompt() {
+  showLastAdminPrompt.value = false
+  userToDelete.value = null
+  isDeactivating.value = false
+}
+
+async function handleDeactivateInstead() {
+  if (!userToDelete.value || isDeactivating.value) return
+
+  isDeactivating.value = true
+  try {
+    const response = await adminUserApi.updateAdminUser({
+      user_id: userToDelete.value.user_id,
+      is_active: false,
+    })
+    if (response.rc === 0) {
+      alert(t('users.deactivate_success'))
+      closeConstraintPrompt()
+      await fetchUsers(true)
+    } else if (response.rc === 771) {
+      alert(t('users.last_admin_deactivate'))
+      openLastAdminPrompt()
+    } else {
+      alert(response.message || t('users.deactivate_failed'))
+      closeConstraintPrompt()
+    }
+  } catch (err) {
+    console.error('Error deactivating user:', err)
+    alert(t('users.deactivate_failed'))
+    closeConstraintPrompt()
+  } finally {
+    isDeactivating.value = false
   }
 }
 
@@ -130,30 +196,75 @@ async function handleDeleteConfirm() {
 const showResetPasswordModal = ref(false)
 const userToReset = ref<User | null>(null)
 const isResettingPassword = ref(false)
+const resetPassword = ref('')
+const showResetPassword = ref(false)
+const resetPasswordError = ref('')
+
+const resetPasswordCriteria = computed(() => {
+  const pwd = resetPassword.value
+  return [
+    { key: 'length', label: t('auth.password_min_length'), met: pwd.length >= 8 },
+    { key: 'lowercase', label: t('auth.password_lowercase'), met: /[a-z]/.test(pwd) },
+    { key: 'uppercase', label: t('auth.password_uppercase'), met: /[A-Z]/.test(pwd) },
+    { key: 'digit', label: t('auth.password_digit'), met: /\d/.test(pwd) },
+    { key: 'special', label: t('auth.password_special'), met: /[^A-Za-z0-9]/.test(pwd) },
+  ] as { key: string; label: string; met: boolean }[]
+})
+
+const isResetPasswordValid = computed(() => resetPasswordCriteria.value.every((c: { met: boolean }) => c.met))
 
 function openResetPasswordModal(user: User) {
   userToReset.value = user
+  resetPassword.value = ''
+  showResetPassword.value = false
+  resetPasswordError.value = ''
   showResetPasswordModal.value = true
+}
+
+function openResetPasswordFromEditModal() {
+  if (!originalEditUser.value) return
+  closeEditModal()
+  const user = users.value.find((u: User) => u.user_id === originalEditUser.value?.user_id)
+  openResetPasswordModal(user || originalEditUser.value)
 }
 
 function closeResetPasswordModal() {
   showResetPasswordModal.value = false
   userToReset.value = null
   isResettingPassword.value = false
+  resetPassword.value = ''
+  showResetPassword.value = false
+  resetPasswordError.value = ''
 }
 
 async function handleResetPasswordConfirm() {
   if (!userToReset.value) return
 
+  resetPasswordError.value = ''
+  if (!resetPassword.value) {
+    resetPasswordError.value = t('validation.required')
+    return
+  }
+  if (!isResetPasswordValid.value) {
+    resetPasswordError.value = t('auth.password_requirements')
+    return
+  }
+
   isResettingPassword.value = true
   try {
     const response = await adminUserApi.resetAdminUserPassword({
       user_id: userToReset.value.user_id,
-      password: '', // TODO: collect password from reset dialog (Section 5)
+      password: resetPassword.value,
     })
     if (response.rc === 0) {
       alert(t('users.reset_password_success'))
       closeResetPasswordModal()
+    } else if (response.rc === 242) {
+      resetPasswordError.value = response.message || t('auth.password_requirements')
+    } else if (response.rc === 770) {
+      alert(t('users.user_not_found'))
+      closeResetPasswordModal()
+      await fetchUsers(true)
     } else {
       alert(response.message || t('users.reset_password_failed'))
     }
@@ -647,25 +758,129 @@ const totalUsers = computed(() => totalCount.value)
     <AppModal
       :show="showDeleteModal"
       :title="t('users.delete_title')"
-      :message="t('users.delete_message', { name: `${userToDelete?.first_name} ${userToDelete?.last_name}` })"
       :cancel-text="t('common.cancel')"
-      :ok-text="t('common.delete')"
+      :ok-text="isDeleting ? t('common.deleting') : t('common.delete')"
+      :ok-disabled="isDeleting"
       @close="closeDeleteModal"
       @cancel="closeDeleteModal"
       @ok="handleDeleteConfirm"
-    />
+    >
+      <div class="delete-modal">
+        <p class="delete-modal__message">
+          {{ t('users.delete_message', { name: `${userToDelete?.first_name} ${userToDelete?.last_name}` }) }}
+        </p>
+        <p class="delete-modal__warning">
+          {{ t('users.delete_warning') }}
+        </p>
+      </div>
+    </AppModal>
+
+    <!-- Constraint Prompt (RC 771) -->
+    <AppModal
+      :show="showConstraintPrompt"
+      :title="t('users.constraint_title')"
+      :cancel-text="t('common.cancel')"
+      :ok-text="isDeactivating ? t('common.deactivating') : t('users.deactivate_instead')"
+      :ok-disabled="isDeactivating"
+      @close="closeConstraintPrompt"
+      @cancel="closeConstraintPrompt"
+      @ok="handleDeactivateInstead"
+    >
+      <div class="constraint-modal">
+        <p class="constraint-modal__message">
+          {{ t('users.constraint_message', { name: `${userToDelete?.first_name} ${userToDelete?.last_name}` }) }}
+        </p>
+        <ul class="constraint-modal__list">
+          <li>{{ t('users.constraint_reason_own_account') }}</li>
+          <li>{{ t('users.constraint_reason_last_admin') }}</li>
+        </ul>
+        <p class="constraint-modal__hint">
+          {{ t('users.constraint_deactivate_hint') }}
+        </p>
+      </div>
+    </AppModal>
+
+    <!-- Last Admin Prompt -->
+    <AppModal
+      :show="showLastAdminPrompt"
+      :title="t('users.constraint_title')"
+      :cancel-text="''"
+      :ok-text="t('common.ok')"
+      @close="closeLastAdminPrompt"
+      @cancel="closeLastAdminPrompt"
+      @ok="closeLastAdminPrompt"
+    >
+      <div class="constraint-modal">
+        <p class="constraint-modal__message">
+          {{ t('users.last_admin_deactivate') }}
+        </p>
+      </div>
+    </AppModal>
 
     <!-- Reset Password Modal -->
     <AppModal
       :show="showResetPasswordModal"
-      :title="t('users.reset_password_title')"
-      :message="t('users.reset_password_message', { name: `${userToReset?.first_name} ${userToReset?.last_name}` })"
+      :title="t('users.reset_password_title', { name: `${userToReset?.first_name} ${userToReset?.last_name}` })"
       :cancel-text="t('common.cancel')"
-      :ok-text="t('users.reset_password')"
+      :ok-text="isResettingPassword ? t('common.saving') : t('users.reset_password')"
+      :ok-disabled="isResettingPassword || !isResetPasswordValid"
       @close="closeResetPasswordModal"
       @cancel="closeResetPasswordModal"
       @ok="handleResetPasswordConfirm"
-    />
+    >
+      <div class="reset-password-modal">
+        <div class="form-group">
+          <label class="form-label">
+            {{ t('users.reset_password_new_password') }}
+            <span class="required">*</span>
+          </label>
+          <div class="password-input-wrapper">
+            <input
+              v-model="resetPassword"
+              :type="showResetPassword ? 'text' : 'password'"
+              class="form-input password-input"
+              :placeholder="t('auth.password_placeholder') || 'Enter password'"
+            />
+            <button
+              type="button"
+              class="password-toggle-btn"
+              @click="showResetPassword = !showResetPassword"
+            >
+              <Icon :name="showResetPassword ? 'lucide:eye-off' : 'lucide:eye'" :size="16" />
+            </button>
+          </div>
+          <span v-if="resetPasswordError" class="error-message">{{ resetPasswordError }}</span>
+
+          <div class="password-criteria">
+            <div
+              v-for="criterion in resetPasswordCriteria"
+              :key="criterion.key"
+              class="password-criteria__item"
+              :class="{ 'password-criteria__item--met': criterion.met }"
+            >
+              <Icon
+                :name="criterion.met ? 'lucide:check' : 'lucide:x'"
+                :size="12"
+                class="password-criteria__icon"
+              />
+              <span>{{ criterion.label }}</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="warning-banner">
+          <div class="warning-banner__title">
+            <Icon name="lucide:alert-triangle" :size="14" />
+            <span>{{ t('users.reset_password_warning') }}</span>
+          </div>
+          <ul class="warning-banner__list">
+            <li>{{ t('users.reset_password_warning_logout') }}</li>
+            <li>{{ t('users.reset_password_warning_change') }}</li>
+            <li>{{ t('users.reset_password_warning_communicate') }}</li>
+          </ul>
+        </div>
+      </div>
+    </AppModal>
 
     <!-- Add User Modal -->
     <AppDialogModal :show="showAddModal" :title="t('users.add_title')" @close="closeAddModal">
@@ -986,6 +1201,14 @@ const totalUsers = computed(() => totalCount.value)
           @click="closeEditModal"
         />
         <AppButton
+          v-if="isCurrentUserSuperAdmin && originalEditUser"
+          :text="t('users.reset_password')"
+          type="secondary"
+          icon="lucide:key"
+          :disabled="isEditing"
+          @click="openResetPasswordFromEditModal"
+        />
+        <AppButton
           :text="isEditing ? t('common.saving') : t('common.save')"
           type="primary"
           icon="lucide:save"
@@ -1150,7 +1373,7 @@ const totalUsers = computed(() => totalCount.value)
   padding: var(--space-3) var(--space-4);
   text-align: left;
   font-weight: 600;
-  font-size: 11px;
+  font-size: var(--font-size-sm);
   letter-spacing: 0.05em;
   text-transform: uppercase;
   color: var(--color-text-muted);
@@ -1279,7 +1502,7 @@ const totalUsers = computed(() => totalCount.value)
 }
 
 .section-title {
-  font-size: 14px;
+  font-size: var(--font-size-md);
   font-weight: 600;
   margin: 0 0 var(--space-4) 0;
   color: var(--color-text-primary);
@@ -1302,7 +1525,7 @@ const totalUsers = computed(() => totalCount.value)
 }
 
 .form-label {
-  font-size: 13px;
+  font-size: var(--font-size-md);
   font-weight: 500;
   color: var(--color-text-primary);
   margin-bottom: var(--space-2);
@@ -1321,7 +1544,7 @@ const totalUsers = computed(() => totalCount.value)
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   color: var(--color-text-primary);
-  font-size: 14px;
+  font-size: var(--font-size-md);
 }
 
 .form-input:focus,
@@ -1376,7 +1599,7 @@ const totalUsers = computed(() => totalCount.value)
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
+  font-size: var(--font-size-base);
   color: var(--color-critical);
 }
 
@@ -1389,13 +1612,13 @@ const totalUsers = computed(() => totalCount.value)
 }
 
 .error-message {
-  font-size: 12px;
+  font-size: var(--font-size-base);
   color: var(--color-critical);
   margin-top: var(--space-1);
 }
 
 .hint {
-  font-size: 12px;
+  font-size: var(--font-size-base);
   color: var(--color-text-muted);
   margin-top: var(--space-1);
 }
@@ -1407,12 +1630,12 @@ const totalUsers = computed(() => totalCount.value)
 }
 
 .info-label {
-  font-size: 13px;
+  font-size: var(--font-size-md);
   color: var(--color-text-muted);
 }
 
 .info-value {
-  font-size: 13px;
+  font-size: var(--font-size-md);
   font-weight: 500;
   color: var(--color-text-primary);
 }
@@ -1437,7 +1660,7 @@ const totalUsers = computed(() => totalCount.value)
   border: 1px solid var(--color-warn);
   border-radius: var(--radius-md);
   color: var(--color-warn);
-  font-size: 12px;
+  font-size: var(--font-size-base);
   line-height: 1.5;
 }
 
@@ -1445,6 +1668,76 @@ const totalUsers = computed(() => totalCount.value)
   background: var(--color-critical-bg);
   border-color: var(--color-critical);
   color: var(--color-critical);
+}
+
+.warning-banner__title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-weight: 600;
+  margin-bottom: var(--space-2);
+}
+
+.warning-banner__list {
+  margin: 0;
+  padding-left: var(--space-4);
+  list-style: disc;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.delete-modal,
+.constraint-modal {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  line-height: 1.5;
+}
+
+.delete-modal__message,
+.constraint-modal__message {
+  margin: 0;
+  color: var(--color-text-primary);
+}
+
+.delete-modal__warning {
+  margin: 0;
+  color: var(--color-critical);
+}
+
+.constraint-modal__list {
+  margin: 0;
+  padding-left: var(--space-4);
+  list-style: disc;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.constraint-modal__hint {
+  margin: 0;
+  padding: var(--space-3);
+  background: var(--color-warn-bg);
+  border: 1px solid var(--color-warn);
+  border-radius: var(--radius-md);
+  color: var(--color-warn);
+  font-size: var(--font-size-xs);
+}
+
+.reset-password-modal {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.reset-password-modal .modal__message {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  line-height: 1.5;
 }
 
 .toggle-switch {
@@ -1488,7 +1781,7 @@ const totalUsers = computed(() => totalCount.value)
 }
 
 .toggle-switch__label {
-  font-size: 13px;
+  font-size: var(--font-size-md);
   color: var(--color-text-primary);
 }
 
@@ -1499,7 +1792,7 @@ const totalUsers = computed(() => totalCount.value)
 }
 
 .role-disabled-hint {
-  font-size: 11px;
+  font-size: var(--font-size-sm);
   color: var(--color-text-muted);
 }
 

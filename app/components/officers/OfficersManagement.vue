@@ -764,7 +764,7 @@ function getInitials(name: string): string {
   display: inline-block;
   padding: 2px var(--space-2);
   border-radius: var(--radius-sm);
-  font-size: 11px;
+  font-size: var(--font-size-sm);
   font-weight: 500;
 }
 

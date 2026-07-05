@@ -120,7 +120,7 @@ class AdminUserApi extends BaseApiClient {
   }
 
   /**
-   * Reset a user's password to a new initial password. Admin only.
+   * Reset a user's password to a new initial password. Super Admin only.
    * The user is logged out and forced to change the password on next login.
    */
   async resetAdminUserPassword(
@@ -129,7 +129,7 @@ class AdminUserApi extends BaseApiClient {
   ): Promise<ApiResponse<AdminUserMutationResponse>> {
     return this.request<AdminUserMutationResponse>(
       {
-        '#request': 'AdminUser/reset_admin_user_password',
+        '#request': 'AdminUser/reset_password',
         ...params,
       },
       options
@@ -145,7 +145,7 @@ class AdminUserApi extends BaseApiClient {
   ): Promise<ApiResponse<AdminUserMutationResponse>> {
     return this.request<AdminUserMutationResponse>(
       {
-        '#request': 'AdminUser/change_my_password',
+        '#request': 'AdminUser/change_password',
         ...params,
       },
       options

@@ -69,7 +69,7 @@ const cards = [
   text-transform: uppercase;
 }
 .kpi-card__value {
-  font-size: 28px;
+  font-size: var(--font-size-3xl);
   font-weight: 600;
   color: var(--color-text-primary);
   line-height: 1.1;

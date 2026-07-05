@@ -293,7 +293,7 @@ watch(confirmPassword, () => { confirmPasswordError.value = '' })
   display: flex;
   align-items: center;
   gap: var(--space-1);
-  font-size: 12px;
+  font-size: var(--font-size-base);
   color: var(--color-text-muted);
   transition: color var(--transition-base);
 }

@@ -556,7 +556,7 @@ function handleDeleteConfirm() {
   padding: var(--space-3) var(--space-4);
   text-align: left;
   font-weight: 600;
-  font-size: 11px;
+  font-size: var(--font-size-sm);
   letter-spacing: 0.05em;
   text-transform: uppercase;
   color: var(--color-text-muted);
@@ -621,7 +621,7 @@ function handleDeleteConfirm() {
   background: rgba(239, 68, 68, 0.15);
   color: #ef4444;
   border-radius: var(--radius-full);
-  font-size: 10px;
+  font-size: var(--font-size-xs);
   font-weight: 600;
 }
 
@@ -649,7 +649,7 @@ function handleDeleteConfirm() {
 }
 
 .ack-pct {
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   font-weight: 600;
   color: var(--color-text-secondary);
   white-space: nowrap;

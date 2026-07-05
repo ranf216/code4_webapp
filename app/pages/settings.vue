@@ -7,7 +7,7 @@ const { t } = useTranslation()
 const route = useRoute()
 const router = useRouter()
 
-type TabId = 'service' | 'assets' | 'post-orders' | 'notifications' | 'poi-trespass' | 'gps-tracking' | 'working-hours'
+type TabId = 'service' | 'assets' | 'post-orders' | 'notifications' | 'poi-trespass' | 'gps-tracking' | 'working-hours' | 'security'
 
 // Tab configuration
 const tabs = [
@@ -18,6 +18,7 @@ const tabs = [
   { id: 'poi-trespass', label: t('settings.tabs.poi_trespass'), icon: 'lucide:shield-alert' },
   { id: 'gps-tracking', label: t('settings.tabs.gps_tracking'), icon: 'lucide:map-pin' },
   { id: 'working-hours', label: t('settings.tabs.working_hours'), icon: 'lucide:clock' },
+  { id: 'security', label: t('settings.tabs.security'), icon: 'lucide:shield' },
 ] as const
 
 const validTabIds = tabs.map((tab) => tab.id) as TabId[]
@@ -41,6 +42,7 @@ const tabTitles: Record<typeof activeTab.value, string> = {
   'poi-trespass': t('settings.titles.poi_trespass'),
   'gps-tracking': t('settings.titles.gps_tracking'),
   'working-hours': t('settings.titles.working_hours'),
+  security: t('settings.titles.security'),
 }
 </script>
 
@@ -73,6 +75,7 @@ const tabTitles: Record<typeof activeTab.value, string> = {
       <PoiTrespassSettings v-else-if="activeTab === 'poi-trespass'" />
       <GpsTrackingSettings v-else-if="activeTab === 'gps-tracking'" />
       <WorkingHoursSettings v-else-if="activeTab === 'working-hours'" />
+      <ChangePasswordForm v-else-if="activeTab === 'security'" />
       <div v-else class="content-card">
         <h2 class="content-title">{{ tabTitles[activeTab] }}</h2>
         <p class="content-placeholder text-secondary">

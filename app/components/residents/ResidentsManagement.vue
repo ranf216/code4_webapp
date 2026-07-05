@@ -425,7 +425,7 @@ function toggleCommunicationTest(resident: Resident) {
   padding: var(--space-3) var(--space-4);
   text-align: left;
   font-weight: 600;
-  font-size: 11px;
+  font-size: var(--font-size-sm);
   letter-spacing: 0.05em;
   text-transform: uppercase;
   color: var(--color-text-muted);
@@ -480,7 +480,7 @@ function toggleCommunicationTest(resident: Resident) {
 }
 
 .resident-name__id {
-  font-size: 11px;
+  font-size: var(--font-size-sm);
   color: var(--color-text-muted);
 }
 
@@ -513,7 +513,7 @@ function toggleCommunicationTest(resident: Resident) {
 }
 
 .status-toggle__text {
-  font-size: 11px;
+  font-size: var(--font-size-sm);
   font-weight: 600;
   text-transform: uppercase;
 }
@@ -527,7 +527,7 @@ function toggleCommunicationTest(resident: Resident) {
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   cursor: pointer;
-  font-size: 11px;
+  font-size: var(--font-size-sm);
   color: var(--color-text-muted);
 }
 
@@ -550,7 +550,7 @@ function toggleCommunicationTest(resident: Resident) {
   background: var(--color-bg-elevated);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
-  font-size: 11px;
+  font-size: var(--font-size-sm);
   color: var(--color-text-secondary);
 }
 

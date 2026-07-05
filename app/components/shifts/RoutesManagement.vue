@@ -265,7 +265,7 @@ function priorityClass(priority: Waypoint['priority']): string {
   background: var(--color-accent);
   color: var(--color-bg-base);
   border-radius: 50%;
-  font-size: 10px;
+  font-size: var(--font-size-xs);
   font-weight: 700;
   flex-shrink: 0;
 }
@@ -285,14 +285,14 @@ function priorityClass(priority: Waypoint['priority']): string {
   flex-wrap: wrap;
   gap: var(--space-2);
   margin-top: 2px;
-  font-size: 10px;
+  font-size: var(--font-size-xs);
   color: var(--color-text-muted);
 }
 
 .badge {
   padding: 1px 4px;
   border-radius: var(--radius-sm);
-  font-size: 9px;
+  font-size: var(--font-size-xs);
   font-weight: 600;
   text-transform: uppercase;
 }

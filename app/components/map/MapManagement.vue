@@ -1136,7 +1136,7 @@ function getMarkerIcon(item: MapItem): string {
 }
 
 .marker-label {
-  font-size: 9px;
+  font-size: var(--font-size-xs);
   color: var(--color-text-secondary);
   white-space: nowrap;
   background: var(--color-bg-base);

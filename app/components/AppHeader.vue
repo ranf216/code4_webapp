@@ -169,7 +169,7 @@ onMounted(() => {
 }
 
 .app-header__search-kbd {
-  font-size: 10px;
+  font-size: var(--font-size-xs);
   color: var(--color-text-muted);
   background: var(--color-bg-overlay);
   border: 1px solid var(--color-border);

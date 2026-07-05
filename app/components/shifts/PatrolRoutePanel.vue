@@ -280,7 +280,7 @@ function saveRoute() {
 .badge {
   padding: 2px 6px;
   border-radius: var(--radius-sm);
-  font-size: 10px;
+  font-size: var(--font-size-xs);
   font-weight: 600;
   text-transform: uppercase;
 }

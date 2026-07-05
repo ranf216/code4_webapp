@@ -5,12 +5,14 @@ const props = withDefaults(defineProps<{
   message?: string
   cancelText?: string
   okText?: string
+  okDisabled?: boolean
   maxWidth?: string
 }>(), {
   title: '',
   message: '',
   cancelText: 'Cancel',
   okText: 'OK',
+  okDisabled: false,
   maxWidth: '500px',
 })
 
@@ -64,7 +66,12 @@ function handleBackdropClick(event: MouseEvent) {
             <button v-if="cancelText" class="modal__btn modal__btn--secondary" @click="handleCancel">
               {{ cancelText }}
             </button>
-            <button v-if="okText" class="modal__btn modal__btn--primary" @click="handleOk">
+            <button
+              v-if="okText"
+              class="modal__btn modal__btn--primary"
+              :disabled="okDisabled"
+              @click="handleOk"
+            >
               {{ okText }}
             </button>
           </div>

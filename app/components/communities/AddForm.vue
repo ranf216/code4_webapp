@@ -644,7 +644,7 @@ async function handleSubmit() {
 }
 
 .autocomplete-dropdown__secondary {
-  font-size: 12px;
+  font-size: var(--font-size-base);
   color: var(--color-text-muted);
 }
 
@@ -701,12 +701,12 @@ async function handleSubmit() {
 }
 
 .form-field__hint {
-  font-size: 12px;
+  font-size: var(--font-size-base);
   color: var(--color-text-muted);
 }
 
 .form-field__error {
-  font-size: 12px;
+  font-size: var(--font-size-base);
   color: var(--color-critical);
 }
 
@@ -742,7 +742,7 @@ async function handleSubmit() {
   background: var(--color-accent);
   border-radius: var(--radius-full);
   color: #0a0c10;
-  font-size: 11px;
+  font-size: var(--font-size-sm);
   font-weight: 600;
 }
 
@@ -833,7 +833,7 @@ async function handleSubmit() {
 }
 
 .map-upload__hint {
-  font-size: 12px;
+  font-size: var(--font-size-base);
   color: var(--color-text-muted);
   margin: 0;
 }
@@ -879,7 +879,7 @@ async function handleSubmit() {
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   color: var(--color-text-secondary);
-  font-size: 12px;
+  font-size: var(--font-size-base);
   cursor: pointer;
   transition: all var(--transition-base);
 }
