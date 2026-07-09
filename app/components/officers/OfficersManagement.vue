@@ -1,6 +1,8 @@
 <script setup lang="ts">
-import { ref, reactive, computed } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import ImageUpload from '~/components/ImageUpload.vue'
+import { officerApi } from '~/api/officer'
+import { communityApi } from '~/api/community'
 
 const props = defineProps<{
   communityId?: string
@@ -20,6 +22,7 @@ interface Officer {
   id: string
   fullName: string
   community: string
+  communityId?: number
   mobile: string
   email: string
   address: string
@@ -33,6 +36,21 @@ interface Officer {
   active: boolean
 }
 
+interface OfficerForm {
+  fullName: string
+  community: string
+  communityId: number
+  mobile: string
+  email: string
+  address: string
+  title: string
+  picture: string
+  description: string
+  roles: string[]
+  certifications: string[]
+  active: boolean
+}
+
 // Constants
 const COMMUNITIES = ['Sunset Heights', 'Green Valley', 'Riverside', 'Central Park', 'Northgate']
 const ROLES = ['Patrol', 'Supervisor', 'K9 Handler', 'Traffic Control', 'Dispatcher', 'CCTV Operator']
@@ -40,12 +58,16 @@ const CERTIFICATIONS = ['First Aid', 'Firearms', 'Defensive Driving', 'Crisis Ma
 
 // Mock data
 const officers = ref<Officer[]>([
-  { id: 'OFF-001', fullName: 'James Carter', community: 'Sunset Heights', mobile: '+1 555-0101', email: 'j.carter@axis.com', address: '12 Oak St, Springfield', title: 'Senior Officer', picture: '', description: 'Experienced patrol officer with 8 years on the field.', registrationDate: '2022-03-15', roles: ['Patrol', 'Supervisor'], certifications: ['First Aid', 'Firearms'], evaluations: [{ text: 'Excellent performance in Q1', date: '2024-01-10', evaluatorName: 'Admin' }], active: true },
-  { id: 'OFF-002', fullName: 'Maria Santos', community: 'Green Valley', mobile: '+1 555-0102', email: 'm.santos@axis.com', address: '44 Maple Ave, Springfield', title: 'Officer', picture: '', description: '', registrationDate: '2023-06-01', roles: ['CCTV Operator'], certifications: ['CPR'], evaluations: [], active: true },
-  { id: 'OFF-003', fullName: 'Kevin Brown', community: 'Riverside', mobile: '+1 555-0103', email: 'k.brown@axis.com', address: '8 River Rd, Springfield', title: 'K9 Officer', picture: '', description: 'Specialised in K9 handling and narcotics detection.', registrationDate: '2021-11-20', roles: ['K9 Handler', 'Patrol'], certifications: ['K9 Certification', 'Firearms'], evaluations: [], active: true },
-  { id: 'OFF-004', fullName: 'Rachel Lee', community: 'Central Park', mobile: '+1 555-0104', email: 'r.lee@axis.com', address: '77 Central Blvd, Springfield', title: 'Dispatcher', picture: '', description: '', registrationDate: '2023-01-05', roles: ['Dispatcher'], certifications: ['Crisis Management'], evaluations: [], active: false },
-  { id: 'OFF-005', fullName: 'Tom Wilson', community: 'Northgate', mobile: '+1 555-0105', email: 't.wilson@axis.com', address: '3 North Gate Way', title: 'Officer', picture: '', description: '', registrationDate: '2024-02-10', roles: ['Traffic Control'], certifications: ['Defensive Driving'], evaluations: [], active: true },
+  { id: 'OFF-001', fullName: 'James Carter', community: 'Sunset Heights', communityId: 1, mobile: '+1 555-0101', email: 'j.carter@axis.com', address: '12 Oak St, Springfield', title: 'Senior Officer', picture: '', description: 'Experienced patrol officer with 8 years on the field.', registrationDate: '2022-03-15', roles: ['Patrol', 'Supervisor'], certifications: ['First Aid', 'Firearms'], evaluations: [{ text: 'Excellent performance in Q1', date: '2024-01-10', evaluatorName: 'Admin' }], active: true },
+  { id: 'OFF-002', fullName: 'Maria Santos', community: 'Green Valley', communityId: 2, mobile: '+1 555-0102', email: 'm.santos@axis.com', address: '44 Maple Ave, Springfield', title: 'Officer', picture: '', description: '', registrationDate: '2023-06-01', roles: ['CCTV Operator'], certifications: ['CPR'], evaluations: [], active: true },
+  { id: 'OFF-003', fullName: 'Kevin Brown', community: 'Riverside', communityId: 3, mobile: '+1 555-0103', email: 'k.brown@axis.com', address: '8 River Rd, Springfield', title: 'K9 Officer', picture: '', description: 'Specialised in K9 handling and narcotics detection.', registrationDate: '2021-11-20', roles: ['K9 Handler', 'Patrol'], certifications: ['K9 Certification', 'Firearms'], evaluations: [], active: true },
+  { id: 'OFF-004', fullName: 'Rachel Lee', community: 'Central Park', communityId: 4, mobile: '+1 555-0104', email: 'r.lee@axis.com', address: '77 Central Blvd, Springfield', title: 'Dispatcher', picture: '', description: '', registrationDate: '2023-01-05', roles: ['Dispatcher'], certifications: ['Crisis Management'], evaluations: [], active: false },
+  { id: 'OFF-005', fullName: 'Tom Wilson', community: 'Northgate', communityId: 5, mobile: '+1 555-0105', email: 't.wilson@axis.com', address: '3 North Gate Way', title: 'Officer', picture: '', description: '', registrationDate: '2024-02-10', roles: ['Traffic Control'], certifications: ['Defensive Driving'], evaluations: [], active: true },
 ])
+
+// Communities
+const communities = ref<{ community_id: number; name: string }[]>([])
+const isLoadingCommunities = ref(false)
 
 // Filters
 const searchQuery = ref('')
@@ -87,13 +109,34 @@ const showEvalModal = ref(false)
 const evalForm = reactive({ text: '', date: '', evaluatorName: '' })
 const evalError = ref('')
 
-const blankForm = (): Omit<Officer, 'id' | 'registrationDate' | 'evaluations'> => ({
-  fullName: '', community: '', mobile: '', email: '', address: '',
-  title: '', picture: '', description: '', roles: [], certifications: [], active: true,
-})
+function blankForm(): OfficerForm {
+  return {
+    fullName: '', community: '', communityId: 0, mobile: '', email: '', address: '',
+    title: '', picture: '', description: '', roles: [], certifications: [], active: true,
+  }
+}
 
-const form = reactive<ReturnType<typeof blankForm> & { roles: string[]; certifications: string[] }>(blankForm())
+const form = reactive<OfficerForm>(blankForm())
 const formErrors = reactive<Record<string, string>>({})
+const isSaving = ref(false)
+
+async function loadCommunities() {
+  isLoadingCommunities.value = true
+  try {
+    const response = await communityApi.getCommunities({ include_inactive: false })
+    if (response.rc === 0 && response.communities) {
+      communities.value = response.communities.map((c: { community_id: number; name: string }) => ({ community_id: c.community_id, name: c.name }))
+    }
+  } catch (err) {
+    console.error('Failed to load communities:', err)
+  } finally {
+    isLoadingCommunities.value = false
+  }
+}
+
+onMounted(() => {
+  loadCommunities()
+})
 
 function openAdd() {
   formMode.value = 'add'
@@ -110,7 +153,7 @@ function openEdit(officer: Officer) {
   formMode.value = 'edit'
   editingId.value = officer.id
   Object.assign(form, {
-    fullName: officer.fullName, community: officer.community, mobile: officer.mobile,
+    fullName: officer.fullName, community: officer.community, communityId: officer.communityId, mobile: officer.mobile,
     email: officer.email, address: officer.address, title: officer.title,
     picture: officer.picture, description: officer.description,
     roles: [...officer.roles], certifications: [...officer.certifications], active: officer.active,
@@ -122,33 +165,107 @@ function openEdit(officer: Officer) {
   showFormModal.value = true
 }
 
+function splitFullName(fullName: string): { firstName: string; lastName: string } {
+  const parts = fullName.trim().split(/\s+/)
+  const firstName = parts[0] || ''
+  const lastName = parts.slice(1).join(' ') || ''
+  return { firstName, lastName }
+}
+
+function stripDataUrlPrefix(dataUrl: string): string {
+  if (dataUrl.startsWith('data:')) {
+    return dataUrl.split(',')[1] || ''
+  }
+  return dataUrl
+}
+
 function validateForm(): boolean {
   formErrors.fullName = !form.fullName.trim() ? t('validation.required') : ''
-  formErrors.community = !form.community ? t('validation.required') : ''
+  formErrors.community = !form.communityId ? t('validation.required') : ''
   formErrors.mobile = !form.mobile.trim() ? t('validation.required') : ''
   formErrors.title = !form.title.trim() ? t('validation.required') : ''
   return !formErrors.fullName && !formErrors.community && !formErrors.mobile && !formErrors.title
 }
 
-function handleSave() {
+async function handleSave() {
   if (!validateForm()) return
+
   if (formMode.value === 'add') {
-    const newOfficer: Officer = {
-      id: `OFF-${String(officers.value.length + 1).padStart(3, '0')}`,
-      fullName: form.fullName, community: form.community, mobile: form.mobile,
-      email: form.email, address: form.address, title: form.title,
-      picture: form.picture, description: form.description,
-      roles: [...form.roles], certifications: [...form.certifications],
-      evaluations: [], registrationDate: new Date().toISOString().split('T')[0]!, active: true,
+    isSaving.value = true
+    try {
+      const { firstName, lastName } = splitFullName(form.fullName)
+      const imageBase64 = stripDataUrlPrefix(form.picture)
+
+      const response = await officerApi.addOfficer({
+        first_name: firstName,
+        last_name: lastName || undefined,
+        phone_num: form.mobile,
+        email: form.email || undefined,
+        community_id: form.communityId,
+        title: form.title,
+        address: form.address || undefined,
+        description: form.description || undefined,
+        image: imageBase64 || undefined,
+        roles: form.roles.length ? form.roles : undefined,
+        certification_badges: form.certifications.length ? form.certifications : undefined,
+      })
+
+      if (response.rc === 0) {
+        const communityName = communities.value.find(c => c.community_id === form.communityId)?.name || form.community
+        const newOfficer: Officer = {
+          id: response.user_id,
+          fullName: form.fullName,
+          community: communityName,
+          communityId: form.communityId,
+          mobile: form.mobile,
+          email: form.email,
+          address: form.address,
+          title: form.title,
+          picture: form.picture,
+          description: form.description,
+          roles: [...form.roles],
+          certifications: [...form.certifications],
+          evaluations: [],
+          registrationDate: new Date().toISOString().split('T')[0]!,
+          active: true,
+        }
+        officers.value.push(newOfficer)
+        showFormModal.value = false
+      } else {
+        // Map common error codes to fields
+        if (response.rc === 235) {
+          formErrors.email = response.message || t('validation.invalid_email')
+        } else if (response.rc === 240) {
+          formErrors.email = response.message || t('users.email_already_exists')
+        } else if (response.rc === 241) {
+          formErrors.mobile = response.message || t('validation.phone_already_exists')
+        } else if (response.rc === 242) {
+          // 242 is password criteria error, not applicable for add_officer
+          formErrors.title = response.message || t('officers.create_failed')
+        } else if (response.rc === 504 || response.rc === 505) {
+          formErrors.community = response.message || t('officers.community_invalid')
+        } else if (response.rc === 521) {
+          formErrors.mobile = response.message || t('officers.officer_already_in_community')
+        } else {
+          formErrors.title = response.message || t('officers.create_failed')
+        }
+      }
+    } catch (err) {
+      console.error('Error creating officer:', err)
+      formErrors.title = t('officers.create_failed')
+    } finally {
+      isSaving.value = false
     }
-    officers.value.push(newOfficer)
-  } else {
+    return
+  }
+
+  if (formMode.value === 'edit') {
     const idx = officers.value.findIndex((o: Officer) => o.id === editingId.value)
     const orig = officers.value[idx]
     if (idx > -1 && orig) {
       const updated: Officer = {
         ...orig,
-        fullName: form.fullName, community: form.community, mobile: form.mobile,
+        fullName: form.fullName, community: form.community, communityId: form.communityId, mobile: form.mobile,
         email: form.email, address: form.address, title: form.title,
         picture: form.picture, description: form.description,
         roles: [...form.roles], certifications: [...form.certifications], active: form.active,
@@ -326,6 +443,7 @@ function getInitials(name: string): string {
       :title="formMode === 'add' ? t('officers.add_title') : t('officers.edit_title')"
       :cancel-text="t('common.cancel')"
       :ok-text="t('common.save')"
+      :ok-disabled="isSaving"
       max-width="50vw"
       @close="showFormModal = false"
       @cancel="showFormModal = false"
@@ -353,9 +471,9 @@ function getInitials(name: string): string {
               </div>
               <div class="form-field" :class="{ error: formErrors.community }">
                 <label class="field-label">{{ t('officers.community') }} <span class="required">*</span></label>
-                <select v-model="form.community" class="field-select">
-                  <option value="" disabled>{{ t('officers.select_community') }}</option>
-                  <option v-for="c in COMMUNITIES" :key="c" :value="c">{{ c }}</option>
+                <select v-model="form.communityId" class="field-select" :disabled="isLoadingCommunities">
+                  <option :value="0" disabled>{{ isLoadingCommunities ? t('officers.loading_communities') : t('officers.select_community') }}</option>
+                  <option v-for="c in communities" :key="c.community_id" :value="c.community_id">{{ c.name }}</option>
                 </select>
                 <span v-if="formErrors.community" class="error-msg">{{ formErrors.community }}</span>
               </div>
