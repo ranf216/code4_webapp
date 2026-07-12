@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, watch } from 'vue'
 import ImageUpload from '~/components/ImageUpload.vue'
 import { officerApi } from '~/api/officer'
 import { communityApi } from '~/api/community'
+import type { Officer as ApiOfficer } from '~/api/types/officer'
 
 const props = defineProps<{
   communityId?: string
@@ -22,7 +23,7 @@ interface Officer {
   id: string
   fullName: string
   community: string
-  communityId?: number
+  communityId: number
   mobile: string
   email: string
   address: string
@@ -30,6 +31,7 @@ interface Officer {
   picture: string
   description: string
   registrationDate: string
+  lastLogin: string | null
   roles: string[]
   certifications: string[]
   evaluations: OfficerEvaluation[]
@@ -37,7 +39,8 @@ interface Officer {
 }
 
 interface OfficerForm {
-  fullName: string
+  firstName: string
+  lastName: string
   community: string
   communityId: number
   mobile: string
@@ -51,67 +54,82 @@ interface OfficerForm {
   active: boolean
 }
 
+function mapApiOfficer(o: ApiOfficer): Officer {
+  return {
+    id: o.user_id,
+    fullName: [o.first_name, o.last_name].filter(Boolean).join(' '),
+    community: o.community_name || '',
+    communityId: o.community_id,
+    mobile: o.phone_num,
+    email: (o.email && !o.email.endsWith('@placeholder.local')) ? o.email : '',
+    address: o.address || '',
+    title: o.title,
+    picture: o.image_url || '',
+    description: o.description || '',
+    registrationDate: o.created_on ? o.created_on.split(' ')[0]! : '',
+    lastLogin: o.last_login,
+    roles: o.roles || [],
+    certifications: o.certification_badges || [],
+    evaluations: [],
+    active: o.is_active,
+  }
+}
+
 // Constants
-const COMMUNITIES = ['Sunset Heights', 'Green Valley', 'Riverside', 'Central Park', 'Northgate']
 const ROLES = ['Patrol', 'Supervisor', 'K9 Handler', 'Traffic Control', 'Dispatcher', 'CCTV Operator']
 const CERTIFICATIONS = ['First Aid', 'Firearms', 'Defensive Driving', 'Crisis Management', 'CPR']
 
-// Mock data
-const officers = ref<Officer[]>([
-  { id: 'OFF-001', fullName: 'James Carter', community: 'Sunset Heights', communityId: 1, mobile: '+1 555-0101', email: 'j.carter@axis.com', address: '12 Oak St, Springfield', title: 'Senior Officer', picture: '', description: 'Experienced patrol officer with 8 years on the field.', registrationDate: '2022-03-15', roles: ['Patrol', 'Supervisor'], certifications: ['First Aid', 'Firearms'], evaluations: [{ text: 'Excellent performance in Q1', date: '2024-01-10', evaluatorName: 'Admin' }], active: true },
-  { id: 'OFF-002', fullName: 'Maria Santos', community: 'Green Valley', communityId: 2, mobile: '+1 555-0102', email: 'm.santos@axis.com', address: '44 Maple Ave, Springfield', title: 'Officer', picture: '', description: '', registrationDate: '2023-06-01', roles: ['CCTV Operator'], certifications: ['CPR'], evaluations: [], active: true },
-  { id: 'OFF-003', fullName: 'Kevin Brown', community: 'Riverside', communityId: 3, mobile: '+1 555-0103', email: 'k.brown@axis.com', address: '8 River Rd, Springfield', title: 'K9 Officer', picture: '', description: 'Specialised in K9 handling and narcotics detection.', registrationDate: '2021-11-20', roles: ['K9 Handler', 'Patrol'], certifications: ['K9 Certification', 'Firearms'], evaluations: [], active: true },
-  { id: 'OFF-004', fullName: 'Rachel Lee', community: 'Central Park', communityId: 4, mobile: '+1 555-0104', email: 'r.lee@axis.com', address: '77 Central Blvd, Springfield', title: 'Dispatcher', picture: '', description: '', registrationDate: '2023-01-05', roles: ['Dispatcher'], certifications: ['Crisis Management'], evaluations: [], active: false },
-  { id: 'OFF-005', fullName: 'Tom Wilson', community: 'Northgate', communityId: 5, mobile: '+1 555-0105', email: 't.wilson@axis.com', address: '3 North Gate Way', title: 'Officer', picture: '', description: '', registrationDate: '2024-02-10', roles: ['Traffic Control'], certifications: ['Defensive Driving'], evaluations: [], active: true },
-])
+// Officers data
+const officers = ref<Officer[]>([])
+const totalCount = ref(0)
+const isLoadingOfficers = ref(false)
+const isSearching = ref(false)
+const loadError = ref('')
 
 // Communities
 const communities = ref<{ community_id: number; name: string }[]>([])
 const isLoadingCommunities = ref(false)
 
-// Filters
+// Filters (server-side)
 const searchQuery = ref('')
-const filterCommunity = ref('all')
+const filterCommunity = ref<number | 'all'>('all')
 const filterActive = ref<'all' | 'active' | 'inactive'>('active')
+const sortBy = ref<'first_name' | 'last_name' | 'community' | 'created_on' | ''>('')
+const sortDir = ref<'asc' | 'desc' | ''>('')
 
-const filteredOfficers = computed((): Officer[] => {
-  let list = officers.value
-  // Always filter by communityId prop if provided (community-specific view)
-  if (props.communityName) list = list.filter((o: Officer) => o.community === props.communityName)
-  if (filterActive.value === 'active') list = list.filter((o: Officer) => o.active)
-  if (filterActive.value === 'inactive') list = list.filter((o: Officer) => !o.active)
-  if (!props.communityName && filterCommunity.value !== 'all') list = list.filter((o: Officer) => o.community === filterCommunity.value)
-  const q = searchQuery.value.toLowerCase()
-  if (q) list = list.filter((o: Officer) =>
-    o.fullName.toLowerCase().includes(q) ||
-    o.mobile.includes(q) ||
-    o.email.toLowerCase().includes(q) ||
-    o.address.toLowerCase().includes(q) ||
-    o.title.toLowerCase().includes(q) ||
-    o.community.toLowerCase().includes(q)
-  )
-  return [...list].sort((a: Officer, b: Officer) => a.fullName.localeCompare(b.fullName))
-})
+let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null
+
+const filteredOfficers = computed((): Officer[] => officers.value)
 
 // Add/Edit modal
 const showFormModal = ref(false)
 const formMode = ref<'add' | 'edit'>('add')
 const editingId = ref<string | null>(null)
+const editingOriginal = ref<OfficerForm | null>(null)
 const showDeleteModal = ref(false)
 const deleteTarget = ref<Officer | null>(null)
+const isDeleting = ref(false)
+const deleteError = ref('')
+
+// Edit modal tab
+const editTab = ref<'details' | 'evaluations'>('details')
 
 // Detail view modal
 const showDetailModal = ref(false)
 const detailOfficer = ref<Officer | null>(null)
 
-// Add evaluation
-const showEvalModal = ref(false)
-const evalForm = reactive({ text: '', date: '', evaluatorName: '' })
-const evalError = ref('')
+// Inline evaluation form (inside edit modal)
+const showInlineEvalForm = ref(false)
+const inlineEvalForm = reactive({ text: '', date: '' })
+const inlineEvalError = ref('')
+
+// Eval delete confirmation
+const showEvalDeleteModal = ref(false)
+const evalDeleteTarget = ref<{ officerId: string; evalIdx: number } | null>(null)
 
 function blankForm(): OfficerForm {
   return {
-    fullName: '', community: '', communityId: 0, mobile: '', email: '', address: '',
+    firstName: '', lastName: '', community: '', communityId: 0, mobile: '', email: '', address: '',
     title: '', picture: '', description: '', roles: [], certifications: [], active: true,
   }
 }
@@ -119,6 +137,25 @@ function blankForm(): OfficerForm {
 const form = reactive<OfficerForm>(blankForm())
 const formErrors = reactive<Record<string, string>>({})
 const isSaving = ref(false)
+
+const isFormHasChanged = computed((): boolean => {
+  if (formMode.value !== 'edit' || !editingOriginal.value) return true
+  const orig = editingOriginal.value
+  if (form.firstName.trim() !== (orig.firstName || '')) return true
+  if (form.lastName.trim() !== (orig.lastName || '')) return true
+  if (form.mobile !== (orig.mobile || '')) return true
+  if (form.email !== (orig.email || '')) return true
+  if (form.communityId !== (orig.communityId || 0)) return true
+  if (form.title !== (orig.title || '')) return true
+  if (form.address !== (orig.address || '')) return true
+  if (form.description !== (orig.description || '')) return true
+  if (form.active !== (orig.active ?? true)) return true
+  if (JSON.stringify(form.roles) !== JSON.stringify(orig.roles || [])) return true
+  if (JSON.stringify(form.certifications) !== JSON.stringify(orig.certifications || [])) return true
+  if (form.picture !== (orig.picture || '') && form.picture.startsWith('data:')) return true
+  if (!form.picture && orig.picture) return true
+  return false
+})
 
 async function loadCommunities() {
   isLoadingCommunities.value = true
@@ -134,15 +171,83 @@ async function loadCommunities() {
   }
 }
 
+async function fetchOfficers(isSearch = false) {
+  if (isSearch) isSearching.value = true
+  else isLoadingOfficers.value = true
+  loadError.value = ''
+  try {
+    const params: Record<string, unknown> = {}
+
+    // Community filter: props.communityId takes priority, then filter dropdown
+    if (props.communityId) {
+      params.community_id = Number(props.communityId)
+    } else if (filterCommunity.value !== 'all') {
+      params.community_id = filterCommunity.value
+    }
+
+    // Active filter
+    if (filterActive.value === 'all') {
+      params.include_inactive = true
+    } else if (filterActive.value === 'inactive') {
+      params.include_inactive = true
+    }
+    // 'active' = default server behavior (only active)
+
+    // Search
+    if (searchQuery.value.trim()) {
+      params.search_text = searchQuery.value.trim()
+    }
+
+    // Sort
+    if (sortBy.value) {
+      params.sort_by = sortBy.value
+      params.sort_dir = sortDir.value || 'asc'
+    }
+
+    const response = await officerApi.getOfficers(params as any, { showLoading: !isSearch })
+    if (response.rc === 0 && response.officers) {
+      let mapped = response.officers.map(mapApiOfficer)
+      // Client-side post-filter for 'inactive' since API only has include_inactive
+      if (filterActive.value === 'inactive') {
+        mapped = mapped.filter((o: Officer) => !o.active)
+      }
+      officers.value = mapped
+      totalCount.value = response.total_count ?? mapped.length
+    } else {
+      loadError.value = response.message || t('officers.load_failed')
+      officers.value = []
+      totalCount.value = 0
+    }
+  } catch (err) {
+    console.error('Failed to load officers:', err)
+    loadError.value = t('officers.load_failed')
+    officers.value = []
+    totalCount.value = 0
+  } finally {
+    if (isSearch) isSearching.value = false
+    else isLoadingOfficers.value = false
+  }
+}
+
+// Combined debounced watcher — search + filters
+watch([searchQuery, filterCommunity, filterActive, sortBy, sortDir], () => {
+  if (searchDebounceTimer) clearTimeout(searchDebounceTimer)
+  searchDebounceTimer = setTimeout(() => {
+    fetchOfficers(true)
+  }, 400)
+})
+
 onMounted(() => {
   loadCommunities()
+  fetchOfficers()
 })
 
 function openAdd() {
   formMode.value = 'add'
   editingId.value = null
+  editTab.value = 'details'
   Object.assign(form, blankForm())
-  formErrors.fullName = ''
+  formErrors.firstName = ''
   formErrors.community = ''
   formErrors.mobile = ''
   formErrors.title = ''
@@ -152,24 +257,22 @@ function openAdd() {
 function openEdit(officer: Officer) {
   formMode.value = 'edit'
   editingId.value = officer.id
-  Object.assign(form, {
-    fullName: officer.fullName, community: officer.community, communityId: officer.communityId, mobile: officer.mobile,
+  const nameParts = officer.fullName.split(' ')
+  const snapshot: OfficerForm = {
+    firstName: nameParts[0] || '', lastName: nameParts.slice(1).join(' ') || '',
+    community: officer.community, communityId: officer.communityId, mobile: officer.mobile,
     email: officer.email, address: officer.address, title: officer.title,
     picture: officer.picture, description: officer.description,
     roles: [...officer.roles], certifications: [...officer.certifications], active: officer.active,
-  })
-  formErrors.fullName = ''
+  }
+  editingOriginal.value = { ...snapshot, roles: [...snapshot.roles], certifications: [...snapshot.certifications] }
+  Object.assign(form, snapshot)
+  editTab.value = 'details'
+  formErrors.firstName = ''
   formErrors.community = ''
   formErrors.mobile = ''
   formErrors.title = ''
   showFormModal.value = true
-}
-
-function splitFullName(fullName: string): { firstName: string; lastName: string } {
-  const parts = fullName.trim().split(/\s+/)
-  const firstName = parts[0] || ''
-  const lastName = parts.slice(1).join(' ') || ''
-  return { firstName, lastName }
 }
 
 function stripDataUrlPrefix(dataUrl: string): string {
@@ -180,11 +283,11 @@ function stripDataUrlPrefix(dataUrl: string): string {
 }
 
 function validateForm(): boolean {
-  formErrors.fullName = !form.fullName.trim() ? t('validation.required') : ''
+  formErrors.firstName = !form.firstName.trim() ? t('validation.required') : ''
   formErrors.community = !form.communityId ? t('validation.required') : ''
   formErrors.mobile = !form.mobile.trim() ? t('validation.required') : ''
   formErrors.title = !form.title.trim() ? t('validation.required') : ''
-  return !formErrors.fullName && !formErrors.community && !formErrors.mobile && !formErrors.title
+  return !formErrors.firstName && !formErrors.community && !formErrors.mobile && !formErrors.title
 }
 
 async function handleSave() {
@@ -193,12 +296,11 @@ async function handleSave() {
   if (formMode.value === 'add') {
     isSaving.value = true
     try {
-      const { firstName, lastName } = splitFullName(form.fullName)
       const imageBase64 = stripDataUrlPrefix(form.picture)
 
       const response = await officerApi.addOfficer({
-        first_name: firstName,
-        last_name: lastName || undefined,
+        first_name: form.firstName.trim(),
+        last_name: form.lastName.trim() || undefined,
         phone_num: form.mobile,
         email: form.email || undefined,
         community_id: form.communityId,
@@ -211,26 +313,8 @@ async function handleSave() {
       })
 
       if (response.rc === 0) {
-        const communityName = communities.value.find(c => c.community_id === form.communityId)?.name || form.community
-        const newOfficer: Officer = {
-          id: response.user_id,
-          fullName: form.fullName,
-          community: communityName,
-          communityId: form.communityId,
-          mobile: form.mobile,
-          email: form.email,
-          address: form.address,
-          title: form.title,
-          picture: form.picture,
-          description: form.description,
-          roles: [...form.roles],
-          certifications: [...form.certifications],
-          evaluations: [],
-          registrationDate: new Date().toISOString().split('T')[0]!,
-          active: true,
-        }
-        officers.value.push(newOfficer)
         showFormModal.value = false
+        await fetchOfficers()
       } else {
         // Map common error codes to fields
         if (response.rc === 235) {
@@ -259,21 +343,75 @@ async function handleSave() {
     return
   }
 
-  if (formMode.value === 'edit') {
-    const idx = officers.value.findIndex((o: Officer) => o.id === editingId.value)
-    const orig = officers.value[idx]
-    if (idx > -1 && orig) {
-      const updated: Officer = {
-        ...orig,
-        fullName: form.fullName, community: form.community, communityId: form.communityId, mobile: form.mobile,
-        email: form.email, address: form.address, title: form.title,
-        picture: form.picture, description: form.description,
-        roles: [...form.roles], certifications: [...form.certifications], active: form.active,
+  if (formMode.value === 'edit' && editingId.value) {
+    isSaving.value = true
+    try {
+      const orig = editingOriginal.value
+
+      // Build partial update payload — only changed fields
+      const payload: Record<string, unknown> = { user_id: editingId.value }
+
+      if (form.firstName.trim() !== (orig?.firstName || '')) payload.first_name = form.firstName.trim()
+      if (form.lastName.trim() !== (orig?.lastName || '')) payload.last_name = form.lastName.trim()
+      if (form.mobile !== (orig?.mobile || '')) payload.phone_num = form.mobile
+      if (form.email !== (orig?.email || '')) payload.email = form.email || ''
+      if (form.communityId !== (orig?.communityId || 0)) payload.community_id = form.communityId
+      if (form.title !== (orig?.title || '')) payload.title = form.title
+      if (form.address !== (orig?.address || '')) payload.address = form.address
+      if (form.description !== (orig?.description || '')) payload.description = form.description
+      if (form.active !== (orig?.active ?? true)) payload.is_active = form.active
+
+      // Arrays: always send if different
+      if (JSON.stringify(form.roles) !== JSON.stringify(orig?.roles || [])) {
+        payload.roles = form.roles
       }
-      officers.value.splice(idx, 1, updated)
+      if (JSON.stringify(form.certifications) !== JSON.stringify(orig?.certifications || [])) {
+        payload.certification_badges = form.certifications
+      }
+
+      // Image: only send if user selected a new file (data URL) or cleared
+      if (form.picture !== (orig?.picture || '')) {
+        if (!form.picture) {
+          // User removed the image
+          payload.image = ''
+        } else if (form.picture.startsWith('data:')) {
+          // User selected a new image
+          payload.image = stripDataUrlPrefix(form.picture)
+        }
+        // If picture is still an http URL (unchanged), skip
+      }
+
+      const response = await officerApi.updateOfficer(payload as any)
+
+      if (response.rc === 0) {
+        showFormModal.value = false
+        await fetchOfficers()
+      } else {
+        if (response.rc === 520) {
+          formErrors.title = response.message || t('officers.officer_not_found')
+          showFormModal.value = false
+          await fetchOfficers()
+        } else if (response.rc === 235) {
+          formErrors.email = response.message || t('validation.invalid_email')
+        } else if (response.rc === 240) {
+          formErrors.email = response.message || t('users.email_already_exists')
+        } else if (response.rc === 241) {
+          formErrors.mobile = response.message || t('validation.phone_already_exists')
+        } else if (response.rc === 504 || response.rc === 505) {
+          formErrors.community = response.message || t('officers.community_invalid')
+        } else if (response.rc === 521) {
+          formErrors.mobile = response.message || t('officers.officer_already_in_community')
+        } else {
+          formErrors.title = response.message || t('officers.update_failed')
+        }
+      }
+    } catch (err) {
+      console.error('Error updating officer:', err)
+      formErrors.title = t('officers.update_failed')
+    } finally {
+      isSaving.value = false
     }
   }
-  showFormModal.value = false
 }
 
 function confirmDelete(officer: Officer) {
@@ -281,12 +419,27 @@ function confirmDelete(officer: Officer) {
   showDeleteModal.value = true
 }
 
-function handleDelete() {
+async function handleDelete() {
   if (!deleteTarget.value) return
-  const idx = officers.value.findIndex((o: Officer) => o.id === deleteTarget.value!.id)
-  if (idx > -1) officers.value.splice(idx, 1)
-  showDeleteModal.value = false
-  deleteTarget.value = null
+  isDeleting.value = true
+  deleteError.value = ''
+  try {
+    const response = await officerApi.deleteOfficer(deleteTarget.value.id)
+    if (response.rc === 0) {
+      showDeleteModal.value = false
+      deleteTarget.value = null
+      await fetchOfficers()
+    } else if (response.rc === 520) {
+      deleteError.value = response.message || t('officers.delete_failed_logged_in')
+    } else {
+      deleteError.value = response.message || t('officers.delete_failed')
+    }
+  } catch (err) {
+    console.error('Error deleting officer:', err)
+    deleteError.value = t('officers.delete_failed')
+  } finally {
+    isDeleting.value = false
+  }
 }
 
 function openDetail(officer: Officer) {
@@ -310,29 +463,63 @@ function handlePhotoChange(event: Event) {
   // This function is no longer used - ImageUpload handles its own events
 }
 
-function openAddEval(officer: Officer) {
-  detailOfficer.value = officer
-  evalForm.text = ''
-  evalForm.date = new Date().toISOString().split('T')[0]!
-  evalForm.evaluatorName = ''
-  evalError.value = ''
-  showEvalModal.value = true
+function openInlineEvalForm() {
+  inlineEvalForm.text = ''
+  inlineEvalForm.date = new Date().toISOString().split('T')[0]!
+  inlineEvalError.value = ''
+  showInlineEvalForm.value = true
 }
 
-function handleSaveEval() {
-  if (!evalForm.text.trim()) { evalError.value = t('validation.required'); return }
-  if (!detailOfficer.value) return
-  const idx = officers.value.findIndex((o: Officer) => o.id === detailOfficer.value!.id)
-  const target = officers.value[idx]
-  if (idx > -1 && target) {
-    target.evaluations.push({ text: evalForm.text.trim(), date: evalForm.date, evaluatorName: evalForm.evaluatorName })
-    detailOfficer.value = target
+function cancelInlineEvalForm() {
+  showInlineEvalForm.value = false
+  inlineEvalError.value = ''
+}
+
+function confirmDeleteEval(officerId: string, evalIdx: number) {
+  evalDeleteTarget.value = { officerId, evalIdx }
+  showEvalDeleteModal.value = true
+}
+
+function submitInlineEvalForm() {
+  if (!inlineEvalForm.text.trim()) {
+    inlineEvalError.value = t('validation.required')
+    return
   }
-  showEvalModal.value = false
+  if (!editingId.value) return
+  const officer = officers.value.find((o: Officer) => o.id === editingId.value)
+  if (officer) {
+    officer.evaluations.unshift({ text: inlineEvalForm.text.trim(), date: inlineEvalForm.date, evaluatorName: '' })
+  }
+  showInlineEvalForm.value = false
+  inlineEvalError.value = ''
+}
+
+// Evaluations list for currently editing officer
+const evalList = computed((): OfficerEvaluation[] => {
+  if (!editingId.value) return []
+  const officer = officers.value.find((o: Officer) => o.id === editingId.value)
+  return officer?.evaluations ?? []
+})
+
+function handleDeleteEval() {
+  if (!evalDeleteTarget.value) return
+  const officer = officers.value.find((o: Officer) => o.id === evalDeleteTarget.value!.officerId)
+  if (officer) officer.evaluations.splice(evalDeleteTarget.value.evalIdx, 1)
+  showEvalDeleteModal.value = false
+  evalDeleteTarget.value = null
 }
 
 function getInitials(name: string): string {
   return name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
+}
+
+function toggleSort(col: 'first_name' | 'last_name' | 'community' | 'created_on') {
+  if (sortBy.value === col) {
+    sortDir.value = sortDir.value === 'asc' ? 'desc' : 'asc'
+  } else {
+    sortBy.value = col
+    sortDir.value = 'asc'
+  }
 }
 </script>
 
@@ -341,7 +528,7 @@ function getInitials(name: string): string {
     <!-- Header -->
     <div class="page-header">
       <div class="header-left">
-        <span class="total-count">{{ t('officers.total', { count: String(filteredOfficers.length) }) }}</span>
+        <span class="total-count">{{ t('officers.total', { count: String(totalCount) }) }}</span>
       </div>
       <div class="header-actions">
         <AppButton :text="t('officers.add_officer')" type="primary" icon="lucide:plus" @click="openAdd" />
@@ -353,11 +540,15 @@ function getInitials(name: string): string {
       <div class="search-box">
         <Icon name="lucide:search" :size="14" />
         <input v-model="searchQuery" type="text" :placeholder="t('officers.search_placeholder')" />
+        <Icon v-if="isSearching" name="lucide:loader-2" :size="14" class="animate-spin search-spinner" />
+        <button v-if="searchQuery" class="search-clear-btn" @click="searchQuery = ''">
+          <Icon name="lucide:x" :size="12" />
+        </button>
       </div>
 
       <select v-if="!props.communityName" v-model="filterCommunity" class="filter-select">
         <option value="all">{{ t('officers.all_communities') }}</option>
-        <option v-for="c in COMMUNITIES" :key="c" :value="c">{{ c }}</option>
+        <option v-for="c in communities" :key="c.community_id" :value="c.community_id">{{ c.name }}</option>
       </select>
 
       <div class="filter-toggle">
@@ -372,18 +563,48 @@ function getInitials(name: string): string {
       <table class="data-table">
         <thead>
           <tr>
-            <th>{{ t('officers.full_name') }}</th>
-            <th v-if="!props.communityName">{{ t('officers.community') }}</th>
+            <th class="sortable" :class="{ 'th--sorted': sortBy === 'first_name' || sortBy === 'last_name' }" @click="toggleSort('first_name')">
+              <span class="th-content">
+                {{ t('officers.full_name') }}
+                <Icon v-if="sortBy === 'first_name'" :name="sortDir === 'asc' ? 'lucide:chevron-up' : 'lucide:chevron-down'" :size="12" />
+                <Icon v-else name="lucide:chevrons-up-down" :size="12" class="th-sort-idle" />
+              </span>
+            </th>
+            <th v-if="!props.communityName" class="sortable" :class="{ 'th--sorted': sortBy === 'community' }" @click="toggleSort('community')">
+              <span class="th-content">
+                {{ t('officers.community') }}
+                <Icon v-if="sortBy === 'community'" :name="sortDir === 'asc' ? 'lucide:chevron-up' : 'lucide:chevron-down'" :size="12" />
+                <Icon v-else name="lucide:chevrons-up-down" :size="12" class="th-sort-idle" />
+              </span>
+            </th>
             <th>{{ t('officers.mobile') }}</th>
             <th>{{ t('officers.title') }}</th>
             <th>{{ t('officers.roles') }}</th>
             <th>{{ t('officers.certifications') }}</th>
-            <th>{{ t('officers.reg_date') }}</th>
+            <th class="sortable" :class="{ 'th--sorted': sortBy === 'created_on' }" @click="toggleSort('created_on')">
+              <span class="th-content">
+                {{ t('officers.reg_date') }}
+                <Icon v-if="sortBy === 'created_on'" :name="sortDir === 'asc' ? 'lucide:chevron-up' : 'lucide:chevron-down'" :size="12" />
+                <Icon v-else name="lucide:chevrons-up-down" :size="12" class="th-sort-idle" />
+              </span>
+            </th>
             <th>{{ t('officers.active') }}</th>
             <th>{{ t('officers.actions') }}</th>
           </tr>
         </thead>
         <tbody>
+          <tr v-if="isLoadingOfficers">
+            <td colspan="9" class="empty-row">
+              <Icon name="lucide:loader-2" :size="16" class="animate-spin" />
+              {{ t('common.loading') }}
+            </td>
+          </tr>
+          <tr v-else-if="loadError">
+            <td colspan="9" class="empty-row error-row">
+              {{ loadError }}
+              <button class="retry-btn" @click="() => fetchOfficers()">{{ t('common.retry') }}</button>
+            </td>
+          </tr>
           <tr v-for="officer in filteredOfficers" :key="officer.id">
             <td>
               <div class="officer-name-cell">
@@ -402,13 +623,13 @@ function getInitials(name: string): string {
             <td>{{ officer.title }}</td>
             <td>
               <div class="tags-cell">
-                <span v-for="role in officer.roles" :key="role" class="tag tag--role">{{ role }}</span>
+                <Badge v-for="role in officer.roles" :key="role" type="officerRole" :value="role" />
                 <span v-if="!officer.roles.length" class="muted">—</span>
               </div>
             </td>
             <td>
               <div class="tags-cell">
-                <span v-for="cert in officer.certifications" :key="cert" class="tag tag--cert">{{ cert }}</span>
+                <Badge v-for="cert in officer.certifications" :key="cert" type="officerCert" :value="cert" />
                 <span v-if="!officer.certifications.length" class="muted">—</span>
               </div>
             </td>
@@ -430,7 +651,7 @@ function getInitials(name: string): string {
               </div>
             </td>
           </tr>
-          <tr v-if="!filteredOfficers.length">
+          <tr v-if="!isLoadingOfficers && !loadError && !filteredOfficers.length">
             <td colspan="9" class="empty-row">{{ t('officers.no_officers') }}</td>
           </tr>
         </tbody>
@@ -441,16 +662,36 @@ function getInitials(name: string): string {
     <AppModal
       :show="showFormModal"
       :title="formMode === 'add' ? t('officers.add_title') : t('officers.edit_title')"
-      :cancel-text="t('common.cancel')"
-      :ok-text="t('common.save')"
-      :ok-disabled="isSaving"
+      :cancel-text="editTab === 'evaluations' ? '' : t('common.cancel')"
+      :ok-text="editTab === 'evaluations' ? t('common.close') : t('common.save')"
+      :ok-disabled="editTab === 'details' && (isSaving || !isFormHasChanged)"
       max-width="50vw"
       @close="showFormModal = false"
       @cancel="showFormModal = false"
-      @ok="handleSave"
+      @ok="editTab === 'evaluations' ? (showFormModal = false) : handleSave()"
     >
       <template #default>
         <div class="officer-form">
+
+          <!-- Tab Bar (edit mode only) -->
+          <div v-if="formMode === 'edit'" class="modal-tab-bar">
+            <button
+              :class="['modal-tab-btn', { 'modal-tab-btn--active': editTab === 'details' }]"
+              @click="editTab = 'details'"
+            >
+              {{ t('officers.tab_details') }}
+            </button>
+            <button
+              :class="['modal-tab-btn', { 'modal-tab-btn--active': editTab === 'evaluations' }]"
+              @click="editTab = 'evaluations'"
+            >
+              {{ t('officers.tab_evaluations') }}
+              <span v-if="evalList.length" class="modal-tab-badge">{{ evalList.length }}</span>
+            </button>
+          </div>
+          <!-- Details Tab Panel -->
+          <template v-if="formMode === 'add' || editTab === 'details'">
+
           <!-- Row 1: Photo + Name/Community Block -->
           <div class="form-row-photo-name">
             <!-- Photo on left -->
@@ -464,10 +705,16 @@ function getInitials(name: string): string {
             </div>
             <!-- Name and Community stacked vertically on right -->
             <div class="name-community-col">
-              <div class="form-field" :class="{ error: formErrors.fullName }">
-                <label class="field-label">{{ t('officers.full_name') }} <span class="required">*</span></label>
-                <input v-model="form.fullName" type="text" class="field-input" :placeholder="t('officers.full_name_placeholder')" />
-                <span v-if="formErrors.fullName" class="error-msg">{{ formErrors.fullName }}</span>
+              <div class="form-row-2col">
+                <div class="form-field" :class="{ error: formErrors.firstName }">
+                  <label class="field-label">{{ t('officers.first_name') }} <span class="required">*</span></label>
+                  <input v-model="form.firstName" type="text" class="field-input" :placeholder="t('officers.first_name_placeholder')" />
+                  <span v-if="formErrors.firstName" class="error-msg">{{ formErrors.firstName }}</span>
+                </div>
+                <div class="form-field">
+                  <label class="field-label">{{ t('officers.last_name') }}</label>
+                  <input v-model="form.lastName" type="text" class="field-input" :placeholder="t('officers.last_name_placeholder')" />
+                </div>
               </div>
               <div class="form-field" :class="{ error: formErrors.community }">
                 <label class="field-label">{{ t('officers.community') }} <span class="required">*</span></label>
@@ -542,6 +789,53 @@ function getInitials(name: string): string {
               <span>{{ form.active ? t('common.active') : t('common.inactive') }}</span>
             </label>
           </div>
+
+          </template><!-- end details tab -->
+
+          <!-- Evaluations Tab Panel -->
+          <div v-if="formMode === 'edit' && editingId && editTab === 'evaluations'" class="eval-section eval-section--tab">
+            <div class="eval-header">
+              <span class="eval-title">{{ t('officers.evaluations') }}</span>
+              <button v-if="!showInlineEvalForm" class="eval-add-btn" @click="openInlineEvalForm">
+                <Icon name="lucide:plus" :size="12" />
+                {{ t('officers.add_evaluation') }}
+              </button>
+            </div>
+
+            <!-- Inline Add Form -->
+            <div v-if="showInlineEvalForm" class="eval-inline-form">
+              <div class="form-field" :class="{ error: inlineEvalError }">
+                <label class="field-label">{{ t('officers.eval_text') }} <span class="required">*</span></label>
+                <textarea v-model="inlineEvalForm.text" class="field-textarea" rows="3" :placeholder="t('officers.eval_text_placeholder')" />
+                <span v-if="inlineEvalError" class="error-msg">{{ inlineEvalError }}</span>
+              </div>
+              <div class="form-field">
+                <label class="field-label">{{ t('officers.eval_date') }}</label>
+                <input v-model="inlineEvalForm.date" type="date" class="field-input" />
+              </div>
+              <div class="eval-inline-actions">
+                <button class="btn-secondary-sm" @click="cancelInlineEvalForm">{{ t('common.cancel') }}</button>
+                <button class="btn-primary-sm" @click="submitInlineEvalForm">{{ t('common.save') }}</button>
+              </div>
+            </div>
+
+            <!-- Eval List -->
+            <div v-if="evalList.length" class="eval-list">
+              <div v-for="(ev, idx) in evalList" :key="idx" class="eval-item">
+                <div class="eval-meta">
+                  <div class="eval-meta-left">
+                    <span class="eval-evaluator">{{ ev.evaluatorName || t('officers.unknown') }}</span>
+                    <span class="eval-date">{{ ev.date }}</span>
+                  </div>
+                  <button class="eval-delete-btn" :title="t('common.delete')" @click="confirmDeleteEval(editingId, idx)">
+                    <Icon name="lucide:trash-2" :size="13" />
+                  </button>
+                </div>
+                <p class="eval-text">{{ ev.text }}</p>
+              </div>
+            </div>
+            <p v-else-if="!showInlineEvalForm" class="eval-empty">{{ t('officers.no_evaluations') }}</p>
+          </div>
         </div>
       </template>
     </AppModal>
@@ -593,14 +887,14 @@ function getInitials(name: string): string {
             <div class="detail-row detail-row--full">
               <span class="detail-label">{{ t('officers.roles') }}</span>
               <div class="tags-cell">
-                <span v-for="r in detailOfficer.roles" :key="r" class="tag tag--role">{{ r }}</span>
+                <Badge v-for="r in detailOfficer.roles" :key="r" type="officerRole" :value="r" />
                 <span v-if="!detailOfficer.roles.length" class="muted">—</span>
               </div>
             </div>
             <div class="detail-row detail-row--full">
               <span class="detail-label">{{ t('officers.certifications') }}</span>
               <div class="tags-cell">
-                <span v-for="c in detailOfficer.certifications" :key="c" class="tag tag--cert">{{ c }}</span>
+                <Badge v-for="c in detailOfficer.certifications" :key="c" type="officerCert" :value="c" />
                 <span v-if="!detailOfficer.certifications.length" class="muted">—</span>
               </div>
             </div>
@@ -610,20 +904,18 @@ function getInitials(name: string): string {
             </div>
           </div>
 
-          <!-- Evaluations -->
+          <!-- Evaluations (read-only in detail view) -->
           <div class="eval-section">
             <div class="eval-header">
               <span class="eval-title">{{ t('officers.evaluations') }}</span>
-              <button class="eval-add-btn" @click="showDetailModal = false; openAddEval(detailOfficer)">
-                <Icon name="lucide:plus" :size="12" />
-                {{ t('officers.add_evaluation') }}
-              </button>
             </div>
             <div v-if="detailOfficer.evaluations.length" class="eval-list">
               <div v-for="(ev, idx) in detailOfficer.evaluations" :key="idx" class="eval-item">
                 <div class="eval-meta">
-                  <span class="eval-evaluator">{{ ev.evaluatorName || t('officers.unknown') }}</span>
-                  <span class="eval-date">{{ ev.date }}</span>
+                  <div class="eval-meta-left">
+                    <span class="eval-evaluator">{{ ev.evaluatorName || t('officers.unknown') }}</span>
+                    <span class="eval-date">{{ ev.date }}</span>
+                  </div>
                 </div>
                 <p class="eval-text">{{ ev.text }}</p>
               </div>
@@ -634,34 +926,18 @@ function getInitials(name: string): string {
       </template>
     </AppModal>
 
-    <!-- Add Evaluation Modal -->
+    <!-- Delete Eval Confirmation -->
     <AppModal
-      :show="showEvalModal"
-      :title="t('officers.add_evaluation')"
+      :show="showEvalDeleteModal"
+      :title="t('officers.delete_eval_title')"
       :cancel-text="t('common.cancel')"
-      :ok-text="t('common.save')"
-      @close="showEvalModal = false"
-      @cancel="showEvalModal = false"
-      @ok="handleSaveEval"
+      :ok-text="t('common.delete')"
+      @close="showEvalDeleteModal = false"
+      @cancel="showEvalDeleteModal = false"
+      @ok="handleDeleteEval"
     >
       <template #default>
-        <div class="eval-form">
-          <div class="form-field" :class="{ error: evalError }">
-            <label class="field-label">{{ t('officers.eval_text') }} <span class="required">*</span></label>
-            <textarea v-model="evalForm.text" class="field-textarea" rows="4" :placeholder="t('officers.eval_text_placeholder')" />
-            <span v-if="evalError" class="error-msg">{{ evalError }}</span>
-          </div>
-          <div class="form-row-2col">
-            <div class="form-field">
-              <label class="field-label">{{ t('officers.eval_date') }}</label>
-              <input v-model="evalForm.date" type="date" class="field-input" />
-            </div>
-            <div class="form-field">
-              <label class="field-label">{{ t('officers.eval_evaluator') }}</label>
-              <input v-model="evalForm.evaluatorName" type="text" class="field-input" :placeholder="t('officers.eval_evaluator_placeholder')" />
-            </div>
-          </div>
-        </div>
+        <p class="modal-confirm-message">{{ t('officers.delete_eval_message') }}</p>
       </template>
     </AppModal>
 
@@ -669,13 +945,18 @@ function getInitials(name: string): string {
     <AppModal
       :show="showDeleteModal"
       :title="t('officers.delete_title')"
-      :message="t('officers.delete_message', { name: deleteTarget?.fullName ?? '' })"
       :cancel-text="t('common.cancel')"
       :ok-text="t('common.delete')"
-      @close="showDeleteModal = false"
-      @cancel="showDeleteModal = false"
+      :ok-disabled="isDeleting"
+      @close="showDeleteModal = false; deleteError = ''"
+      @cancel="showDeleteModal = false; deleteError = ''"
       @ok="handleDelete"
-    />
+    >
+      <template #default>
+        <p class="modal-confirm-message">{{ t('officers.delete_message', { name: deleteTarget?.fullName ?? '' }) }}</p>
+        <p v-if="deleteError" class="modal-error-message">{{ deleteError }}</p>
+      </template>
+    </AppModal>
   </div>
 </template>
 
@@ -733,6 +1014,32 @@ function getInitials(name: string): string {
   outline: none;
   color: var(--color-text-primary);
   font-size: var(--font-size-sm);
+}
+
+.search-spinner {
+  color: var(--color-accent);
+  flex-shrink: 0;
+}
+
+.search-clear-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  background: var(--color-bg-overlay);
+  border: none;
+  border-radius: 50%;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background var(--transition-base), color var(--transition-base);
+}
+
+.search-clear-btn:hover {
+  background: var(--color-border);
+  color: var(--color-text-primary);
 }
 
 .filter-select {
@@ -800,6 +1107,29 @@ function getInitials(name: string): string {
   white-space: nowrap;
 }
 
+.data-table th.sortable {
+  cursor: pointer;
+  user-select: none;
+}
+
+.data-table th.sortable:hover {
+  color: var(--color-text-primary);
+}
+
+.data-table th.th--sorted {
+  color: var(--color-accent);
+}
+
+.th-content {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.th-sort-idle {
+  opacity: 0.35;
+}
+
 .data-table td {
   padding: var(--space-3);
   color: var(--color-text-primary);
@@ -815,6 +1145,55 @@ function getInitials(name: string): string {
   color: var(--color-text-muted);
   padding: var(--space-8) !important;
   font-style: italic;
+}
+
+.error-row {
+  color: var(--color-critical);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+}
+
+.retry-btn {
+  background: none;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-1) var(--space-3);
+  font-size: var(--font-size-xs);
+  color: var(--color-accent);
+  cursor: pointer;
+  margin-left: var(--space-2);
+}
+
+.retry-btn:hover {
+  background: var(--color-bg-elevated);
+}
+
+.modal-confirm-message {
+  font-size: var(--font-size-md);
+  color: var(--color-text-secondary);
+  margin: 0 0 var(--space-3);
+  line-height: 1.6;
+}
+
+.modal-error-message {
+  font-size: var(--font-size-sm);
+  color: var(--color-critical);
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  background: rgba(239, 68, 68, 0.08);
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(239, 68, 68, 0.25);
+}
+
+.animate-spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
 /* Officer name cell */
@@ -1134,6 +1513,60 @@ function getInitials(name: string): string {
   color: var(--color-text-muted);
 }
 
+/* Modal Tab Bar */
+.modal-tab-bar {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--color-border);
+  margin-bottom: var(--space-4);
+}
+
+.modal-tab-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-4);
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  cursor: pointer;
+  margin-bottom: -1px;
+  transition: color var(--transition-base), border-color var(--transition-base);
+}
+
+.modal-tab-btn:hover {
+  color: var(--color-text-primary);
+}
+
+.modal-tab-btn--active {
+  color: var(--color-accent);
+  border-bottom-color: var(--color-accent);
+  font-weight: 600;
+}
+
+.modal-tab-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  background: var(--color-accent);
+  border-radius: 9px;
+  color: #0a0c10;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.eval-section--tab {
+  border-top: none;
+  padding-top: 0;
+}
+
 /* Evaluations */
 .eval-section {
   border-top: 1px solid var(--color-border);
@@ -1188,6 +1621,78 @@ function getInitials(name: string): string {
   justify-content: space-between;
   margin-bottom: var(--space-1);
 }
+
+.eval-meta-left {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.eval-delete-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: background var(--transition-base), color var(--transition-base), border-color var(--transition-base);
+  flex-shrink: 0;
+}
+
+.eval-delete-btn:hover {
+  background: rgba(239, 68, 68, 0.1);
+  color: var(--color-critical);
+  border-color: rgba(239, 68, 68, 0.25);
+}
+
+.eval-inline-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  background: var(--color-bg-overlay);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  margin-bottom: var(--space-3);
+}
+
+.eval-inline-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+.btn-primary-sm {
+  padding: var(--space-1) var(--space-3);
+  background: var(--color-accent);
+  border: none;
+  border-radius: var(--radius-md);
+  color: #0a0c10;
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity var(--transition-base);
+}
+
+.btn-primary-sm:hover { opacity: 0.85; }
+
+.btn-secondary-sm {
+  padding: var(--space-1) var(--space-3);
+  background: none;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+  transition: background var(--transition-base);
+}
+
+.btn-secondary-sm:hover { background: var(--color-bg-elevated); }
 
 .eval-evaluator {
   font-size: var(--font-size-xs);

@@ -25,12 +25,15 @@ export class OfficerApi extends BaseApiClient {
   /**
    * Admin: Get list of officers with optional filters, search, and sorting
    */
-  async getOfficers(params: Omit<GetOfficersRequest, '#request'>): Promise<ApiResponse<GetOfficersResponse>> {
+  async getOfficers(
+    params: Omit<GetOfficersRequest, '#request'>,
+    options?: { showLoading?: boolean }
+  ): Promise<ApiResponse<GetOfficersResponse>> {
     const request: GetOfficersRequest = {
       '#request': 'Officer/get_officers',
       ...params,
     }
-    return this.request<GetOfficersResponse>(request)
+    return this.request<GetOfficersResponse>(request, options)
   }
 
   /**

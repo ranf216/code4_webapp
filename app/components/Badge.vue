@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { UserType, UserTypeLabels } from '~/constants/userTypes'
 
-type BadgeType = 'status' | 'userType' | 'adminRole' | 'active' | 'report' | 'review' | 'taskPriority' | 'taskStatus' | 'shiftStatus' | 'shiftCount' | 'postOrderStatus' | 'poiType' | 'poiThreat' | 'poiStatus' | 'templateStatus' | 'templateCategory'
+type BadgeType = 'status' | 'userType' | 'adminRole' | 'active' | 'report' | 'review' | 'taskPriority' | 'taskStatus' | 'shiftStatus' | 'shiftCount' | 'postOrderStatus' | 'poiType' | 'poiThreat' | 'poiStatus' | 'templateStatus' | 'templateCategory' | 'officerRole' | 'officerCert'
 
 const props = defineProps<{
   type: BadgeType
@@ -192,6 +192,12 @@ const badgeClass = computed((): string => {
   }
   if (props.type === 'templateCategory') {
     return `badge--tpl-cat-${props.value}`
+  }
+  if (props.type === 'officerRole') {
+    return 'badge--officer-role'
+  }
+  if (props.type === 'officerCert') {
+    return 'badge--officer-cert'
   }
   return ''
 })
@@ -579,5 +585,19 @@ const badgeClass = computed((): string => {
   background: rgba(99, 102, 241, 0.12);
   color: #6366f1;
   border: 1px solid rgba(99, 102, 241, 0.25);
+}
+
+/* Officer Role */
+.badge--officer-role {
+  background: rgba(14, 165, 233, 0.12);
+  color: #0ea5e9;
+  border: 1px solid rgba(14, 165, 233, 0.25);
+}
+
+/* Officer Certification */
+.badge--officer-cert {
+  background: rgba(16, 185, 129, 0.12);
+  color: #10b981;
+  border: 1px solid rgba(16, 185, 129, 0.25);
 }
 </style>

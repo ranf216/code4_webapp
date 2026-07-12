@@ -191,8 +191,13 @@ function handleBackdropClick(event: MouseEvent) {
   color: #0a0c10;
 }
 
-.modal__btn--primary:hover {
+.modal__btn--primary:hover:not(:disabled) {
   opacity: 0.9;
+}
+
+.modal__btn--primary:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
 }
 
 /* Transition animations */
