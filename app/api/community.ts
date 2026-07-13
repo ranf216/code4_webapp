@@ -67,8 +67,8 @@ export interface AddCommunityParams {
   map_image?: string
   map_boundaries?: string
   is_active?: boolean
-  officers?: number[]
-  residents?: number[]
+  officers?: string[]
+  residents?: string[]
 }
 
 export interface UpdateCommunityParams {
@@ -89,11 +89,11 @@ export interface UpdateCommunityParams {
    * - Provided as empty array [] → clears all officer assignments.
    * - Omitted → no change to current assignments.
    */
-  officers?: number[]
+  officers?: string[]
   /**
    * Replacement list of resident user IDs. Same behaviour as officers.
    */
-  residents?: number[]
+  residents?: string[]
 }
 
 // ─── API Client ──────────────────────────────────────────────

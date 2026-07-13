@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { nextTick, onMounted, onUnmounted } from 'vue'
 import { communityApi } from '~/api/community'
+import { officerApi } from '~/api/officer'
 import ImageUpload from '~/components/ImageUpload.vue'
 import type { CommunityEditFormData } from '~/types/community'
 
@@ -39,6 +40,68 @@ const errors = reactive<Record<string, string>>({})
 
 const newPost = ref('')
 
+interface CommunityOfficer {
+  id: string
+  fullName: string
+  title: string
+  mobile: string
+  picture: string
+  active: boolean
+}
+
+const communityOfficers = ref<CommunityOfficer[]>([])
+const isLoadingOfficers = ref(false)
+
+async function loadCommunityOfficers() {
+  isLoadingOfficers.value = true
+  try {
+    const response = await officerApi.getOfficers({ community_id: Number(props.communityId), include_inactive: true })
+    if (response.rc === 0 && response.officers) {
+      communityOfficers.value = response.officers.map((o: any) => ({
+        id: o.user_id,
+        fullName: [o.first_name, o.last_name].filter(Boolean).join(' '),
+        title: o.title || '',
+        mobile: o.phone_num || '',
+        picture: o.image_url || '',
+        active: o.is_active,
+      }))
+    }
+  } catch (err) {
+    console.error('Error loading community officers:', err)
+  } finally {
+    isLoadingOfficers.value = false
+  }
+}
+
+function getOfficerInitials(name: string): string {
+  return name.split(' ').map((p: string) => p[0] || '').join('').toUpperCase().slice(0, 2)
+}
+
+const isRemovingOfficer = ref<string | null>(null)
+
+const showAddOfficerModal = ref(false)
+
+interface PickerOfficer {
+  id: string
+  fullName: string
+  title: string
+  picture: string
+  active: boolean
+  communityName: string | null
+}
+
+function handleOfficerPickerConfirm(officers: PickerOfficer[]) {
+  const existingMap = new Map(communityOfficers.value.map((o: CommunityOfficer) => [o.id, o]))
+  communityOfficers.value = officers.map((o) =>
+    existingMap.get(o.id) ?? { id: o.id, fullName: o.fullName, title: o.title, mobile: '', picture: o.picture, active: o.active }
+  )
+  showAddOfficerModal.value = false
+}
+
+function removeOfficerFromCommunity(officerId: string) {
+  communityOfficers.value = communityOfficers.value.filter((o: CommunityOfficer) => o.id !== officerId)
+}
+
 async function loadCommunity() {
   isLoading.value = true
   loadError.value = null
@@ -76,6 +139,7 @@ onMounted(async () => {
     return
   }
   await loadCommunity()
+  await loadCommunityOfficers()
   nextTick(() => {
     loadMapTool()
   })
@@ -236,11 +300,14 @@ async function handleSubmit() {
   isSubmitting.value = true
   submitError.value = null
   try {
+    const officerIds = communityOfficers.value.map((o: CommunityOfficer) => o.id).filter((id): id is string => !!id)
+    const officersPayload = officerIds.length ? officerIds : ['0']
     const payload: {
       community_id: number
       name: string
       area: string
       is_active: boolean
+      officers: string[]
       map_image?: string
       map_boundaries?: string
     } = {
@@ -248,6 +315,7 @@ async function handleSubmit() {
       name: form.name.trim(),
       area: form.area.trim(),
       is_active: form.active,
+      officers: officersPayload,
     }
 
     const mapImageBase64 = extractBase64FromDataUrl(form.mapImage || '')
@@ -373,25 +441,45 @@ async function handleSubmit() {
         <div class="form-section">
           <h3 class="form-section__title">{{ t('communities.officers') }}</h3>
 
-          <!-- Officers List -->
-          <div v-if="form.officers.length" class="items-list">
-            <div
-              v-for="(officer, index) in form.officers"
-              :key="index"
-              class="item-row"
-            >
-              <span class="item-row__name">{{ officer }}</span>
-              <button type="button" class="item-row__remove" @click="removeOfficer(index)">
-                <Icon name="lucide:x" :size="14" />
+          <div v-if="isLoadingOfficers" class="officers-loading">
+            <Icon name="lucide:loader-2" :size="16" class="spin" />
+            <span>{{ t('common.loading') }}</span>
+          </div>
+
+          <div v-else-if="communityOfficers.length" class="community-officers-list">
+            <div v-for="officer in communityOfficers" :key="officer.id" class="community-officer-card">
+              <div v-if="officer.picture" class="community-officer-avatar">
+                <img :src="officer.picture" :alt="officer.fullName" />
+              </div>
+              <div v-else class="community-officer-avatar community-officer-avatar--initials">
+                {{ getOfficerInitials(officer.fullName) }}
+              </div>
+              <div class="community-officer-info">
+                <div class="community-officer-name-row">
+                  <span class="community-officer-name">{{ officer.fullName }}</span>
+                  <span :class="['community-officer-status', officer.active ? 'community-officer-status--active' : 'community-officer-status--inactive']">{{ officer.active ? t('common.active') : t('common.inactive') }}</span>
+                </div>
+                <span class="community-officer-title">{{ officer.title }}</span>
+                <span class="community-officer-phone">{{ officer.mobile }}</span>
+              </div>
+              <button
+                type="button"
+                class="community-officer-remove"
+                :title="t('communities.remove_officer')"
+                :disabled="isRemovingOfficer === officer.id"
+                @click="removeOfficerFromCommunity(officer.id)"
+              >
+                <Icon v-if="isRemovingOfficer === officer.id" name="lucide:loader-2" :size="14" class="spin" />
+                <Icon v-else name="lucide:user-minus" :size="14" />
               </button>
             </div>
           </div>
+
           <span v-else class="form-field__hint">{{ t('communities.no_officers') }}</span>
 
-          <!-- Add Officers Button -->
-          <div class="form-row form-row--inline">
-            <button type="button" class="form-field__button form-field__button--secondary">
-              <Icon name="lucide:plus" :size="16" />
+          <div class="community-officers-actions">
+            <button type="button" class="community-officers-add-btn" @click="showAddOfficerModal = true">
+              <Icon name="lucide:user-plus" :size="15" />
               <span>{{ t('communities.add_officers') }}</span>
             </button>
           </div>
@@ -529,6 +617,14 @@ async function handleSubmit() {
         </div>
       </div>
     </div>
+
+    <!-- Add Officer Modal -->
+    <OfficerPickerModal
+      :show="showAddOfficerModal"
+      :preselected-ids="communityOfficers.map((o) => o.id)"
+      @close="showAddOfficerModal = false"
+      @confirm="handleOfficerPickerConfirm"
+    />
 
     <!-- Map Tool Section -->
     <div v-if="showMapTool" class="community-form__map-section">
@@ -809,6 +905,160 @@ async function handleSubmit() {
   color: #0a0c10;
   font-size: var(--font-size-sm);
   font-weight: 600;
+}
+
+/* Officers loading */
+.officers-loading {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+  padding: var(--space-2) 0;
+}
+
+/* Community Officers List */
+.community-officers-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.community-officer-card {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-bg-base);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.community-officer-avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+
+.community-officer-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.community-officer-avatar--initials {
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+  color: var(--color-text-muted);
+  letter-spacing: 0.05em;
+}
+
+.community-officer-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.community-officer-name-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.community-officer-name {
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--color-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.community-officer-status {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: var(--radius-md);
+}
+
+.community-officer-status--active {
+  background: rgba(17, 156, 166, 0.15);
+  color: #119ca6;
+  border: 1px solid rgba(17, 156, 166, 0.3);
+}
+
+.community-officer-status--inactive {
+  background: rgba(148, 163, 184, 0.15);
+  color: #94a3b8;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+}
+
+.community-officer-title {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+}
+
+.community-officer-phone {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  font-family: monospace;
+}
+
+.community-officer-remove {
+  margin-left: auto;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.community-officer-remove:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.1);
+  color: var(--color-critical);
+}
+
+.community-officer-remove:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.community-officers-actions {
+  margin-top: var(--space-3);
+}
+
+.community-officers-add-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  color: var(--color-accent);
+  border: 1px dashed var(--color-accent);
+  border-radius: var(--radius-md);
+  text-decoration: none;
+  transition: background 0.15s;
+}
+
+.community-officers-add-btn:hover {
+  background: rgba(17, 156, 166, 0.08);
 }
 
 /* Items List (Officers/Residents) */

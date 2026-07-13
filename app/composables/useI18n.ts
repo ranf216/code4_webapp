@@ -214,6 +214,7 @@ const translations: Record<string, Record<string, string>> = {
     'common.filter': 'Filter',
     'common.view_all': 'View all',
     'common.ok': 'OK',
+    'common.all': 'All',
     'common.active': 'Active',
     'common.inactive': 'Inactive',
     'common.status': 'Status',

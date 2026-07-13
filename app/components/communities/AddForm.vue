@@ -2,6 +2,7 @@
 import { nextTick, onMounted, onUnmounted, ref } from 'vue'
 import { communityApi } from '~/api/community'
 import ImageUpload from '~/components/ImageUpload.vue'
+import OfficerPickerModal from '~/components/communities/OfficerPickerModal.vue'
 import { getPlacePredictions, getPlaceDetails, type PlacePrediction } from '~/composables/useGooglePlaces'
 
 
@@ -24,6 +25,31 @@ let areaSearchTimer: ReturnType<typeof setTimeout> | null = null
 
 const showMapTool = ref(true)
 const mapToolLoaded = ref(false)
+
+interface AddFormOfficer {
+  id: string
+  fullName: string
+  title: string
+  picture: string
+  active: boolean
+  communityName?: string | null
+}
+
+const selectedOfficers = ref<AddFormOfficer[]>([])
+const showOfficerPicker = ref(false)
+
+function getInitials(name: string): string {
+  return name.split(' ').map((p: string) => p[0] || '').join('').toUpperCase().slice(0, 2)
+}
+
+function removeOfficer(id: string) {
+  selectedOfficers.value = selectedOfficers.value.filter((o) => o.id !== id)
+}
+
+function handleOfficerPickerConfirm(officers: AddFormOfficer[]) {
+  selectedOfficers.value = officers
+  showOfficerPicker.value = false
+}
 
 const isSubmitting = ref(false)
 const submitError = ref<string | null>(null)
@@ -241,9 +267,11 @@ async function handleSubmit() {
   isSubmitting.value = true
   submitError.value = null
   try {
+    const officerIds = selectedOfficers.value.map((o) => o.id).filter((id): id is string => !!id)
     const payload: {
       name: string
       area: string
+      officers?: string[]
       latitude?: number
       longitude?: number
       location_name?: string
@@ -252,6 +280,7 @@ async function handleSubmit() {
     } = {
       name: form.name.trim(),
       area: form.area.trim(),
+      ...(officerIds.length ? { officers: officerIds } : {}),
     }
 
     if (selectedArea.value) {
@@ -379,25 +408,41 @@ async function handleSubmit() {
         <!-- Assignments Section -->
         <div class="form-section">
           <h3 class="form-section__title">{{ t('communities.assignments') }}</h3>
-          
-          <div class="form-row form-row--2col">
-            <div class="form-field">
-              <label class="form-field__label">{{ t('communities.officers') }}</label>
-              <button type="button" class="form-field__button form-field__button--secondary" disabled>
-                <Icon name="lucide:users" :size="16" />
-                <span>{{ t('communities.select_officers') }}</span>
-              </button>
-              <span class="form-field__hint">{{ t('communities.officers_hint') }}</span>
+
+          <div class="form-field" style="margin-bottom: var(--space-4)">
+            <label class="form-field__label">{{ t('communities.officers') }}</label>
+
+            <div v-if="selectedOfficers.length" class="add-form-officers-list">
+              <div v-for="officer in selectedOfficers" :key="officer.id" class="add-form-officer-card">
+                <div v-if="officer.picture" class="add-form-officer-avatar">
+                  <img :src="officer.picture" :alt="officer.fullName" />
+                </div>
+                <div v-else class="add-form-officer-avatar add-form-officer-avatar--initials">
+                  {{ getInitials(officer.fullName) }}
+                </div>
+                <div class="add-form-officer-info">
+                  <span class="add-form-officer-name">{{ officer.fullName }}</span>
+                  <span class="add-form-officer-title">{{ officer.title }}</span>
+                </div>
+                <button type="button" class="add-form-officer-remove" @click="removeOfficer(officer.id)">
+                  <Icon name="lucide:x" :size="13" />
+                </button>
+              </div>
             </div>
 
-            <div class="form-field">
-              <label class="form-field__label">{{ t('communities.residents') }}</label>
-              <button type="button" class="form-field__button form-field__button--secondary" disabled>
-                <Icon name="lucide:user-plus" :size="16" />
-                <span>{{ t('communities.add_residents') }}</span>
-              </button>
-              <span class="form-field__hint">{{ t('communities.residents_hint') }}</span>
-            </div>
+            <button type="button" class="add-form-officers-btn" @click="showOfficerPicker = true">
+              <Icon name="lucide:user-plus" :size="15" />
+              <span>{{ t('communities.add_officers') }}</span>
+            </button>
+          </div>
+
+          <div class="form-field">
+            <label class="form-field__label">{{ t('communities.residents') }}</label>
+            <button type="button" class="form-field__button form-field__button--secondary" disabled>
+              <Icon name="lucide:user-plus" :size="16" />
+              <span>{{ t('communities.add_residents') }}</span>
+            </button>
+            <span class="form-field__hint">{{ t('communities.residents_hint') }}</span>
           </div>
         </div>
       </div>
@@ -446,6 +491,14 @@ async function handleSubmit() {
 
       </div>
     </div>
+
+    <!-- Officer Picker Modal -->
+    <OfficerPickerModal
+      :show="showOfficerPicker"
+      :preselected-ids="selectedOfficers.map((o) => o.id)"
+      @close="showOfficerPicker = false"
+      @confirm="handleOfficerPickerConfirm"
+    />
 
     <!-- Map Tool Section -->
     <div v-if="showMapTool" class="community-form__map-section">
@@ -1014,6 +1067,101 @@ async function handleSubmit() {
   font-size: var(--font-size-sm);
   margin-bottom: var(--space-4);
 }
+
+/* Officer list in Add Form */
+.add-form-officers-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+
+.add-form-officer-card {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-bg-base);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.add-form-officer-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+.add-form-officer-avatar img { width: 100%; height: 100%; object-fit: cover; }
+.add-form-officer-avatar--initials {
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+  color: var(--color-text-muted);
+}
+
+.add-form-officer-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.add-form-officer-name {
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--color-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.add-form-officer-title {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+}
+
+.add-form-officer-remove {
+  margin-left: auto;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.add-form-officer-remove:hover {
+  background: rgba(239, 68, 68, 0.1);
+  color: var(--color-critical);
+}
+
+.add-form-officers-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  color: var(--color-accent);
+  border: 1px dashed var(--color-accent);
+  border-radius: var(--radius-md);
+  background: transparent;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.add-form-officers-btn:hover { background: rgba(17, 156, 166, 0.08); }
 
 /* Spin animation */
 @keyframes spin {
