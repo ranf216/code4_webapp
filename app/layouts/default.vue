@@ -5,6 +5,7 @@
       <slot />
     </div>
     <LoadingModal :show="loadingStore.showLoading" :message="loadingStore.message" />
+    <AppToast />
   </div>
 </template>
 

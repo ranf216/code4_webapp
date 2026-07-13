@@ -4,6 +4,7 @@ import ImageUpload from '~/components/ImageUpload.vue'
 import { officerApi } from '~/api/officer'
 import { communityApi } from '~/api/community'
 import type { Officer as ApiOfficer } from '~/api/types/officer'
+import { useToastStore } from '~/stores/toast'
 
 const props = defineProps<{
   communityId?: string
@@ -11,12 +12,14 @@ const props = defineProps<{
 }>()
 
 const { t } = useTranslation()
+const toastStore = useToastStore()
 
 // Types
 interface OfficerEvaluation {
+  evaluation_id: number
   text: string
   date: string
-  evaluatorName: string
+  evaluator_name: string
 }
 
 interface Officer {
@@ -107,9 +110,10 @@ const formMode = ref<'add' | 'edit'>('add')
 const editingId = ref<string | null>(null)
 const editingOriginal = ref<OfficerForm | null>(null)
 const showDeleteModal = ref(false)
+const showCannotDeleteModal = ref(false)
 const deleteTarget = ref<Officer | null>(null)
 const isDeleting = ref(false)
-const deleteError = ref('')
+const isDeactivating = ref(false)
 
 // Edit modal tab
 const editTab = ref<'details' | 'evaluations'>('details')
@@ -120,12 +124,31 @@ const detailOfficer = ref<Officer | null>(null)
 
 // Inline evaluation form (inside edit modal)
 const showInlineEvalForm = ref(false)
+const isSavingEval = ref(false)
+const isLoadingEvals = ref(false)
 const inlineEvalForm = reactive({ text: '', date: '' })
 const inlineEvalError = ref('')
 
+// Deactivate warning
+const deactivateWarning = computed((): boolean =>
+  formMode.value === 'edit' &&
+  !!editingOriginal.value &&
+  editingOriginal.value.active === true &&
+  form.active === false
+)
+
+// Phone change warning
+const showPhoneConfirm = ref(false)
+const phoneChanged = computed((): boolean =>
+  formMode.value === 'edit' &&
+  !!editingOriginal.value &&
+  form.mobile.trim() !== '' &&
+  form.mobile !== editingOriginal.value.mobile
+)
+
 // Eval delete confirmation
 const showEvalDeleteModal = ref(false)
-const evalDeleteTarget = ref<{ officerId: string; evalIdx: number } | null>(null)
+const evalDeleteTarget = ref<{ officerId: string; evaluationId: number } | null>(null)
 
 function blankForm(): OfficerForm {
   return {
@@ -254,9 +277,7 @@ function openAdd() {
   showFormModal.value = true
 }
 
-function openEdit(officer: Officer) {
-  formMode.value = 'edit'
-  editingId.value = officer.id
+function populateEditForm(officer: Officer) {
   const nameParts = officer.fullName.split(' ')
   const snapshot: OfficerForm = {
     firstName: nameParts[0] || '', lastName: nameParts.slice(1).join(' ') || '',
@@ -267,12 +288,35 @@ function openEdit(officer: Officer) {
   }
   editingOriginal.value = { ...snapshot, roles: [...snapshot.roles], certifications: [...snapshot.certifications] }
   Object.assign(form, snapshot)
-  editTab.value = 'details'
   formErrors.firstName = ''
   formErrors.community = ''
   formErrors.mobile = ''
   formErrors.title = ''
+}
+
+async function openEdit(officer: Officer) {
+  formMode.value = 'edit'
+  editingId.value = officer.id
+  editTab.value = 'details'
+  populateEditForm(officer)
   showFormModal.value = true
+  try {
+    const response = await officerApi.getOfficer(officer.id)
+    if (response.rc === 0 && response.officer) {
+      const full = mapApiOfficer(response.officer)
+      full.evaluations = (response.officer.evaluations || []).map((e: any) => ({
+        evaluation_id: e.evaluation_id,
+        text: e.text,
+        date: e.date,
+        evaluator_name: e.evaluator_name || '',
+      }))
+      const idx = officers.value.findIndex((o: Officer) => o.id === officer.id)
+      if (idx > -1) officers.value[idx] = full
+      populateEditForm(full)
+    }
+  } catch (err) {
+    console.error('Error loading officer details:', err)
+  }
 }
 
 function stripDataUrlPrefix(dataUrl: string): string {
@@ -293,6 +337,16 @@ function validateForm(): boolean {
 async function handleSave() {
   if (!validateForm()) return
 
+  // If editing and phone changed → show confirmation first
+  if (formMode.value === 'edit' && phoneChanged.value) {
+    showPhoneConfirm.value = true
+    return
+  }
+
+  await doSave()
+}
+
+async function doSave() {
   if (formMode.value === 'add') {
     isSaving.value = true
     try {
@@ -314,6 +368,7 @@ async function handleSave() {
 
       if (response.rc === 0) {
         showFormModal.value = false
+        toastStore.success(t('officers.create_success'))
         await fetchOfficers()
       } else {
         // Map common error codes to fields
@@ -422,29 +477,76 @@ function confirmDelete(officer: Officer) {
 async function handleDelete() {
   if (!deleteTarget.value) return
   isDeleting.value = true
-  deleteError.value = ''
   try {
     const response = await officerApi.deleteOfficer(deleteTarget.value.id)
     if (response.rc === 0) {
       showDeleteModal.value = false
+      toastStore.success(t('officers.delete_success'))
       deleteTarget.value = null
       await fetchOfficers()
+    } else if (response.rc === 526) {
+      showDeleteModal.value = false
+      showCannotDeleteModal.value = true
     } else if (response.rc === 520) {
-      deleteError.value = response.message || t('officers.delete_failed_logged_in')
+      showDeleteModal.value = false
+      toastStore.info(t('officers.officer_not_found'))
+      deleteTarget.value = null
+      await fetchOfficers()
     } else {
-      deleteError.value = response.message || t('officers.delete_failed')
+      showDeleteModal.value = false
+      toastStore.error(response.message || t('officers.delete_failed'))
+      deleteTarget.value = null
     }
   } catch (err) {
     console.error('Error deleting officer:', err)
-    deleteError.value = t('officers.delete_failed')
+    toastStore.error(t('officers.delete_failed'))
+    showDeleteModal.value = false
   } finally {
     isDeleting.value = false
   }
 }
 
-function openDetail(officer: Officer) {
+async function handleDeactivateFromDelete() {
+  if (!deleteTarget.value) return
+  isDeactivating.value = true
+  try {
+    const response = await officerApi.updateOfficer({ user_id: deleteTarget.value.id, is_active: false })
+    if (response.rc === 0) {
+      showCannotDeleteModal.value = false
+      toastStore.success(t('officers.deactivate_success'))
+      deleteTarget.value = null
+      await fetchOfficers()
+    } else {
+      toastStore.error(response.message || t('officers.update_failed'))
+    }
+  } catch (err) {
+    console.error('Error deactivating officer:', err)
+    toastStore.error(t('officers.update_failed'))
+  } finally {
+    isDeactivating.value = false
+  }
+}
+
+async function openDetail(officer: Officer) {
   detailOfficer.value = officer
   showDetailModal.value = true
+  try {
+    const response = await officerApi.getOfficer(officer.id)
+    if (response.rc === 0 && response.officer) {
+      const full = mapApiOfficer(response.officer)
+      full.evaluations = (response.officer.evaluations || []).map((e: any) => ({
+        evaluation_id: e.evaluation_id,
+        text: e.text,
+        date: e.date,
+        evaluator_name: e.evaluator_name || '',
+      }))
+      const idx = officers.value.findIndex((o: Officer) => o.id === officer.id)
+      if (idx > -1) officers.value[idx] = full
+      detailOfficer.value = full
+    }
+  } catch (err) {
+    console.error('Error loading officer details:', err)
+  }
 }
 
 function toggleRole(role: string) {
@@ -463,6 +565,29 @@ function handlePhotoChange(event: Event) {
   // This function is no longer used - ImageUpload handles its own events
 }
 
+async function openEvaluationsTab() {
+  if (!editingId.value) return
+  editTab.value = 'evaluations'
+  const officer = officers.value.find((o: Officer) => o.id === editingId.value)
+  if (!officer) return
+  isLoadingEvals.value = true
+  try {
+    const response = await officerApi.getOfficerEvaluations(editingId.value)
+    if (response.rc === 0 && response.evaluations) {
+      officer.evaluations = response.evaluations.map((e: any) => ({
+        evaluation_id: e.evaluation_id,
+        text: e.text,
+        date: e.date,
+        evaluator_name: e.evaluator_name || '',
+      }))
+    }
+  } catch (err) {
+    console.error('Error loading evaluations:', err)
+  } finally {
+    isLoadingEvals.value = false
+  }
+}
+
 function openInlineEvalForm() {
   inlineEvalForm.text = ''
   inlineEvalForm.date = new Date().toISOString().split('T')[0]!
@@ -475,38 +600,92 @@ function cancelInlineEvalForm() {
   inlineEvalError.value = ''
 }
 
-function confirmDeleteEval(officerId: string, evalIdx: number) {
-  evalDeleteTarget.value = { officerId, evalIdx }
+function confirmDeleteEval(officerId: string | null, evaluationId: number) {
+  if (!officerId) return
+  evalDeleteTarget.value = { officerId, evaluationId }
   showEvalDeleteModal.value = true
 }
 
-function submitInlineEvalForm() {
+async function submitInlineEvalForm() {
   if (!inlineEvalForm.text.trim()) {
     inlineEvalError.value = t('validation.required')
     return
   }
   if (!editingId.value) return
-  const officer = officers.value.find((o: Officer) => o.id === editingId.value)
-  if (officer) {
-    officer.evaluations.unshift({ text: inlineEvalForm.text.trim(), date: inlineEvalForm.date, evaluatorName: '' })
-  }
-  showInlineEvalForm.value = false
+  isSavingEval.value = true
   inlineEvalError.value = ''
+  try {
+    const response = await officerApi.addOfficerEvaluation({
+      user_id: editingId.value,
+      text: inlineEvalForm.text.trim(),
+      date: inlineEvalForm.date,
+    })
+    if (response.rc === 0) {
+      showInlineEvalForm.value = false
+      toastStore.success(t('officers.eval_add_success'))
+      // Reload evaluation list from server to get evaluator_name and correct data
+      const officer = officers.value.find((o: Officer) => o.id === editingId.value)
+      if (officer && editingId.value) {
+        isLoadingEvals.value = true
+        try {
+          const evResponse = await officerApi.getOfficerEvaluations(editingId.value)
+          if (evResponse.rc === 0 && evResponse.evaluations) {
+            officer.evaluations = evResponse.evaluations.map((e: any) => ({
+              evaluation_id: e.evaluation_id,
+              text: e.text,
+              date: e.date,
+              evaluator_name: e.evaluator_name || '',
+            }))
+          }
+        } finally {
+          isLoadingEvals.value = false
+        }
+      }
+    } else if (response.rc === 520) {
+      inlineEvalError.value = t('officers.officer_not_found')
+    } else {
+      inlineEvalError.value = response.message || t('officers.eval_add_failed')
+    }
+  } catch (err) {
+    console.error('Error adding evaluation:', err)
+    inlineEvalError.value = t('officers.eval_add_failed')
+  } finally {
+    isSavingEval.value = false
+  }
 }
 
-// Evaluations list for currently editing officer
+// Evaluations list for currently editing officer — sorted newest first
 const evalList = computed((): OfficerEvaluation[] => {
   if (!editingId.value) return []
   const officer = officers.value.find((o: Officer) => o.id === editingId.value)
-  return officer?.evaluations ?? []
+  return [...(officer?.evaluations ?? [])].sort((a, b) => b.date.localeCompare(a.date))
 })
 
-function handleDeleteEval() {
+function formatEvalDate(dateStr: string): string {
+  if (!dateStr) return ''
+  const d = new Date(dateStr)
+  return d.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
+}
+
+async function handleDeleteEval() {
   if (!evalDeleteTarget.value) return
-  const officer = officers.value.find((o: Officer) => o.id === evalDeleteTarget.value!.officerId)
-  if (officer) officer.evaluations.splice(evalDeleteTarget.value.evalIdx, 1)
+  const { officerId, evaluationId } = evalDeleteTarget.value
   showEvalDeleteModal.value = false
   evalDeleteTarget.value = null
+  try {
+    const response = await officerApi.deleteOfficerEvaluation(evaluationId)
+    if (response.rc === 0 || response.rc === 527) {
+      const officer = officers.value.find((o: Officer) => o.id === officerId)
+      if (officer) {
+        officer.evaluations = officer.evaluations.filter((e: OfficerEvaluation) => e.evaluation_id !== evaluationId)
+      }
+      if (response.rc === 527) {
+        toastStore.info(t('officers.eval_not_found'))
+      }
+    }
+  } catch (err) {
+    console.error('Error deleting evaluation:', err)
+  }
 }
 
 function getInitials(name: string): string {
@@ -605,7 +784,7 @@ function toggleSort(col: 'first_name' | 'last_name' | 'community' | 'created_on'
               <button class="retry-btn" @click="() => fetchOfficers()">{{ t('common.retry') }}</button>
             </td>
           </tr>
-          <tr v-for="officer in filteredOfficers" :key="officer.id">
+          <tr v-for="officer in filteredOfficers" :key="officer.id" :class="{ 'row--inactive': !officer.active }">
             <td>
               <div class="officer-name-cell">
                 <div v-if="officer.picture" class="avatar">
@@ -635,7 +814,10 @@ function toggleSort(col: 'first_name' | 'last_name' | 'community' | 'created_on'
             </td>
             <td class="muted">{{ officer.registrationDate }}</td>
             <td>
-              <Badge type="status" :value="officer.active ? 'active' : 'inactive'" />
+              <div class="tags-cell">
+                <Badge type="status" :value="officer.active ? 'active' : 'inactive'" />
+                <span v-if="officer.lastLogin === null" class="badge-pending-login">Not yet logged in</span>
+              </div>
             </td>
             <td>
               <div class="action-group">
@@ -683,7 +865,7 @@ function toggleSort(col: 'first_name' | 'last_name' | 'community' | 'created_on'
             </button>
             <button
               :class="['modal-tab-btn', { 'modal-tab-btn--active': editTab === 'evaluations' }]"
-              @click="editTab = 'evaluations'"
+              @click="openEvaluationsTab"
             >
               {{ t('officers.tab_evaluations') }}
               <span v-if="evalList.length" class="modal-tab-badge">{{ evalList.length }}</span>
@@ -733,6 +915,10 @@ function toggleSort(col: 'first_name' | 'last_name' | 'community' | 'created_on'
               <label class="field-label">{{ t('officers.mobile') }} <span class="required">*</span></label>
               <input v-model="form.mobile" type="tel" class="field-input" :placeholder="t('officers.mobile_placeholder')" />
               <span v-if="formErrors.mobile" class="error-msg">{{ formErrors.mobile }}</span>
+              <div v-if="phoneChanged" class="phone-change-warning">
+                <Icon name="lucide:alert-triangle" :size="14" class="phone-change-warning__icon" />
+                <span>{{ t('officers.phone_change_warning') }}</span>
+              </div>
             </div>
             <div class="form-field" :class="{ error: formErrors.title }">
               <label class="field-label">{{ t('officers.title') }} <span class="required">*</span></label>
@@ -788,6 +974,10 @@ function toggleSort(col: 'first_name' | 'last_name' | 'community' | 'created_on'
               <input v-model="form.active" type="checkbox" />
               <span>{{ form.active ? t('common.active') : t('common.inactive') }}</span>
             </label>
+            <div v-if="deactivateWarning" class="phone-change-warning">
+              <Icon name="lucide:alert-triangle" :size="14" class="phone-change-warning__icon" />
+              <span>{{ t('officers.deactivate_warning') }}</span>
+            </div>
           </div>
 
           </template><!-- end details tab -->
@@ -802,8 +992,14 @@ function toggleSort(col: 'first_name' | 'last_name' | 'community' | 'created_on'
               </button>
             </div>
 
+            <!-- Loading state -->
+            <div v-if="isLoadingEvals" class="eval-loading">
+              <Icon name="lucide:loader-2" :size="18" class="eval-loading__spinner" />
+              <span>{{ t('common.loading') }}</span>
+            </div>
+
             <!-- Inline Add Form -->
-            <div v-if="showInlineEvalForm" class="eval-inline-form">
+            <div v-if="!isLoadingEvals && showInlineEvalForm" class="eval-inline-form">
               <div class="form-field" :class="{ error: inlineEvalError }">
                 <label class="field-label">{{ t('officers.eval_text') }} <span class="required">*</span></label>
                 <textarea v-model="inlineEvalForm.text" class="field-textarea" rows="3" :placeholder="t('officers.eval_text_placeholder')" />
@@ -814,27 +1010,27 @@ function toggleSort(col: 'first_name' | 'last_name' | 'community' | 'created_on'
                 <input v-model="inlineEvalForm.date" type="date" class="field-input" />
               </div>
               <div class="eval-inline-actions">
-                <button class="btn-secondary-sm" @click="cancelInlineEvalForm">{{ t('common.cancel') }}</button>
-                <button class="btn-primary-sm" @click="submitInlineEvalForm">{{ t('common.save') }}</button>
+                <button class="btn-secondary-sm" :disabled="isSavingEval" @click="cancelInlineEvalForm">{{ t('common.cancel') }}</button>
+                <button class="btn-primary-sm" :disabled="isSavingEval" @click="submitInlineEvalForm">{{ isSavingEval ? t('common.saving') : t('common.save') }}</button>
               </div>
             </div>
 
             <!-- Eval List -->
-            <div v-if="evalList.length" class="eval-list">
-              <div v-for="(ev, idx) in evalList" :key="idx" class="eval-item">
+            <div v-if="!isLoadingEvals && evalList.length" class="eval-list">
+              <div v-for="ev in evalList" :key="ev.evaluation_id" class="eval-item">
                 <div class="eval-meta">
-                  <div class="eval-meta-left">
-                    <span class="eval-evaluator">{{ ev.evaluatorName || t('officers.unknown') }}</span>
-                    <span class="eval-date">{{ ev.date }}</span>
+                  <span class="eval-date">{{ formatEvalDate(ev.date) }}</span>
+                  <div class="eval-meta-right">
+                    <span class="eval-evaluator">by {{ ev.evaluator_name || t('officers.unknown') }}</span>
+                    <button class="eval-delete-btn" :title="t('common.delete')" @click="confirmDeleteEval(editingId, ev.evaluation_id)">
+                      <Icon name="lucide:trash-2" :size="13" />
+                    </button>
                   </div>
-                  <button class="eval-delete-btn" :title="t('common.delete')" @click="confirmDeleteEval(editingId, idx)">
-                    <Icon name="lucide:trash-2" :size="13" />
-                  </button>
                 </div>
                 <p class="eval-text">{{ ev.text }}</p>
               </div>
             </div>
-            <p v-else-if="!showInlineEvalForm" class="eval-empty">{{ t('officers.no_evaluations') }}</p>
+            <p v-else-if="!isLoadingEvals && !showInlineEvalForm" class="eval-empty">{{ t('officers.no_evaluations') }}</p>
           </div>
         </div>
       </template>
@@ -912,10 +1108,8 @@ function toggleSort(col: 'first_name' | 'last_name' | 'community' | 'created_on'
             <div v-if="detailOfficer.evaluations.length" class="eval-list">
               <div v-for="(ev, idx) in detailOfficer.evaluations" :key="idx" class="eval-item">
                 <div class="eval-meta">
-                  <div class="eval-meta-left">
-                    <span class="eval-evaluator">{{ ev.evaluatorName || t('officers.unknown') }}</span>
-                    <span class="eval-date">{{ ev.date }}</span>
-                  </div>
+                  <span class="eval-date">{{ formatEvalDate(ev.date) }}</span>
+                  <span class="eval-evaluator">by {{ ev.evaluator_name || t('officers.unknown') }}</span>
                 </div>
                 <p class="eval-text">{{ ev.text }}</p>
               </div>
@@ -923,6 +1117,21 @@ function toggleSort(col: 'first_name' | 'last_name' | 'community' | 'created_on'
             <p v-else class="eval-empty">{{ t('officers.no_evaluations') }}</p>
           </div>
         </div>
+      </template>
+    </AppModal>
+
+    <!-- Phone Change Confirmation -->
+    <AppModal
+      :show="showPhoneConfirm"
+      :title="t('officers.phone_confirm_title')"
+      :cancel-text="t('common.cancel')"
+      :ok-text="t('common.continue')"
+      @close="showPhoneConfirm = false"
+      @cancel="showPhoneConfirm = false"
+      @ok="showPhoneConfirm = false; doSave()"
+    >
+      <template #default>
+        <p class="modal-confirm-message">{{ t('officers.phone_confirm_message') }}</p>
       </template>
     </AppModal>
 
@@ -946,15 +1155,31 @@ function toggleSort(col: 'first_name' | 'last_name' | 'community' | 'created_on'
       :show="showDeleteModal"
       :title="t('officers.delete_title')"
       :cancel-text="t('common.cancel')"
-      :ok-text="t('common.delete')"
+      :ok-text="isDeleting ? t('common.deleting') : t('common.delete')"
       :ok-disabled="isDeleting"
-      @close="showDeleteModal = false; deleteError = ''"
-      @cancel="showDeleteModal = false; deleteError = ''"
+      @close="showDeleteModal = false"
+      @cancel="showDeleteModal = false"
       @ok="handleDelete"
     >
       <template #default>
         <p class="modal-confirm-message">{{ t('officers.delete_message', { name: deleteTarget?.fullName ?? '' }) }}</p>
-        <p v-if="deleteError" class="modal-error-message">{{ deleteError }}</p>
+        <p class="modal-confirm-subtext">{{ t('officers.delete_cannot_undo') }}</p>
+      </template>
+    </AppModal>
+
+    <!-- Cannot Delete Modal (rc: 526) -->
+    <AppModal
+      :show="showCannotDeleteModal"
+      :title="t('officers.cannot_delete_title')"
+      :cancel-text="t('common.close')"
+      :ok-text="isDeactivating ? t('common.deactivating') : t('officers.deactivate_officer')"
+      :ok-disabled="isDeactivating"
+      @close="showCannotDeleteModal = false; deleteTarget = null"
+      @cancel="showCannotDeleteModal = false; deleteTarget = null"
+      @ok="handleDeactivateFromDelete"
+    >
+      <template #default>
+        <p class="modal-confirm-message">{{ t('officers.cannot_delete_message') }}</p>
       </template>
     </AppModal>
   </div>
@@ -1139,6 +1364,21 @@ function toggleSort(col: 'first_name' | 'last_name' | 'community' | 'created_on'
 
 .data-table tr:last-child td { border-bottom: none; }
 .data-table tr:hover td { background: var(--color-bg-elevated); }
+.data-table tr.row--inactive { opacity: 0.6; }
+
+.badge-pending-login {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  background: rgba(245, 158, 11, 0.12);
+  color: #d97706;
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  white-space: nowrap;
+}
+.data-table tr.row--inactive:hover td { background: transparent; }
 
 .empty-row {
   text-align: center;
@@ -1173,8 +1413,14 @@ function toggleSort(col: 'first_name' | 'last_name' | 'community' | 'created_on'
 .modal-confirm-message {
   font-size: var(--font-size-md);
   color: var(--color-text-secondary);
-  margin: 0 0 var(--space-3);
+  margin: 0 0 var(--space-2);
   line-height: 1.6;
+}
+
+.modal-confirm-subtext {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+  margin: 0;
 }
 
 .modal-error-message {
@@ -1398,6 +1644,26 @@ function toggleSort(col: 'first_name' | 'last_name' | 'community' | 'created_on'
 
 .error-msg { font-size: var(--font-size-xs); color: var(--color-critical); }
 
+.phone-change-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: color-mix(in srgb, #f59e0b 12%, transparent);
+  border: 1px solid color-mix(in srgb, #f59e0b 40%, transparent);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-xs);
+  color: #d97706;
+  line-height: 1.5;
+}
+
+.phone-change-warning__icon {
+  flex-shrink: 0;
+  margin-top: 1px;
+  color: #f59e0b;
+}
+
 .checkbox-group {
   display: flex;
   flex-wrap: wrap;
@@ -1567,6 +1833,24 @@ function toggleSort(col: 'first_name' | 'last_name' | 'community' | 'created_on'
   padding-top: 0;
 }
 
+.eval-loading {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-4) 0;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+}
+
+.eval-loading__spinner {
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
 /* Evaluations */
 .eval-section {
   border-top: 1px solid var(--color-border);
@@ -1620,9 +1904,10 @@ function toggleSort(col: 'first_name' | 'last_name' | 'community' | 'created_on'
   align-items: center;
   justify-content: space-between;
   margin-bottom: var(--space-1);
+  gap: var(--space-2);
 }
 
-.eval-meta-left {
+.eval-meta-right {
   display: flex;
   align-items: center;
   gap: var(--space-2);
@@ -1696,14 +1981,14 @@ function toggleSort(col: 'first_name' | 'last_name' | 'community' | 'created_on'
 
 .eval-evaluator {
   font-size: var(--font-size-xs);
-  font-weight: 600;
+  font-weight: 500;
   color: var(--color-accent);
 }
 
 .eval-date {
   font-size: var(--font-size-xs);
-  color: var(--color-text-muted);
-  font-family: monospace;
+  font-weight: 600;
+  color: var(--color-text-primary);
 }
 
 .eval-text {

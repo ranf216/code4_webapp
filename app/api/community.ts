@@ -16,6 +16,8 @@ export interface Community {
   is_active: boolean
   created_on: string
   last_update: string | null
+  officer_count?: number
+  resident_count?: number
 }
 
 export interface GetCommunitiesResponse extends ApiResponse {

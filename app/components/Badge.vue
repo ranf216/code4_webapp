@@ -233,6 +233,12 @@ const badgeClass = computed((): string => {
   border: 1px solid rgba(245, 158, 11, 0.3);
 }
 
+.badge--status-pending {
+  background: rgba(245, 158, 11, 0.12);
+  color: #d97706;
+  border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
 .badge--status-inactive {
   background: rgba(148, 163, 184, 0.15);
   color: #94a3b8;
