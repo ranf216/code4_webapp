@@ -1,4 +1,12 @@
 <script setup lang="ts">
+import { onMounted } from 'vue'
+import { residentApi } from '~/api/resident'
+import LoadingModal from '~/components/LoadingModal.vue'
+import ResidentsAddForm from '~/components/residents/AddForm.vue'
+import ResidentsEditModal from '~/components/residents/EditModal.vue'
+import { ApiError } from '~/api/base'
+import { useToastStore } from '~/stores/toast'
+import type { Resident as ApiResident } from '~/api/types/resident'
 import type { Resident } from '~/types/resident'
 
 const props = defineProps<{
@@ -7,54 +15,50 @@ const props = defineProps<{
 }>()
 
 const { t } = useTranslation()
+const toastStore = useToastStore()
 
 // Sample data
-const residents = ref<Resident[]>([
-  {
-    id: 'RS-0001',
-    fullName: 'Alice Brown',
-    mobile: '+1 (555) 123-4567',
-    email: 'alice.brown@email.com',
-    address: '123 Main St, Apt 4B',
-    registrationDate: '2024-01-15',
-    active: true,
-    communicationTest: false,
-    vehicleNumbers: ['ABC-1234', 'XYZ-5678'],
-  },
-  {
-    id: 'RS-0002',
-    fullName: 'Bob Wilson',
-    mobile: '+1 (555) 234-5678',
-    email: 'bob.wilson@email.com',
-    address: '456 Oak Ave, Unit 12',
-    registrationDate: '2024-02-20',
-    active: true,
-    communicationTest: true,
-    vehicleNumbers: ['DEF-9012'],
-  },
-  {
-    id: 'RS-0003',
-    fullName: 'Carol Davis',
-    mobile: '+1 (555) 345-6789',
-    email: 'carol.davis@email.com',
-    address: '789 Pine Rd, Suite 3',
-    registrationDate: '2024-03-10',
-    active: false,
-    communicationTest: false,
-    vehicleNumbers: [],
-  },
-  {
-    id: 'RS-0004',
-    fullName: 'David Miller',
-    mobile: '+1 (555) 456-7890',
-    email: 'david.miller@email.com',
-    address: '321 Elm St, House 5',
-    registrationDate: '2024-04-05',
-    active: true,
-    communicationTest: false,
-    vehicleNumbers: ['GHI-3456', 'JKL-7890'],
-  },
-])
+const residents = ref<Resident[]>([])
+const totalCount = ref(0)
+const isLoadingResidents = ref(false)
+const loadError = ref('')
+
+function mapApiResident(resident: ApiResident): Resident {
+  return {
+    id: resident.user_id,
+    fullName: [resident.first_name, resident.last_name].filter(Boolean).join(' '),
+    mobile: resident.phone_num || '',
+    email: resident.email?.endsWith('@placeholder.local') ? '' : resident.email || '',
+    address: resident.address || '',
+    registrationDate: resident.created_on || '',
+    active: resident.is_active,
+    communicationTest: resident.communication_test,
+    vehicleNumbers: resident.vehicles || [],
+  }
+}
+
+async function loadResidents() {
+  isLoadingResidents.value = true
+  loadError.value = ''
+  try {
+    const response = await residentApi.getResidents({
+      community_id: Number(props.communityId),
+      include_inactive: false,
+      search_text: '',
+      sort_by: '',
+      sort_dir: 'asc',
+    }, { showLoading: false })
+    residents.value = response.residents.map(mapApiResident)
+    totalCount.value = response.total_count
+  } catch (error) {
+    console.error('Failed to load residents:', error)
+    residents.value = []
+    totalCount.value = 0
+    loadError.value = t('residents.load_failed')
+  } finally {
+    isLoadingResidents.value = false
+  }
+}
 
 // Filters
 const statusFilter = ref('all')
@@ -142,11 +146,32 @@ const sortedResidents = computed(() => {
   })
 })
 
-const totalEntries = computed(() => filteredResidents.value.length)
+const totalEntries = computed(() => totalCount.value)
 
 // Modals
+const showAddModal = ref(false)
+const showEditModal = ref(false)
 const showDeleteModal = ref(false)
+const showCannotDeleteModal = ref(false)
 const selectedResident = ref<Resident | null>(null)
+const isDeleting = ref(false)
+const isDeactivating = ref(false)
+
+function handleResidentCreated() {
+  showAddModal.value = false
+  loadResidents()
+}
+
+function openEditModal(resident: Resident) {
+  selectedResident.value = resident
+  showEditModal.value = true
+}
+
+function handleResidentUpdated() {
+  showEditModal.value = false
+  selectedResident.value = null
+  loadResidents()
+}
 
 function openDeleteModal(resident: Resident) {
   selectedResident.value = resident
@@ -158,14 +183,46 @@ function closeDeleteModal() {
   selectedResident.value = null
 }
 
-function handleDeleteResident() {
-  if (selectedResident.value) {
-    const index = residents.value.findIndex((r: Resident) => r.id === selectedResident.value?.id)
-    if (index > -1) {
-      residents.value.splice(index, 1)
+async function handleDeleteResident() {
+  if (!selectedResident.value) return
+
+  isDeleting.value = true
+  try {
+    await residentApi.deleteResident(selectedResident.value.id, { showLoading: false })
+    toastStore.success(t('residents.delete_success'))
+    closeDeleteModal()
+    await loadResidents()
+  } catch (error) {
+    if (error instanceof ApiError && error.rc === 543) {
+      showDeleteModal.value = false
+      showCannotDeleteModal.value = true
+    } else if (error instanceof ApiError && error.rc === 540) {
+      toastStore.info(t('residents.not_found'))
+      closeDeleteModal()
+      await loadResidents()
+    } else {
+      toastStore.error(error instanceof ApiError ? error.message : t('residents.delete_failed'))
     }
+  } finally {
+    isDeleting.value = false
   }
-  closeDeleteModal()
+}
+
+async function deactivateSelectedResident() {
+  if (!selectedResident.value) return
+
+  isDeactivating.value = true
+  try {
+    await residentApi.updateResident({ user_id: selectedResident.value.id, is_active: false }, { showLoading: false })
+    toastStore.success(t('residents.deactivate_success'))
+    showCannotDeleteModal.value = false
+    selectedResident.value = null
+    await loadResidents()
+  } catch (error) {
+    toastStore.error(error instanceof ApiError ? error.message : t('residents.update_failed'))
+  } finally {
+    isDeactivating.value = false
+  }
 }
 
 function toggleActive(resident: Resident) {
@@ -175,10 +232,14 @@ function toggleActive(resident: Resident) {
 function toggleCommunicationTest(resident: Resident) {
   resident.communicationTest = !resident.communicationTest
 }
+
+onMounted(loadResidents)
 </script>
 
 <template>
   <div class="residents-management">
+    <LoadingModal :show="isLoadingResidents" :message="t('common.loading')" />
+
     <!-- Header -->
     <div class="residents-management__header">
       <div class="residents-management__header-left">
@@ -187,9 +248,7 @@ function toggleCommunicationTest(resident: Resident) {
           {{ communityName }} • {{ t('residents.total', { count: String(totalEntries) }) }}
         </p>
       </div>
-      <NuxtLink :to="`/communities/${communityId}/residents/new`">
-        <AppButton :text="t('residents.add_resident')" icon="lucide:plus" type="primary" />
-      </NuxtLink>
+      <AppButton :text="t('residents.add_resident')" icon="lucide:plus" type="primary" @click="showAddModal = true" />
     </div>
 
     <!-- Toolbar -->
@@ -262,7 +321,19 @@ function toggleCommunicationTest(resident: Resident) {
           </tr>
         </thead>
         <tbody>
-          <tr v-for="resident in sortedResidents" :key="resident.id">
+          <tr v-if="isLoadingResidents">
+            <td colspan="9" class="empty-row">
+              <Icon name="lucide:loader-2" :size="16" class="animate-spin" />
+              {{ t('common.loading') }}
+            </td>
+          </tr>
+          <tr v-else-if="loadError">
+            <td colspan="9" class="empty-row error-row">
+              {{ loadError }}
+              <button class="retry-btn" @click="loadResidents">{{ t('common.retry') }}</button>
+            </td>
+          </tr>
+          <tr v-for="resident in sortedResidents" v-else :key="resident.id">
             <td>
               <div class="resident-name">
                 <span class="resident-name__text">{{ resident.fullName }}</span>
@@ -296,18 +367,38 @@ function toggleCommunicationTest(resident: Resident) {
             </td>
             <td>
               <div class="action-group">
-                <NuxtLink :to="`/communities/${communityId}/residents/edit/${resident.id}`" class="action-btn action-btn--icon">
+                <button class="action-btn action-btn--icon" :title="t('common.edit')" @click="openEditModal(resident)">
                   <Icon name="lucide:pencil" :size="14" />
-                </NuxtLink>
+                </button>
                 <button class="action-btn action-btn--icon" @click="openDeleteModal(resident)">
                   <Icon name="lucide:trash-2" :size="14" />
                 </button>
               </div>
             </td>
           </tr>
+          <tr v-if="!isLoadingResidents && !loadError && !sortedResidents.length">
+            <td colspan="9" class="empty-row">No residents found</td>
+          </tr>
         </tbody>
       </table>
     </div>
+
+    <ResidentsAddForm
+      :show="showAddModal"
+      :community-id="communityId"
+      :community-name="communityName"
+      @close="showAddModal = false"
+      @submitted="handleResidentCreated"
+    />
+
+    <ResidentsEditModal
+      :show="showEditModal"
+      :resident-id="selectedResident?.id || ''"
+      :community-id="communityId"
+      :community-name="communityName"
+      @close="showEditModal = false"
+      @submitted="handleResidentUpdated"
+    />
 
     <!-- Delete Confirmation Modal -->
     <AppModal
@@ -315,10 +406,23 @@ function toggleCommunicationTest(resident: Resident) {
       :title="t('residents.delete_title')"
       :message="t('residents.delete_message', { name: selectedResident?.fullName || '' })"
       :cancel-text="t('common.cancel')"
-      :ok-text="t('common.delete')"
+      :ok-text="isDeleting ? t('common.deleting') : t('common.delete')"
+      :ok-disabled="isDeleting"
       @close="closeDeleteModal"
       @cancel="closeDeleteModal"
       @ok="handleDeleteResident"
+    />
+
+    <AppModal
+      :show="showCannotDeleteModal"
+      :title="t('residents.cannot_delete_title')"
+      :message="t('residents.cannot_delete_message')"
+      :cancel-text="t('common.close')"
+      :ok-text="isDeactivating ? t('common.saving') : t('residents.deactivate')"
+      :ok-disabled="isDeactivating"
+      @close="showCannotDeleteModal = false"
+      @cancel="showCannotDeleteModal = false"
+      @ok="deactivateSelectedResident"
     />
   </div>
 </template>

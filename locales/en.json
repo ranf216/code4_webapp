@@ -89,6 +89,7 @@
     "actions": "Actions",
     "yes": "Yes",
     "no": "No",
+    "retry": "Retry",
     "logout": "Logout"
   },
   "communities": {
@@ -145,6 +146,10 @@
     "filter_inactive": "Inactive",
     "full_name": "Full Name",
     "full_name_placeholder": "Enter full name",
+    "first_name": "First Name",
+    "first_name_placeholder": "Enter first name",
+    "last_name": "Last Name",
+    "last_name_placeholder": "Enter last name",
     "mobile": "Mobile Number",
     "mobile_placeholder": "Enter mobile number",
     "email": "Email",
@@ -171,7 +176,21 @@
     "vehicle_hint": "Press Enter or click Add to add multiple vehicles",
     "mobile_change_warning": "If mobile number is changed, the resident must be identified again before login",
     "vehicle_readonly_hint": "Vehicle numbers cannot be edited from this screen",
-    "no_vehicles": "No vehicles registered"
+    "no_vehicles": "No vehicles registered",
+    "no_residents": "No residents found",
+    "load_failed": "Failed to load residents. Please try again.",
+    "select_community": "Select a community",
+    "instructions": "Instructions",
+    "instructions_placeholder": "Enter special instructions for officers",
+    "invalid_mobile": "Please enter a valid mobile number",
+    "invalid_email": "Please enter a valid email address",
+    "mobile_exists": "This phone number is already registered in the system",
+    "email_exists": "This email is already in use by another user",
+    "community_not_found": "Selected community was not found. Please refresh and try again.",
+    "community_inactive": "Selected community is not active. Please choose an active community.",
+    "load_communities_failed": "Failed to load communities. Please try again.",
+    "create_failed": "Failed to create resident. Please try again.",
+    "create_success": "Resident created successfully"
   },
   "map": {
     "title": "2D Map Management",

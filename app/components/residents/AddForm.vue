@@ -1,42 +1,43 @@
 <script setup lang="ts">
-import { ref, reactive, computed } from 'vue'
-import type { ResidentFormData } from '~/types/resident'
-
-// Community option interface
-interface CommunityOption {
-  id: string
-  name: string
-}
+import { ref, reactive, computed, watch } from 'vue'
+import { residentApi } from '~/api/resident'
+import { ApiError } from '~/api/base'
+import LoadingModal from '~/components/LoadingModal.vue'
+import { useToastStore } from '~/stores/toast'
 
 const props = defineProps<{
+  show: boolean
   communityId: string
   communityName: string
-  communities?: CommunityOption[]
+}>()
+
+const emit = defineEmits<{
+  (e: 'close'): void
+  (e: 'submitted'): void
 }>()
 
 const { t } = useTranslation()
-const router = useRouter()
+const toastStore = useToastStore()
 
-const form = reactive<ResidentFormData & { communityId: string }>({
-  fullName: '',
+const form = reactive({
+  firstName: '',
+  lastName: '',
   mobile: '',
   email: '',
   address: '',
+  instructions: '',
   communicationTest: false,
-  vehicleNumbers: [],
-  communityId: props.communityId,
+  vehicleNumbers: [] as string[],
+  communityId: Number(props.communityId) || 0,
 })
 
-// Default communities list (can be overridden by prop)
-const defaultCommunities: CommunityOption[] = [
-  { id: props.communityId, name: props.communityName },
-  // Add more communities as needed
-]
-
-const communitiesList = computed(() => props.communities?.length ? props.communities : defaultCommunities)
-
 const isSubmitting = ref(false)
+const submitError = ref('')
 const errors = reactive<Record<string, string>>({})
+
+const isFormValid = computed(() =>
+  !!form.firstName.trim() && !!form.mobile.trim() && form.communityId > 0
+)
 
 const newVehicle = ref('')
 
@@ -52,80 +53,123 @@ function removeVehicle(index: number) {
 }
 
 function validate(): boolean {
-  errors.fullName = !form.fullName.trim() ? t('validation.required') : ''
-  errors.mobile = !form.mobile.trim() ? t('validation.required') : ''
-  errors.email = !form.email.trim() ? t('validation.required') : ''
-  errors.address = !form.address.trim() ? t('validation.required') : ''
+  const phonePattern = /^\+?[\d\s().-]{7,}$/
+  const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
-  return !errors.fullName && !errors.mobile && !errors.email && !errors.address
+  errors.firstName = !form.firstName.trim() ? t('validation.required') : ''
+  errors.mobile = !form.mobile.trim()
+    ? t('validation.required')
+    : !phonePattern.test(form.mobile.trim()) ? t('residents.invalid_mobile') : ''
+  errors.email = form.email.trim() && !emailPattern.test(form.email.trim())
+    ? t('residents.invalid_email')
+    : ''
+  errors.communityId = form.communityId <= 0 ? t('validation.required') : ''
+
+  return !errors.firstName && !errors.mobile && !errors.email && !errors.communityId
+}
+
+function handleSubmitError(error: unknown) {
+  if (error instanceof ApiError) {
+    if (error.rc === 224 || error.rc === 241) errors.mobile = t(error.rc === 224 ? 'residents.invalid_mobile' : 'residents.mobile_exists')
+    else if (error.rc === 235 || error.rc === 240) errors.email = t(error.rc === 235 ? 'residents.invalid_email' : 'residents.email_exists')
+    else if (error.rc === 500 || error.rc === 505) errors.communityId = t(error.rc === 500 ? 'residents.community_not_found' : 'residents.community_inactive')
+    else submitError.value = error.message
+    return
+  }
+  submitError.value = t('residents.create_failed')
+}
+
+function resetForm() {
+  form.firstName = ''
+  form.lastName = ''
+  form.mobile = ''
+  form.email = ''
+  form.address = ''
+  form.instructions = ''
+  form.communicationTest = false
+  form.vehicleNumbers = []
+  form.communityId = Number(props.communityId) || 0
+  newVehicle.value = ''
+  submitError.value = ''
+  Object.keys(errors).forEach((key) => { errors[key] = '' })
 }
 
 function handleCancel() {
-  router.push(`/communities/${props.communityId}/residents`)
+  emit('close')
 }
 
 async function handleSubmit() {
   if (!validate()) return
 
+  addVehicle()
   isSubmitting.value = true
-  // Simulate API call
-  await new Promise(r => setTimeout(r, 500))
-  isSubmitting.value = false
-
-  // Navigate back to residents list
-  router.push(`/communities/${props.communityId}/residents`)
+  submitError.value = ''
+  try {
+    await residentApi.addResident({
+      first_name: form.firstName.trim(),
+      last_name: form.lastName.trim() || undefined,
+      phone_num: form.mobile.trim(),
+      email: form.email.trim() || undefined,
+      community_id: form.communityId,
+      address: form.address.trim() || undefined,
+      vehicles: form.vehicleNumbers,
+      instructions: form.instructions.trim() || undefined,
+      communication_test: form.communicationTest,
+    }, { showLoading: false })
+    toastStore.success(t('residents.create_success'))
+    emit('submitted')
+    emit('close')
+  } catch (error) {
+    handleSubmitError(error)
+  } finally {
+    isSubmitting.value = false
+  }
 }
+
+watch(() => props.show, (show: boolean) => {
+  if (show) resetForm()
+})
 </script>
 
 <template>
-  <div class="add-resident-form">
-    <!-- Header -->
-    <div class="form-header">
-      <h2 class="form-title">{{ t('residents.add_title') }}</h2>
-      <div class="form-actions">
-        <AppButton :text="t('common.cancel')" type="secondary" @click="handleCancel" />
-        <AppButton
-          :text="t('common.save')"
-          type="primary"
-          icon="lucide:save"
-          :disabled="isSubmitting"
-          @click="handleSubmit"
-        />
-      </div>
-    </div>
+  <AppDialogModal :show="show" :title="t('residents.add_title')" max-width="900px" @close="handleCancel">
+    <div class="add-resident-form">
+      <LoadingModal :show="isSubmitting" :message="t('common.loading')" />
 
-    <!-- Form -->
-    <div class="form-body">
+      <div class="form-body">
       <!-- Left Column: Basic Information -->
       <div class="form-column form-column--left">
         <div class="form-section">
           <h3 class="section-title">{{ t('residents.basic_info') }}</h3>
 
           <div class="form-field">
-            <label class="field-label">
-              {{ t('residents.community') }}
-              <span class="required">*</span>
-            </label>
-            <select v-model="form.communityId" class="field-input">
-              <option v-for="comm in communitiesList" :key="comm.id" :value="comm.id">
-                {{ comm.name }}
-              </option>
-            </select>
+            <span class="field-label">{{ t('residents.community') }}</span>
+            <span class="field-value">{{ communityName }}</span>
           </div>
 
           <div class="form-field">
             <label class="field-label">
-              {{ t('residents.full_name') }}
+              {{ t('residents.first_name') }}
               <span class="required">*</span>
             </label>
             <input
-              v-model="form.fullName"
+              v-model="form.firstName"
               type="text"
               class="field-input"
-              :placeholder="t('residents.full_name_placeholder')"
-              :class="{ error: errors.fullName }"
+              :placeholder="t('residents.first_name_placeholder')"
+              :class="{ error: errors.firstName }"
             />
-            <span v-if="errors.fullName" class="error-message">{{ errors.fullName }}</span>
+            <span v-if="errors.firstName" class="error-message">{{ errors.firstName }}</span>
+          </div>
+
+          <div class="form-field">
+            <label class="field-label">{{ t('residents.last_name') }}</label>
+            <input
+              v-model="form.lastName"
+              type="text"
+              class="field-input"
+              :placeholder="t('residents.last_name_placeholder')"
+            />
           </div>
 
           <div class="form-field">
@@ -145,10 +189,7 @@ async function handleSubmit() {
           </div>
 
           <div class="form-field">
-            <label class="field-label">
-              {{ t('residents.email') }}
-              <span class="required">*</span>
-            </label>
+            <label class="field-label">{{ t('residents.email') }}</label>
             <input
               v-model="form.email"
               type="email"
@@ -160,10 +201,7 @@ async function handleSubmit() {
           </div>
 
           <div class="form-field">
-            <label class="field-label">
-              {{ t('residents.address') }}
-              <span class="required">*</span>
-            </label>
+            <label class="field-label">{{ t('residents.address') }}</label>
             <input
               v-model="form.address"
               type="text"
@@ -180,6 +218,15 @@ async function handleSubmit() {
       <div class="form-column form-column--right">
         <div class="form-section">
           <h3 class="section-title">{{ t('residents.settings') }}</h3>
+
+          <div class="form-field">
+            <label class="field-label">{{ t('residents.instructions') }}</label>
+            <textarea
+              v-model="form.instructions"
+              class="field-input field-input--textarea"
+              :placeholder="t('residents.instructions_placeholder')"
+            />
+          </div>
 
           <div class="form-field">
             <label class="checkbox-label">
@@ -225,7 +272,7 @@ async function handleSubmit() {
         <div class="form-section form-section--info">
           <div class="info-row">
             <span class="info-label">{{ t('residents.community') }}:</span>
-            <span class="info-value">{{ communitiesList.find(c => c.id === form.communityId)?.name || communityName }}</span>
+            <span class="info-value">{{ communityName }}</span>
           </div>
           <div class="info-row">
             <span class="info-label">{{ t('residents.status') }}:</span>
@@ -237,8 +284,21 @@ async function handleSubmit() {
           </div>
         </div>
       </div>
+      </div>
+      <p v-if="submitError" class="submit-error">{{ submitError }}</p>
     </div>
-  </div>
+
+    <template #footer>
+      <AppButton :text="t('common.cancel')" type="secondary" :disabled="isSubmitting" @click="handleCancel" />
+      <AppButton
+        :text="isSubmitting ? t('common.saving') : t('common.save')"
+        type="primary"
+        icon="lucide:save"
+        :disabled="isSubmitting || !isFormValid"
+        @click="handleSubmit"
+      />
+    </template>
+  </AppDialogModal>
 </template>
 
 <style scoped>
@@ -246,23 +306,15 @@ async function handleSubmit() {
   width: 100%;
 }
 
-.form-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: var(--space-6);
-}
-
-.form-title {
-  font-size: var(--font-size-xl);
-  font-weight: 700;
+.field-value {
+  display: block;
+  min-height: 44px;
+  padding: 12px var(--space-4);
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
   color: var(--color-text-primary);
-  margin: 0;
-}
-
-.form-actions {
-  display: flex;
-  gap: var(--space-3);
+  font-size: var(--font-size-sm);
 }
 
 .form-body {
@@ -337,6 +389,19 @@ async function handleSubmit() {
 
 .field-input:focus {
   border-color: var(--color-accent);
+}
+
+.field-input--textarea {
+  height: auto;
+  min-height: 100px;
+  padding: var(--space-3) var(--space-4);
+  resize: vertical;
+}
+
+.submit-error {
+  margin: 0;
+  color: var(--color-critical);
+  font-size: var(--font-size-sm);
 }
 
 .field-input.error {

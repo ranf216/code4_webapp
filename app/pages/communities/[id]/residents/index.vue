@@ -1,11 +1,28 @@
 <script setup lang="ts">
+import { onMounted, ref } from 'vue'
+import { communityApi } from '~/api/community'
+
 definePageMeta({ layout: 'default' })
 
 const route = useRoute()
 const communityId = route.params.id as string
+const communityName = ref('Loading...')
 
-// Mock community name - in real app, fetch from API
-const communityName = ref('Sunset Heights')
+async function loadCommunity() {
+  try {
+    const response = await communityApi.getCommunity(Number(communityId))
+    if (response.rc === 0 && response.community) {
+      communityName.value = response.community.name
+    } else {
+      communityName.value = 'Unknown Community'
+    }
+  } catch (error) {
+    console.error('Failed to load community:', error)
+    communityName.value = 'Unknown Community'
+  }
+}
+
+onMounted(loadCommunity)
 </script>
 
 <template>
