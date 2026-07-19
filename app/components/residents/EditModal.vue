@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, nextTick, reactive, ref, watch } from 'vue'
 import { ApiError } from '~/api/base'
 import { communityApi } from '~/api/community'
 import { residentApi } from '~/api/resident'
@@ -35,6 +35,11 @@ const newVehicle = ref('')
 const newImages = ref<Array<{ id: number; preview: string; file: File | null }>>([])
 const keptImages = ref<string[]>([])
 let nextImageId = 0
+const imageUploadRefs = new Map<number, { openFilePicker: () => void }>()
+
+function createNewImage() {
+  return { id: nextImageId++, preview: '', file: null }
+}
 const errors = reactive<Record<string, string>>({})
 const communities = ref<Array<{ id: number; name: string }>>([])
 const isLoadingCommunities = ref(false)
@@ -126,8 +131,16 @@ function removeVehicle(index: number) {
   form.vehicles.splice(index, 1)
 }
 
-function addImageUpload() {
-  newImages.value.push({ id: nextImageId++, preview: '', file: null })
+async function addImageUpload() {
+  const image = createNewImage()
+  newImages.value.push(image)
+  await nextTick()
+  imageUploadRefs.get(image.id)?.openFilePicker()
+}
+
+function setImageUploadRef(id: number, instance: unknown) {
+  if (instance) imageUploadRefs.set(id, instance as { openFilePicker: () => void })
+  else imageUploadRefs.delete(id)
 }
 
 function updateNewImage(index: number, preview: string) {
@@ -255,7 +268,7 @@ watch(() => props.show, (show: boolean) => {
             <div class="form-field"><label>{{ t('residents.last_login') }}</label><p class="read-only">{{ resident.last_login || t('residents.never') }}</p></div>
           </div>
         </div>
-        <div class="images-section"><div class="images-section__header"><label>{{ t('residents.property_images') }}</label><button type="button" class="upload-button" @click="addImageUpload"><Icon name="lucide:plus" :size="16" />{{ t('common.upload') }}</button></div><p v-if="!imageItems.length && !newImages.length" class="image-empty">{{ t('residents.no_property_images') }}</p><div v-if="imageItems.length" class="image-grid"><div v-for="image in imageItems" :key="image.id" class="image-item"><img :src="imageUrl(image.id)" alt="Property" /><button @click="removeImage(image.id)"><Icon name="lucide:x" :size="16" /></button></div></div><div class="new-image-uploads"><ImageUpload v-for="(image, index) in newImages" :key="image.id" :model-value="image.preview" label="" :auto-upload="false" :call-api-after-attach="false" :preview-size="120" @update:model-value="updateNewImage(index, $event)" @file-selected="selectNewImage(index, $event)" /></div></div>
+        <div class="images-section"><div class="images-section__header"><label>{{ t('residents.property_images') }}</label><button type="button" class="upload-button" @click="addImageUpload"><Icon name="lucide:upload" :size="16" />{{ t('common.upload') }}</button></div><p v-if="!imageItems.length && !newImages.length" class="image-empty">{{ t('residents.no_property_images') }}</p><div class="image-grid"><div v-for="image in imageItems" :key="image.id" class="gallery-item"><img :src="imageUrl(image.id)" alt="Property" /><button class="gallery-remove" @click="removeImage(image.id)"><Icon name="lucide:x" :size="16" /></button></div><div v-for="(image, index) in newImages" :key="image.id" class="gallery-item gallery-item--upload"><ImageUpload :ref="(instance) => setImageUploadRef(image.id, instance)" :model-value="image.preview" label="" :auto-upload="false" :call-api-after-attach="false" :preview-size="120" @update:model-value="updateNewImage(index, $event)" @file-selected="selectNewImage(index, $event)" /></div></div></div>
         <p v-if="submitError" class="submit-error">{{ submitError }}</p>
       </template>
     </div>
@@ -264,26 +277,197 @@ watch(() => props.show, (show: boolean) => {
 </template>
 
 <style scoped>
-.edit-resident-modal { min-height: 200px; }
-.modal-loading { display: flex; justify-content: center; align-items: center; gap: 8px; min-height: 200px; }
-.spin { animation: spin 1s linear infinite; }
-.form-grid, .form-row { display: grid; gap: 16px; }
-.form-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-.form-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-.form-section, .images-section { padding: 16px; border: 1px solid var(--color-border); border-radius: var(--radius-lg); }
-.form-field { margin-bottom: 14px; }
-.form-field label, .images-section label { display: block; margin-bottom: 6px; font-size: var(--font-size-sm); font-weight: 600; }
-input, textarea, select { box-sizing: border-box; width: 100%; border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-bg-base); color: var(--color-text-primary); padding: 10px 12px; }
-textarea { min-height: 76px; resize: vertical; }
-.error { border-color: var(--color-critical); }
-.required, .error-message, .submit-error { color: var(--color-critical); }
-.error-message { font-size: var(--font-size-xs); }
-.read-only { margin: 0; padding: 10px 12px; background: var(--color-bg-elevated); border-radius: var(--radius-md); }
-.toggle { display: flex; gap: 8px; align-items: center; margin: 12px 0; cursor: pointer; }
-.toggle input { width: 18px; height: 18px; }
-.warning { display: flex; gap: 8px; margin: 8px 0; padding: 10px; color: #92400e; background: #fef3c7; border-radius: var(--radius-md); font-size: var(--font-size-sm); }
-.vehicle-input { display: flex; gap: 8px; }.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }.chip { display: inline-flex; align-items: center; gap: 4px; padding: 5px 8px; border: 1px solid var(--color-border); border-radius: 999px; }.chip button, .image-item button { border: 0; background: transparent; cursor: pointer; color: var(--color-text-muted); }
-.images-section { margin-top: 16px; }.images-section__header { display: flex; justify-content: space-between; align-items: center; }.upload-button { display: inline-flex !important; align-items: center; gap: 6px; padding: 8px 12px; background: var(--color-bg-elevated); border-radius: var(--radius-md); cursor: pointer; }.upload-button input { display: none; }.image-empty { color: var(--color-text-muted); }.image-grid { display: flex; flex-wrap: wrap; gap: 12px; }.image-item { position: relative; width: 120px; height: 120px; }.image-item img { width: 100%; height: 100%; border-radius: var(--radius-md); object-fit: cover; }.image-item button { position: absolute; right: 4px; top: 4px; padding: 4px; border-radius: 50%; background: rgba(0,0,0,.65); color: #fff; }
-@keyframes spin { to { transform: rotate(360deg); } }
-@media (max-width: 700px) { .form-grid, .form-row { grid-template-columns: 1fr; } }
+.edit-resident-modal { 
+  min-height: 200px; 
+}
+.modal-loading { 
+  display: flex; 
+  justify-content: center; 
+  align-items: center; 
+  gap: 8px; 
+  min-height: 200px; 
+}
+.spin { 
+  animation: spin 1s linear infinite; 
+}
+.form-grid, .form-row { 
+  display: grid; 
+  gap: 16px; 
+}
+.form-grid { 
+  grid-template-columns: repeat(2, minmax(0, 1fr)); 
+}
+.form-row { 
+  grid-template-columns: repeat(2, minmax(0, 1fr)); 
+}
+.form-section, .images-section { 
+  padding: 16px; 
+  border: 1px solid var(--color-border); 
+  border-radius: var(--radius-lg); 
+}
+.form-field { 
+  margin-bottom: 14px; 
+}
+.form-field label, .images-section label { 
+  display: block; 
+  margin-bottom: 6px; 
+  font-size: var(--font-size-sm); 
+  font-weight: 600; 
+}
+input, textarea, select { 
+  box-sizing: border-box; 
+  width: 100%; 
+  border: 1px solid var(--color-border); 
+  border-radius: var(--radius-md); 
+  background: var(--color-bg-base); 
+  color: var(--color-text-primary); 
+  padding: 10px 12px; 
+}
+textarea { 
+  min-height: 76px; 
+  resize: vertical; 
+}
+.error { 
+  border-color: var(--color-critical); 
+}
+.required, .error-message, .submit-error { 
+  color: var(--color-critical); 
+}
+.error-message { 
+  font-size: var(--font-size-xs); 
+}
+.read-only { 
+  margin: 0; 
+  padding: 10px 12px; 
+  background: var(--color-bg-elevated); 
+  border-radius: var(--radius-md); 
+}
+.toggle { 
+  display: flex; 
+  gap: 8px; 
+  align-items: center; 
+  margin: 12px 0; 
+  cursor: pointer; 
+}
+.toggle input { 
+  width: 18px; 
+  height: 18px; 
+}
+.warning { 
+  display: flex; 
+  gap: 8px; 
+  margin: 8px 0; 
+  padding: 10px; 
+  color: #92400e; 
+  background: #fef3c7; 
+  border-radius: var(--radius-md); 
+  font-size: var(--font-size-sm); 
+}
+.vehicle-input { 
+  display: flex; 
+  gap: 8px; 
+}
+.chips { 
+  display: flex; 
+  flex-wrap: wrap; 
+  gap: 6px; 
+  margin-top: 8px; 
+}
+.chip { 
+  display: inline-flex; 
+  align-items: center; 
+  gap: 4px; 
+  padding: 5px 8px; 
+  border: 1px solid var(--color-border); 
+  border-radius: 999px; 
+}
+.chip button { 
+  border: 0; 
+  background: transparent; 
+  cursor: pointer; 
+  color: var(--color-text-muted); 
+}
+.images-section { 
+  margin-top: 16px; 
+}
+.images-section__header { 
+  display: flex; 
+  justify-content: space-between; 
+  align-items: center; 
+}
+.upload-button { 
+  display: inline-flex !important; 
+  align-items: center; 
+  gap: 6px; 
+  padding: 8px 12px; 
+  background: var(--color-bg-elevated); 
+  border: 0; 
+  border-radius: var(--radius-md); 
+  color: var(--color-text-primary); 
+  cursor: pointer; 
+}
+.image-empty { 
+  color: var(--color-text-muted); 
+}
+.image-grid { 
+  display: flex; 
+  flex-wrap: wrap; 
+  gap: 12px; 
+  align-items: flex-start; 
+}
+.gallery-item { 
+  position: relative; 
+  display: flex; 
+  flex-direction: column; 
+  align-items: flex-start; 
+  gap: 8px; 
+}
+.gallery-item--upload :deep(.form-field) { 
+  margin: 0; 
+}
+.gallery-item--upload :deep(.image-preview-actions) { 
+  flex-direction: column; 
+  align-items: flex-start; 
+}
+.gallery-item--upload :deep(.image-preview) { 
+  border: 0; 
+}
+.gallery-item img, .gallery-item :deep(.image-preview) { 
+  box-sizing: border-box; 
+  width: 120px; 
+  height: 120px; 
+  border-radius: var(--radius-md); 
+  object-fit: cover; 
+}
+.gallery-remove { 
+  position: absolute; 
+  top: -10px; 
+  right: -10px; 
+  width: 28px; 
+  height: 28px; 
+  display: flex; 
+  align-items: center; 
+  justify-content: center; 
+  border: 0; 
+  border-radius: 50%; 
+  background: rgba(0,0,0,.75); 
+  color: #fff; 
+  cursor: pointer; 
+  z-index: 1; 
+}
+.gallery-item--upload :deep(.image-remove) { 
+  top: -10px !important; 
+  right: -10px !important; 
+  z-index: 1; 
+}
+@keyframes spin { 
+  to { 
+    transform: rotate(360deg); 
+  } 
+}
+@media (max-width: 700px) { 
+  .form-grid, .form-row { 
+    grid-template-columns: 1fr; 
+  } 
+}
 </style>

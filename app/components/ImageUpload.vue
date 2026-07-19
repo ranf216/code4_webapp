@@ -99,7 +99,7 @@ async function upload(): Promise<string | null> {
   return null
 }
 
-defineExpose({ upload })
+defineExpose({ upload, openFilePicker: triggerFileInput })
 
 function removeImage() {
   previewUrl.value = ''
@@ -137,7 +137,7 @@ const displayUrl = computed(() => {
 
 <template>
   <div class="form-field">
-    <label class="field-label">
+    <label v-if="label || required" class="field-label">
       {{ label }}
       <span v-if="required" class="required">*</span>
     </label>
@@ -162,7 +162,7 @@ const displayUrl = computed(() => {
       <label v-else class="upload-placeholder" :style="{ width: `${previewSize}px`, height: `${previewSize}px` }">
         <Icon name="lucide:upload" :size="24" />
         <span>{{ callApiAfterAttach ? 'Upload' : 'Select' }}</span>
-        <input type="file" accept="image/*" @change="handleFileChange" />
+        <input ref="fileInputRef" type="file" accept="image/*" @change="handleFileChange" />
       </label>
     </div>
   </div>
