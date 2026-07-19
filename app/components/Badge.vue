@@ -4,11 +4,15 @@ import { UserType, UserTypeLabels } from '~/constants/userTypes'
 type BadgeType = 'status' | 'userType' | 'adminRole' | 'active' | 'report' | 'review' | 'taskPriority' | 'taskStatus' | 'shiftStatus' | 'shiftCount' | 'postOrderStatus' | 'poiType' | 'poiThreat' | 'poiStatus' | 'templateStatus' | 'templateCategory' | 'officerRole' | 'officerCert'
 
 const props = defineProps<{
-  type: BadgeType
-  value: string | number | boolean
+  type?: BadgeType
+  value?: string | number | boolean
+  text?: string
+  color?: string
 }>()
 
 const label = computed((): string => {
+  if (props.text !== undefined) return props.text
+
   if (props.type === 'userType') {
     const typeNum = props.value as number
     if (typeNum === 1 || typeNum === 2 || typeNum === 3 || typeNum === 4 || typeNum === 5) {
@@ -204,7 +208,7 @@ const badgeClass = computed((): string => {
 </script>
 
 <template>
-  <span class="badge" :class="badgeClass">
+  <span class="badge" :class="badgeClass" :style="color ? { color, border: `1px solid ${color}4d`, backgroundColor: `${color}1f` } : undefined">
     {{ label }}
   </span>
 </template>

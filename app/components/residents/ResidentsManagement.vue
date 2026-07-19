@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { onMounted, ref, watch } from 'vue'
+import { communityApi } from '~/api/community'
 import { residentApi } from '~/api/resident'
 import LoadingModal from '~/components/LoadingModal.vue'
 import ResidentsAddForm from '~/components/residents/AddForm.vue'
@@ -21,7 +22,13 @@ const toastStore = useToastStore()
 const residents = ref<Resident[]>([])
 const totalCount = ref(0)
 const isLoadingResidents = ref(false)
+const isLoadingCommunities = ref(false)
 const loadError = ref('')
+const communities = ref<Array<{ id: number; name: string }>>([])
+const selectedCommunityId = ref(Number(props.communityId))
+const includeInactive = ref(false)
+const searchQuery = ref('')
+let searchDebounceTimer: ReturnType<typeof setTimeout> | undefined
 
 function mapApiResident(resident: ApiResident): Resident {
   return {
@@ -42,11 +49,11 @@ async function loadResidents() {
   loadError.value = ''
   try {
     const response = await residentApi.getResidents({
-      community_id: Number(props.communityId),
-      include_inactive: false,
-      search_text: '',
-      sort_by: '',
-      sort_dir: 'asc',
+      community_id: selectedCommunityId.value,
+      include_inactive: includeInactive.value,
+      search_text: searchQuery.value.trim(),
+      sort_by: sortKey.value,
+      sort_dir: sortOrder.value,
     }, { showLoading: false })
     residents.value = response.residents.map(mapApiResident)
     totalCount.value = response.total_count
@@ -60,90 +67,35 @@ async function loadResidents() {
   }
 }
 
-// Filters
-const statusFilter = ref('all')
-const searchQuery = ref('')
-
-// Sorting
-const sortKey = ref<'fullName' | 'mobile' | 'email' | 'address' | 'registrationDate' | 'active' | 'communicationTest'>('fullName')
+const sortKey = ref<'first_name' | 'last_name' | 'community' | 'created_on'>('first_name')
 const sortOrder = ref<'asc' | 'desc'>('asc')
 
 function toggleSort(key: typeof sortKey.value) {
-  if (sortKey.value === key) {
-    sortOrder.value = sortOrder.value === 'asc' ? 'desc' : 'asc'
-  } else {
-    sortKey.value = key
-    sortOrder.value = 'asc'
+  sortOrder.value = sortKey.value === key && sortOrder.value === 'asc' ? 'desc' : 'asc'
+  sortKey.value = key
+  loadResidents()
+}
+
+function clearSearch() {
+  searchQuery.value = ''
+}
+
+async function loadCommunities() {
+  isLoadingCommunities.value = true
+  try {
+    const response = await communityApi.getCommunities({ include_inactive: false }, { showLoading: false })
+    communities.value = response.communities.map((community: { community_id: number; name: string }) => ({ id: community.community_id, name: community.name }))
+  } finally {
+    isLoadingCommunities.value = false
   }
 }
 
-// Filtered and sorted residents
-const filteredResidents = computed(() => {
-  let result = residents.value
+const sortedResidents = computed(() => residents.value)
 
-  // Filter by status
-  if (statusFilter.value !== 'all') {
-    const isActive = statusFilter.value === 'active'
-    result = result.filter((r: Resident) => r.active === isActive)
-  }
-
-  // Filter by search query
-  if (searchQuery.value.trim()) {
-    const query = searchQuery.value.toLowerCase().trim()
-    result = result.filter((r: Resident) =>
-      r.fullName.toLowerCase().includes(query) ||
-      r.mobile.toLowerCase().includes(query) ||
-      r.email.toLowerCase().includes(query) ||
-      r.address.toLowerCase().includes(query) ||
-      r.vehicleNumbers.some((v: string) => v.toLowerCase().includes(query))
-    )
-  }
-
-  return result
-})
-
-const sortedResidents = computed(() => {
-  return [...filteredResidents.value].sort((a, b) => {
-    let aVal: string | boolean
-    let bVal: string | boolean
-
-    switch (sortKey.value) {
-      case 'fullName':
-        aVal = a.fullName.toLowerCase()
-        bVal = b.fullName.toLowerCase()
-        break
-      case 'mobile':
-        aVal = a.mobile.toLowerCase()
-        bVal = b.mobile.toLowerCase()
-        break
-      case 'email':
-        aVal = a.email.toLowerCase()
-        bVal = b.email.toLowerCase()
-        break
-      case 'address':
-        aVal = a.address.toLowerCase()
-        bVal = b.address.toLowerCase()
-        break
-      case 'registrationDate':
-        aVal = a.registrationDate
-        bVal = b.registrationDate
-        break
-      case 'active':
-        aVal = a.active
-        bVal = b.active
-        break
-      case 'communicationTest':
-        aVal = a.communicationTest
-        bVal = b.communicationTest
-        break
-      default:
-        return 0
-    }
-
-    if (aVal < bVal) return sortOrder.value === 'asc' ? -1 : 1
-    if (aVal > bVal) return sortOrder.value === 'asc' ? 1 : -1
-    return 0
-  })
+watch([selectedCommunityId, includeInactive], loadResidents)
+watch(searchQuery, () => {
+  if (searchDebounceTimer) clearTimeout(searchDebounceTimer)
+  searchDebounceTimer = setTimeout(loadResidents, 400)
 })
 
 const totalEntries = computed(() => totalCount.value)
@@ -233,7 +185,10 @@ function toggleCommunicationTest(resident: Resident) {
   resident.communicationTest = !resident.communicationTest
 }
 
-onMounted(loadResidents)
+onMounted(() => {
+  loadResidents()
+  loadCommunities()
+})
 </script>
 
 <template>
@@ -261,12 +216,18 @@ onMounted(loadResidents)
           class="residents-management__search-input"
           :placeholder="t('residents.search_placeholder')"
         />
+        <button v-if="searchQuery" class="residents-management__clear-search" :aria-label="t('common.close')" @click="clearSearch">
+          <Icon name="lucide:x" :size="16" />
+        </button>
       </div>
-      <select v-model="statusFilter" class="residents-management__filter">
-        <option value="all">{{ t('residents.filter_all') }}</option>
-        <option value="active">{{ t('residents.filter_active') }}</option>
-        <option value="inactive">{{ t('residents.filter_inactive') }}</option>
+      <select v-model="selectedCommunityId" class="residents-management__filter" :disabled="isLoadingCommunities">
+        <option :value="0">{{ t('residents.all_communities') }}</option>
+        <option v-for="community in communities" :key="community.id" :value="community.id">{{ community.name }}</option>
       </select>
+      <div class="residents-management__active-toggle" role="group" :aria-label="t('residents.active_filter')">
+        <button :class="{ active: !includeInactive }" @click="includeInactive = false">{{ t('residents.active_only') }}</button>
+        <button :class="{ active: includeInactive }" @click="includeInactive = true">{{ t('residents.all_statuses') }}</button>
+      </div>
     </div>
 
     <!-- Table -->
@@ -274,48 +235,23 @@ onMounted(loadResidents)
       <table class="residents-management__table">
         <thead>
           <tr>
-            <th class="sortable" :class="{ sorted: sortKey === 'fullName' }" @click="toggleSort('fullName')">
+            <th class="sortable" :class="{ sorted: sortKey === 'first_name' }" @click="toggleSort('first_name')">
               <span class="sortable-content">
                 <span>{{ t('residents.full_name') }}</span>
-                <Icon v-if="sortKey === 'fullName'" :name="sortOrder === 'asc' ? 'lucide:chevron-up' : 'lucide:chevron-down'" :size="14" />
+                <Icon v-if="sortKey === 'first_name'" :name="sortOrder === 'asc' ? 'lucide:chevron-up' : 'lucide:chevron-down'" :size="14" />
               </span>
             </th>
-            <th class="sortable" :class="{ sorted: sortKey === 'mobile' }" @click="toggleSort('mobile')">
-              <span class="sortable-content">
-                <span>{{ t('residents.mobile') }}</span>
-                <Icon v-if="sortKey === 'mobile'" :name="sortOrder === 'asc' ? 'lucide:chevron-up' : 'lucide:chevron-down'" :size="14" />
-              </span>
-            </th>
-            <th class="sortable" :class="{ sorted: sortKey === 'email' }" @click="toggleSort('email')">
-              <span class="sortable-content">
-                <span>{{ t('residents.email') }}</span>
-                <Icon v-if="sortKey === 'email'" :name="sortOrder === 'asc' ? 'lucide:chevron-up' : 'lucide:chevron-down'" :size="14" />
-              </span>
-            </th>
-            <th class="sortable" :class="{ sorted: sortKey === 'address' }" @click="toggleSort('address')">
-              <span class="sortable-content">
-                <span>{{ t('residents.address') }}</span>
-                <Icon v-if="sortKey === 'address'" :name="sortOrder === 'asc' ? 'lucide:chevron-up' : 'lucide:chevron-down'" :size="14" />
-              </span>
-            </th>
-            <th class="sortable" :class="{ sorted: sortKey === 'registrationDate' }" @click="toggleSort('registrationDate')">
+            <th>{{ t('residents.mobile') }}</th>
+            <th>{{ t('residents.email') }}</th>
+            <th>{{ t('residents.address') }}</th>
+            <th class="sortable" :class="{ sorted: sortKey === 'created_on' }" @click="toggleSort('created_on')">
               <span class="sortable-content">
                 <span>{{ t('residents.registration_date') }}</span>
-                <Icon v-if="sortKey === 'registrationDate'" :name="sortOrder === 'asc' ? 'lucide:chevron-up' : 'lucide:chevron-down'" :size="14" />
+                <Icon v-if="sortKey === 'created_on'" :name="sortOrder === 'asc' ? 'lucide:chevron-up' : 'lucide:chevron-down'" :size="14" />
               </span>
             </th>
-            <th class="sortable" :class="{ sorted: sortKey === 'active' }" @click="toggleSort('active')">
-              <span class="sortable-content">
-                <span>{{ t('residents.active') }}</span>
-                <Icon v-if="sortKey === 'active'" :name="sortOrder === 'asc' ? 'lucide:chevron-up' : 'lucide:chevron-down'" :size="14" />
-              </span>
-            </th>
-            <th class="sortable" :class="{ sorted: sortKey === 'communicationTest' }" @click="toggleSort('communicationTest')">
-              <span class="sortable-content">
-                <span>{{ t('residents.communication_test') }}</span>
-                <Icon v-if="sortKey === 'communicationTest'" :name="sortOrder === 'asc' ? 'lucide:chevron-up' : 'lucide:chevron-down'" :size="14" />
-              </span>
-            </th>
+            <th>{{ t('residents.active') }}</th>
+            <th>{{ t('residents.communication_test') }}</th>
             <th>{{ t('residents.vehicle_numbers') }}</th>
             <th>{{ t('residents.actions') }}</th>
           </tr>
@@ -337,7 +273,6 @@ onMounted(loadResidents)
             <td>
               <div class="resident-name">
                 <span class="resident-name__text">{{ resident.fullName }}</span>
-                <span class="resident-name__id">ID: {{ resident.id }}</span>
               </div>
             </td>
             <td>{{ resident.mobile }}</td>
@@ -359,9 +294,7 @@ onMounted(loadResidents)
             </td>
             <td>
               <div v-if="resident.vehicleNumbers.length" class="vehicle-tags">
-                <span v-for="(vehicle, index) in resident.vehicleNumbers" :key="index" class="vehicle-tag">
-                  {{ vehicle }}
-                </span>
+                <Badge v-for="(vehicle, index) in resident.vehicleNumbers" :key="index" :text="vehicle" color="#119ca6" />
               </div>
               <span v-else class="text-muted">—</span>
             </td>
@@ -484,7 +417,7 @@ onMounted(loadResidents)
 .residents-management__search-input {
   width: 100%;
   height: 40px;
-  padding: 0 var(--space-3) 0 calc(var(--space-3) + 24px);
+  padding: 0 calc(var(--space-3) + 24px) 0 calc(var(--space-3) + 24px);
   background: var(--color-bg-surface);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
@@ -511,6 +444,42 @@ onMounted(loadResidents)
 
 .residents-management__filter:focus {
   border-color: var(--color-accent);
+}
+
+.residents-management__clear-search {
+  position: absolute;
+  top: 50%;
+  right: var(--space-2);
+  display: flex;
+  padding: 2px;
+  color: var(--color-text-muted);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  transform: translateY(-50%);
+}
+
+.residents-management__active-toggle {
+  display: inline-flex;
+  padding: 3px;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.residents-management__active-toggle button {
+  padding: 6px 10px;
+  color: var(--color-text-muted);
+  background: transparent;
+  border: 0;
+  border-radius: calc(var(--radius-md) - 2px);
+  cursor: pointer;
+}
+
+.residents-management__active-toggle button.active {
+  color: var(--color-text-primary);
+  background: var(--color-bg-surface);
+  box-shadow: var(--shadow-sm);
 }
 
 .residents-management__table-container {

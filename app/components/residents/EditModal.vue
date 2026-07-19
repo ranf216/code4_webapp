@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
 import { ApiError } from '~/api/base'
+import { communityApi } from '~/api/community'
 import { residentApi } from '~/api/resident'
 import type { Resident } from '~/api/types/resident'
 import { useFileApi } from '~/composables/useFileApi'
+import ImageUpload from '~/components/ImageUpload.vue'
 import LoadingModal from '~/components/LoadingModal.vue'
 import { useToastStore } from '~/stores/toast'
 
@@ -27,13 +29,15 @@ const config = useRuntimeConfig()
 const resident = ref<Resident | null>(null)
 const isLoading = ref(false)
 const isSubmitting = ref(false)
-const isUploadingImage = ref(false)
 const loadError = ref('')
 const submitError = ref('')
 const newVehicle = ref('')
-const newImageIds = ref<string[]>([])
+const newImages = ref<Array<{ id: number; preview: string; file: File | null }>>([])
 const keptImages = ref<string[]>([])
+let nextImageId = 0
 const errors = reactive<Record<string, string>>({})
+const communities = ref<Array<{ id: number; name: string }>>([])
+const isLoadingCommunities = ref(false)
 
 const form = reactive({
   firstName: '',
@@ -45,18 +49,16 @@ const form = reactive({
   vehicles: [] as string[],
   communicationTest: false,
   active: true,
+  communityId: Number(props.communityId) || 0,
 })
 
 const isPhoneChanged = computed(() => !!resident.value && form.mobile !== resident.value.phone_num && !!form.mobile)
 const isDeactivating = computed(() => !!resident.value && resident.value.is_active && !form.active)
 const hasImageChanges = computed(() =>
-  !!resident.value && (newImageIds.value.length > 0 || keptImages.value.length !== resident.value.images.length)
+  !!resident.value && (newImages.value.some((image) => !!image.file) || keptImages.value.length !== resident.value.images.length)
 )
-const isFormValid = computed(() => !!form.firstName.trim() && !!form.mobile.trim())
-const imageItems = computed(() => [
-  ...keptImages.value.map((id) => ({ id, isNew: false })),
-  ...newImageIds.value.map((id) => ({ id, isNew: true })),
-])
+const isFormValid = computed(() => !!form.firstName.trim() && !!form.mobile.trim() && form.communityId > 0)
+const imageItems = computed(() => keptImages.value.map((id) => ({ id, isNew: false })))
 
 function imageUrl(imageId: string) {
   return imageId.startsWith('http') ? imageId : `${config.public.apiBase}/files/n/${imageId}.png`
@@ -67,7 +69,7 @@ function resetState() {
   loadError.value = ''
   submitError.value = ''
   newVehicle.value = ''
-  newImageIds.value = []
+  newImages.value = []
   keptImages.value = []
   Object.keys(errors).forEach((key) => { errors[key] = '' })
 }
@@ -82,7 +84,18 @@ function populateForm(value: Resident) {
   form.vehicles = [...(value.vehicles || [])]
   form.communicationTest = value.communication_test
   form.active = value.is_active
+  form.communityId = value.community_id
   keptImages.value = [...(value.images || [])]
+}
+
+async function loadCommunities() {
+  isLoadingCommunities.value = true
+  try {
+    const response = await communityApi.getCommunities({ include_inactive: false }, { showLoading: false })
+    communities.value = response.communities.map((community: { community_id: number; name: string }) => ({ id: community.community_id, name: community.name }))
+  } finally {
+    isLoadingCommunities.value = false
+  }
 }
 
 async function loadResident() {
@@ -93,6 +106,7 @@ async function loadResident() {
     if (!response.resident) throw new Error(t('residents.not_found'))
     resident.value = response.resident
     populateForm(response.resident)
+    await loadCommunities()
   } catch (error) {
     loadError.value = error instanceof ApiError && error.rc === 540 ? t('residents.not_found') : t('residents.load_failed')
   } finally {
@@ -112,30 +126,38 @@ function removeVehicle(index: number) {
   form.vehicles.splice(index, 1)
 }
 
-async function handleImageSelected(event: Event) {
-  const input = event.target as HTMLInputElement
-  const files = Array.from(input.files || [])
-  if (!files.length) return
-
-  isUploadingImage.value = true
-  submitError.value = ''
-  try {
-    for (const file of files) {
-      const fileId = await uploadSmallFile(file)
-      if (!fileId) throw new Error(t('residents.image_upload_failed'))
-      newImageIds.value.push(fileId)
-    }
-  } catch (error) {
-    submitError.value = error instanceof Error ? error.message : t('residents.image_upload_failed')
-  } finally {
-    isUploadingImage.value = false
-    input.value = ''
-  }
+function addImageUpload() {
+  newImages.value.push({ id: nextImageId++, preview: '', file: null })
 }
 
-function removeImage(imageId: string, isNew: boolean) {
-  if (isNew) newImageIds.value = newImageIds.value.filter((id) => id !== imageId)
-  else keptImages.value = keptImages.value.filter((id) => id !== imageId)
+function updateNewImage(index: number, preview: string) {
+  const image = newImages.value[index]
+  if (!image) return
+  if (!preview) {
+    newImages.value.splice(index, 1)
+    return
+  }
+  image.preview = preview
+}
+
+function selectNewImage(index: number, file: File) {
+  const image = newImages.value[index]
+  if (image) image.file = file
+}
+
+function removeImage(imageId: string) {
+  keptImages.value = keptImages.value.filter((id) => id !== imageId)
+}
+
+async function uploadNewImages() {
+  const imageIds: string[] = []
+  for (const image of newImages.value) {
+    if (!image.file) continue
+    const fileId = await uploadSmallFile(image.file)
+    if (!fileId) throw new Error(t('residents.image_upload_failed'))
+    imageIds.push(fileId)
+  }
+  return imageIds
 }
 
 function validate() {
@@ -144,7 +166,8 @@ function validate() {
   errors.firstName = form.firstName.trim() ? '' : t('validation.required')
   errors.mobile = !form.mobile.trim() ? t('validation.required') : !phonePattern.test(form.mobile.trim()) ? t('residents.invalid_mobile') : ''
   errors.email = form.email.trim() && !emailPattern.test(form.email.trim()) ? t('residents.invalid_email') : ''
-  return !errors.firstName && !errors.mobile && !errors.email
+  errors.communityId = form.communityId > 0 ? '' : t('validation.required')
+  return !errors.firstName && !errors.mobile && !errors.email && !errors.communityId
 }
 
 function handleSubmitError(error: unknown) {
@@ -152,6 +175,7 @@ function handleSubmitError(error: unknown) {
     if (error.rc === 224 || error.rc === 241) errors.mobile = t(error.rc === 224 ? 'residents.invalid_mobile' : 'residents.mobile_exists')
     else if (error.rc === 235 || error.rc === 240) errors.email = t(error.rc === 235 ? 'residents.invalid_email' : 'residents.email_exists')
     else if (error.rc === 321) submitError.value = t('residents.image_not_found')
+    else if (error.rc === 500 || error.rc === 505 || error.rc === 542) errors.communityId = t(error.rc === 500 ? 'residents.community_not_found' : error.rc === 505 ? 'residents.community_inactive' : 'residents.community_already_assigned')
     else if (error.rc === 540) submitError.value = t('residents.not_found')
     else submitError.value = error.message
     return
@@ -171,15 +195,11 @@ async function handleSubmit() {
   if (form.email !== (original.email?.endsWith('@placeholder.local') ? '' : original.email || '')) payload.email = form.email.trim()
   if (form.address !== (original.address || '')) payload.address = form.address.trim()
   if (form.instructions !== (original.instructions || '')) payload.instructions = form.instructions.trim()
+  if (form.communityId !== original.community_id) payload.community_id = form.communityId
   if (JSON.stringify(form.vehicles) !== JSON.stringify(original.vehicles || [])) payload.vehicles = form.vehicles
   if (form.communicationTest !== original.communication_test) payload.communication_test = form.communicationTest
   if (form.active !== original.is_active) payload.is_active = form.active
-  if (hasImageChanges.value) {
-    payload.keep_images = keptImages.value
-    payload.new_image_ids = newImageIds.value
-  }
-
-  if (Object.keys(payload).length === 1) {
+  if (Object.keys(payload).length === 1 && !hasImageChanges.value) {
     emit('close')
     return
   }
@@ -187,6 +207,10 @@ async function handleSubmit() {
   isSubmitting.value = true
   submitError.value = ''
   try {
+    if (hasImageChanges.value) {
+      payload.keep_images = keptImages.value
+      payload.new_image_ids = await uploadNewImages()
+    }
     await residentApi.updateResident(payload as Parameters<typeof residentApi.updateResident>[0], { showLoading: false })
     toastStore.success(t('residents.update_success'))
     emit('submitted')
@@ -222,7 +246,7 @@ watch(() => props.show, (show: boolean) => {
             <div class="form-field"><label>{{ t('residents.instructions') }}</label><textarea v-model="form.instructions" /></div>
           </div>
           <div class="form-section">
-            <div class="form-field"><label>{{ t('residents.community') }}</label><p class="read-only">{{ communityName }}</p></div>
+            <div class="form-field"><label>{{ t('residents.community') }}</label><select v-model="form.communityId" :disabled="isLoadingCommunities" :class="{ error: errors.communityId }"><option :value="0">{{ t('residents.select_community') }}</option><option v-for="community in communities" :key="community.id" :value="community.id">{{ community.name }}</option></select><span v-if="errors.communityId" class="error-message">{{ errors.communityId }}</span></div>
             <div class="form-field"><label>{{ t('residents.vehicle_numbers') }}</label><div class="vehicle-input"><input v-model="newVehicle" :placeholder="t('residents.vehicle_placeholder')" @keyup.enter="addVehicle" /><AppButton :text="t('common.add')" type="secondary" @click="addVehicle" /></div><div class="chips"><span v-for="(vehicle, index) in form.vehicles" :key="`${vehicle}-${index}`" class="chip">{{ vehicle }}<button @click="removeVehicle(index)"><Icon name="lucide:x" :size="14" /></button></span></div></div>
             <label class="toggle"><input v-model="form.communicationTest" type="checkbox" />{{ t('residents.enable_communication_test') }}</label>
             <label class="toggle"><input v-model="form.active" type="checkbox" />{{ t('residents.active') }}</label>
@@ -231,7 +255,7 @@ watch(() => props.show, (show: boolean) => {
             <div class="form-field"><label>{{ t('residents.last_login') }}</label><p class="read-only">{{ resident.last_login || t('residents.never') }}</p></div>
           </div>
         </div>
-        <div class="images-section"><div class="images-section__header"><label>{{ t('residents.property_images') }}</label><label class="upload-button"><Icon name="lucide:upload" :size="16" />{{ isUploadingImage ? t('common.loading') : t('common.upload') }}<input type="file" accept="image/*" multiple :disabled="isUploadingImage" @change="handleImageSelected" /></label></div><p v-if="!imageItems.length" class="image-empty">{{ t('residents.no_property_images') }}</p><div v-else class="image-grid"><div v-for="image in imageItems" :key="`${image.isNew}-${image.id}`" class="image-item"><img :src="imageUrl(image.id)" alt="Property" /><button @click="removeImage(image.id, image.isNew)"><Icon name="lucide:x" :size="16" /></button></div></div></div>
+        <div class="images-section"><div class="images-section__header"><label>{{ t('residents.property_images') }}</label><button type="button" class="upload-button" @click="addImageUpload"><Icon name="lucide:plus" :size="16" />{{ t('common.upload') }}</button></div><p v-if="!imageItems.length && !newImages.length" class="image-empty">{{ t('residents.no_property_images') }}</p><div v-if="imageItems.length" class="image-grid"><div v-for="image in imageItems" :key="image.id" class="image-item"><img :src="imageUrl(image.id)" alt="Property" /><button @click="removeImage(image.id)"><Icon name="lucide:x" :size="16" /></button></div></div><div class="new-image-uploads"><ImageUpload v-for="(image, index) in newImages" :key="image.id" :model-value="image.preview" label="" :auto-upload="false" :call-api-after-attach="false" :preview-size="120" @update:model-value="updateNewImage(index, $event)" @file-selected="selectNewImage(index, $event)" /></div></div>
         <p v-if="submitError" class="submit-error">{{ submitError }}</p>
       </template>
     </div>
@@ -249,7 +273,7 @@ watch(() => props.show, (show: boolean) => {
 .form-section, .images-section { padding: 16px; border: 1px solid var(--color-border); border-radius: var(--radius-lg); }
 .form-field { margin-bottom: 14px; }
 .form-field label, .images-section label { display: block; margin-bottom: 6px; font-size: var(--font-size-sm); font-weight: 600; }
-input, textarea { box-sizing: border-box; width: 100%; border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-bg-base); color: var(--color-text-primary); padding: 10px 12px; }
+input, textarea, select { box-sizing: border-box; width: 100%; border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-bg-base); color: var(--color-text-primary); padding: 10px 12px; }
 textarea { min-height: 76px; resize: vertical; }
 .error { border-color: var(--color-critical); }
 .required, .error-message, .submit-error { color: var(--color-critical); }
