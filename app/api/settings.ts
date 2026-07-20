@@ -413,6 +413,7 @@ export interface NotificationSettingsResponse {
   report_approved_enabled: boolean
   report_changes_enabled: boolean
   report_delivered_enabled: boolean
+  notification_retention_days?: number
 }
 
 export interface SaveNotificationSettingsRequest {
@@ -434,6 +435,7 @@ export interface SaveNotificationSettingsRequest {
   report_approved_enabled: boolean
   report_changes_enabled: boolean
   report_delivered_enabled: boolean
+  notification_retention_days: number
 }
 
 export interface SaveNotificationSettingsResponse {

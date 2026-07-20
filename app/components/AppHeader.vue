@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useNotificationBadge } from '~/composables/useNotificationBadge'
+
 interface BreadcrumbItem {
   label: string
   to?: string
@@ -15,6 +17,8 @@ const props = defineProps<{
 const emit = defineEmits<{
   'update:searchModelValue': [value: string]
 }>()
+
+const { badgeText, showBadge } = useNotificationBadge()
 
 const breadcrumbItems = computed(() => props.breadcrumb || [])
 const showSearchBox = computed(() => props.showSearch !== false)
@@ -70,10 +74,12 @@ onMounted(() => {
         <span class="app-header__search-kbd">⌘K</span>
       </div>
 
-      <button class="app-header__icon-btn">
-        <Icon name="lucide:bell" :size="18" />
-        <span class="app-header__notif-dot" />
-      </button>
+      <NotificationDropdown v-slot="{ toggle }">
+        <button class="app-header__icon-btn" aria-label="Notifications" @click.stop="toggle">
+          <Icon name="lucide:bell" :size="18" />
+          <span v-if="showBadge" class="app-header__notif-badge">{{ badgeText }}</span>
+        </button>
+      </NotificationDropdown>
 
       <span class="app-header__datetime">{{ now }}</span>
     </div>
@@ -197,15 +203,22 @@ onMounted(() => {
   color: var(--color-text-primary);
 }
 
-.app-header__notif-dot {
+.app-header__notif-badge {
   position: absolute;
-  top: 5px;
-  right: 5px;
-  width: 7px;
-  height: 7px;
-  background: var(--color-critical);
-  border-radius: 50%;
-  border: 1px solid var(--color-bg-surface);
+  top: 2px;
+  right: 0px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  background: var(--color-critical, #ef4444);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+  border-radius: 8px;
+  border: 1.5px solid var(--color-bg-surface);
+  pointer-events: none;
 }
 
 .app-header__datetime {

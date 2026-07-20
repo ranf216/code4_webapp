@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { settingsApi } from '~/api/settings'
+import { ApiError } from '~/api/base'
+import { useToastStore } from '~/stores/toast'
 
 const { t } = useTranslation()
+const toastStore = useToastStore()
 
 // Channels — parsed from comma-separated notification_methods
 const channelInApp = ref(true)
@@ -13,6 +16,10 @@ const senderName = ref('')
 
 // Notification title
 const notificationTitle = ref('')
+
+// Data Retention
+const retentionDays = ref(90)
+const retentionError = ref('')
 
 // Trigger enabled states — keyed by API field name
 const triggerStates = ref({
@@ -67,6 +74,7 @@ async function fetchSettings() {
       parseChannels(response.notification_methods || 'in_app,email,mobile')
       senderName.value = response.sender_name || ''
       notificationTitle.value = response.notification_title || ''
+      retentionDays.value = response.notification_retention_days ?? 90
       triggerStates.value = {
         new_call_enabled: response.new_call_enabled,
         call_accepted_enabled: response.call_accepted_enabled,
@@ -136,24 +144,48 @@ function toggleAllTriggers() {
 
 const enabledCount = computed(() => Object.values(triggerStates.value).filter(Boolean).length)
 
+// Validate retention days
+function validateRetention(): boolean {
+  const val = Number(retentionDays.value)
+  if (!Number.isInteger(val) || val < 1) {
+    retentionError.value = t('settings.notifications.retention_error')
+    return false
+  }
+  if (val > 365) {
+    retentionError.value = t('settings.notifications.retention_max_error')
+    return false
+  }
+  retentionError.value = ''
+  return true
+}
+
 // Save
 async function handleSave() {
+  if (!validateRetention()) return
   try {
     saving.value = true
     const response = await settingsApi.saveNotificationSettings({
       notification_methods: buildChannelsString(),
       notification_title: notificationTitle.value,
       sender_name: senderName.value,
+      notification_retention_days: Number(retentionDays.value),
       ...triggerStates.value,
     })
     if (response.rc === 0) {
       isDirty.value = false
+      toastStore.success(t('settings.notifications.save_success'), 3000)
+    } else if (response.rc === 103) {
+      toastStore.error(t('settings.notifications.access_denied'))
     } else {
-      alert(response.message || 'Failed to save notification settings')
+      toastStore.error(response.message || t('settings.notifications.save_failed'))
     }
   } catch (err) {
-    console.error('Error saving notification settings:', err)
-    alert('Failed to save notification settings')
+    if (err instanceof ApiError && err.rc === 103) {
+      toastStore.error(t('settings.notifications.access_denied'))
+    } else {
+      console.error('Error saving notification settings:', err)
+      toastStore.error(err instanceof ApiError ? err.message : t('settings.notifications.save_failed'))
+    }
   } finally {
     saving.value = false
   }
@@ -294,6 +326,35 @@ async function handleReset() {
                 @input="markDirty()"
               />
               <p class="form-hint">{{ t('settings.notifications.notification_title_hint') }}</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Section 4: Data Retention -->
+        <div class="settings-card">
+          <div class="card-header">
+            <div class="card-icon">
+              <Icon name="lucide:database" :size="18" />
+            </div>
+            <div>
+              <h3 class="card-title">{{ t('settings.notifications.retention_title') }}</h3>
+              <p class="card-desc">{{ t('settings.notifications.retention_desc') }}</p>
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="form-field">
+              <label class="form-label">{{ t('settings.notifications.retention_label') }}</label>
+              <input
+                v-model.number="retentionDays"
+                type="number"
+                class="form-input"
+                min="1"
+                max="365"
+                placeholder="90"
+                @input="retentionError = ''; markDirty()"
+              />
+              <p v-if="retentionError" class="form-error">{{ retentionError }}</p>
+              <p class="form-hint">{{ t('settings.notifications.retention_hint') }}</p>
             </div>
           </div>
         </div>
@@ -552,6 +613,12 @@ async function handleReset() {
 .form-hint {
   font-size: var(--font-size-xs);
   color: var(--color-text-muted);
+  margin: 0;
+}
+
+.form-error {
+  font-size: var(--font-size-xs);
+  color: var(--color-critical, #ef4444);
   margin: 0;
 }
 

@@ -41,6 +41,12 @@ export const DateTimeConfig = {
   dateTimeFormat: 'YYYY-MM-DD HH:mm:ss',
 } as const
 
+// Notification Configuration
+export const NotificationConfig = {
+  /** Polling interval in ms for fetching unread notification count */
+  pollIntervalMs: 60_000, // 60 seconds
+} as const
+
 // Search Configuration
 export const SearchConfig = {
   /** Debounce delay in ms before triggering a server-side search */
@@ -54,6 +60,7 @@ export const AppConfig = {
   pagination: PaginationConfig,
   dateTime: DateTimeConfig,
   search: SearchConfig,
+  notification: NotificationConfig,
 } as const
 
 export default AppConfig
