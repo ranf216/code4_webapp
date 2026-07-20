@@ -271,6 +271,25 @@ input, textarea, select {
   box-shadow: 0 0 0 3px var(--color-critical-bg);
 }
 
+/* --- Standard text input (matches resident search/filter input) --- */
+/* Does NOT set width, margin, or padding so each view keeps its own. */
+.input-standard {
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+  height: 40px;
+  outline: none;
+  transition: border-color var(--transition-base);
+}
+.input-standard::placeholder {
+  color: var(--color-text-muted);
+}
+.input-standard:focus {
+  border-color: var(--color-accent);
+}
+
 /* --- Labels --- */
 .label {
   display: block;

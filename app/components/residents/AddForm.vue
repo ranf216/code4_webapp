@@ -155,7 +155,7 @@ watch(() => props.show, (show: boolean) => {
             <input
               v-model="form.firstName"
               type="text"
-              class="field-input"
+              class="field-input input-standard"
               :placeholder="t('residents.first_name_placeholder')"
               :class="{ error: errors.firstName }"
             />
@@ -167,7 +167,7 @@ watch(() => props.show, (show: boolean) => {
             <input
               v-model="form.lastName"
               type="text"
-              class="field-input"
+              class="field-input input-standard"
               :placeholder="t('residents.last_name_placeholder')"
             />
           </div>
@@ -180,7 +180,7 @@ watch(() => props.show, (show: boolean) => {
             <input
               v-model="form.mobile"
               type="tel"
-              class="field-input"
+              class="field-input input-standard"
               :placeholder="t('residents.mobile_placeholder')"
               :class="{ error: errors.mobile }"
             />
@@ -193,7 +193,7 @@ watch(() => props.show, (show: boolean) => {
             <input
               v-model="form.email"
               type="email"
-              class="field-input"
+              class="field-input input-standard"
               :placeholder="t('residents.email_placeholder')"
               :class="{ error: errors.email }"
             />
@@ -205,7 +205,7 @@ watch(() => props.show, (show: boolean) => {
             <input
               v-model="form.address"
               type="text"
-              class="field-input"
+              class="field-input input-standard"
               :placeholder="t('residents.address_placeholder')"
               :class="{ error: errors.address }"
             />
@@ -223,7 +223,7 @@ watch(() => props.show, (show: boolean) => {
             <label class="field-label">{{ t('residents.instructions') }}</label>
             <textarea
               v-model="form.instructions"
-              class="field-input field-input--textarea"
+              class="field-input field-input--textarea input-standard"
               :placeholder="t('residents.instructions_placeholder')"
             />
           </div>
@@ -245,7 +245,7 @@ watch(() => props.show, (show: boolean) => {
               <input
                 v-model="newVehicle"
                 type="text"
-                class="field-input"
+                class="field-input input-standard"
                 :placeholder="t('residents.vehicle_placeholder')"
                 @keyup.enter="addVehicle"
               />
@@ -376,19 +376,7 @@ watch(() => props.show, (show: boolean) => {
 
 .field-input {
   width: 100%;
-  height: 44px;
   padding: 0 var(--space-4);
-  background: var(--color-bg-base);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  color: var(--color-text-primary);
-  font-size: var(--font-size-sm);
-  outline: none;
-  transition: border-color var(--transition-base);
-}
-
-.field-input:focus {
-  border-color: var(--color-accent);
 }
 
 .field-input--textarea {

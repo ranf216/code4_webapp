@@ -250,17 +250,17 @@ watch(() => props.show, (show: boolean) => {
         <div class="form-grid">
           <div class="form-section">
             <div class="form-row">
-              <div class="form-field"><label>{{ t('residents.first_name') }} <span class="required">*</span></label><input v-model="form.firstName" :class="{ error: errors.firstName }" /><span v-if="errors.firstName" class="error-message">{{ errors.firstName }}</span></div>
-              <div class="form-field"><label>{{ t('residents.last_name') }}</label><input v-model="form.lastName" /></div>
+              <div class="form-field"><label>{{ t('residents.first_name') }} <span class="required">*</span></label><input v-model="form.firstName" class="input-standard" :class="{ error: errors.firstName }" /><span v-if="errors.firstName" class="error-message">{{ errors.firstName }}</span></div>
+              <div class="form-field"><label>{{ t('residents.last_name') }}</label><input v-model="form.lastName" class="input-standard" /></div>
             </div>
-            <div class="form-field"><label>{{ t('residents.mobile') }} <span class="required">*</span></label><input v-model="form.mobile" type="tel" :class="{ error: errors.mobile }" /><span v-if="errors.mobile" class="error-message">{{ errors.mobile }}</span><p v-if="isPhoneChanged" class="warning"><Icon name="lucide:triangle-alert" :size="16" />{{ t('residents.phone_change_warning') }}</p></div>
-            <div class="form-field"><label>{{ t('residents.email') }}</label><input v-model="form.email" type="email" :class="{ error: errors.email }" /><span v-if="errors.email" class="error-message">{{ errors.email }}</span></div>
+            <div class="form-field"><label>{{ t('residents.mobile') }} <span class="required">*</span></label><input v-model="form.mobile" type="tel" class="input-standard" :class="{ error: errors.mobile }" /><span v-if="errors.mobile" class="error-message">{{ errors.mobile }}</span><p v-if="isPhoneChanged" class="warning"><Icon name="lucide:triangle-alert" :size="16" />{{ t('residents.phone_change_warning') }}</p></div>
+            <div class="form-field"><label>{{ t('residents.email') }}</label><input v-model="form.email" type="email" class="input-standard" :class="{ error: errors.email }" /><span v-if="errors.email" class="error-message">{{ errors.email }}</span></div>
             <div class="form-field"><label>{{ t('residents.address') }}</label><textarea v-model="form.address" /></div>
             <div class="form-field"><label>{{ t('residents.instructions') }}</label><textarea v-model="form.instructions" /></div>
           </div>
           <div class="form-section">
-            <div class="form-field"><label>{{ t('residents.community') }}</label><select v-model="form.communityId" :disabled="isLoadingCommunities" :class="{ error: errors.communityId }"><option :value="0">{{ t('residents.select_community') }}</option><option v-for="community in communities" :key="community.id" :value="community.id">{{ community.name }}</option></select><span v-if="errors.communityId" class="error-message">{{ errors.communityId }}</span></div>
-            <div class="form-field"><label>{{ t('residents.vehicle_numbers') }}</label><div class="vehicle-input"><input v-model="newVehicle" :placeholder="t('residents.vehicle_placeholder')" @keyup.enter="addVehicle" /><AppButton :text="t('common.add')" type="secondary" @click="addVehicle" /></div><div class="chips"><span v-for="(vehicle, index) in form.vehicles" :key="`${vehicle}-${index}`" class="chip">{{ vehicle }}<button @click="removeVehicle(index)"><Icon name="lucide:x" :size="14" /></button></span></div></div>
+            <div class="form-field"><label>{{ t('residents.community') }}</label><select v-model="form.communityId" class="input-standard" :disabled="isLoadingCommunities" :class="{ error: errors.communityId }"><option :value="0">{{ t('residents.select_community') }}</option><option v-for="community in communities" :key="community.id" :value="community.id">{{ community.name }}</option></select><span v-if="errors.communityId" class="error-message">{{ errors.communityId }}</span></div>
+            <div class="form-field"><label>{{ t('residents.vehicle_numbers') }}</label><div class="vehicle-input"><input v-model="newVehicle" class="input-standard" :placeholder="t('residents.vehicle_placeholder')" @keyup.enter="addVehicle" /><AppButton :text="t('common.add')" type="secondary" @click="addVehicle" /></div><div class="chips"><span v-for="(vehicle, index) in form.vehicles" :key="`${vehicle}-${index}`" class="chip">{{ vehicle }}<button @click="removeVehicle(index)"><Icon name="lucide:x" :size="14" /></button></span></div></div>
             <label class="toggle"><input v-model="form.communicationTest" type="checkbox" />{{ t('residents.enable_communication_test') }}</label>
             <label class="toggle"><input v-model="form.active" type="checkbox" />{{ t('residents.active') }}</label>
             <p v-if="isDeactivating" class="warning"><Icon name="lucide:triangle-alert" :size="16" />{{ t('residents.deactivate_warning') }}</p>
@@ -319,13 +319,20 @@ input, textarea, select {
   width: 100%; 
   border: 1px solid var(--color-border); 
   border-radius: var(--radius-md); 
-  background: var(--color-bg-base); 
   color: var(--color-text-primary); 
   padding: 10px 12px; 
 }
 textarea { 
+  background: var(--color-bg-base); 
   min-height: 76px; 
   resize: vertical; 
+}
+select { 
+  background: transparent; 
+}
+textarea:focus { 
+  border-color: var(--color-accent); 
+  outline: none; 
 }
 .error { 
   border-color: var(--color-critical); 

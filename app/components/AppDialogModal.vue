@@ -80,7 +80,13 @@ onBeforeUnmount(() => {
   width: 100%;
   max-height: 90vh;
   overflow-y: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
+}
+
+.dialog-modal::-webkit-scrollbar {
+  display: none;
 }
 
 .dialog-modal__header {

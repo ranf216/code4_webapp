@@ -213,7 +213,7 @@ onMounted(() => {
         <input
           v-model="searchQuery"
           type="text"
-          class="residents-management__search-input"
+          class="residents-management__search-input input-standard"
           :placeholder="t('residents.search_placeholder')"
         />
         <button v-if="searchQuery" class="residents-management__clear-search" :aria-label="t('common.close')" @click="clearSearch">
@@ -416,18 +416,7 @@ onMounted(() => {
 
 .residents-management__search-input {
   width: 100%;
-  height: 40px;
   padding: 0 calc(var(--space-3) + 24px) 0 calc(var(--space-3) + 24px);
-  background: var(--color-bg-surface);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  color: var(--color-text-primary);
-  font-size: var(--font-size-sm);
-  outline: none;
-}
-
-.residents-management__search-input:focus {
-  border-color: var(--color-accent);
 }
 
 .residents-management__filter {
@@ -533,7 +522,7 @@ onMounted(() => {
 .residents-management__table td {
   padding: var(--space-3) var(--space-4);
   font-size: var(--font-size-sm);
-  color: var(--color-text-secondary);
+  color: var(--color-text-primary);
   border-bottom: 1px solid var(--color-border);
 }
 
@@ -554,7 +543,7 @@ onMounted(() => {
 
 .resident-name__id {
   font-size: var(--font-size-sm);
-  color: var(--color-text-muted);
+  color: var(--color-text-primary);
 }
 
 .status-toggle {
@@ -601,7 +590,7 @@ onMounted(() => {
   border-radius: var(--radius-md);
   cursor: pointer;
   font-size: var(--font-size-sm);
-  color: var(--color-text-muted);
+  color: var(--color-text-primary);
 }
 
 .comm-test-toggle.enabled {
@@ -641,7 +630,7 @@ onMounted(() => {
   background: var(--color-bg-elevated);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
-  color: var(--color-text-secondary);
+  color: var(--color-text-primary);
   cursor: pointer;
   transition: all var(--transition-base);
 }
