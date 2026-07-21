@@ -244,7 +244,7 @@ defineExpose({ toggle, close, isOpen })
             <!-- Read/unread dot -->
             <span class="notif-item__dot" :class="{ 'notif-item__dot--unread': !item.is_read }" />
             <!-- Type icon -->
-            <Icon :name="getTypeIcon(item.type)" :size="16" class="notif-item__icon" />
+            <Icon :name="getTypeIcon(item.type)" :size="16" class="notif-item__icon" :class="{ 'notif-item__icon--emergency': item.type === 'panic_button' }" />
             <div class="notif-item__content">
               <div class="notif-item__top">
                 <span class="notif-item__item-title">{{ item.title }}</span>
@@ -414,6 +414,10 @@ defineExpose({ toggle, close, isOpen })
 
 .notif-item--unread .notif-item__icon {
   color: var(--color-text-secondary);
+}
+
+.notif-item__icon--emergency {
+  color: var(--color-critical, #ef4444) !important;
 }
 
 /* Content */
