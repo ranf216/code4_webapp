@@ -2,6 +2,7 @@
 import moment from 'moment'
 import { notificationApi } from '~/api/notification'
 import { useNotificationBadge } from '~/composables/useNotificationBadge'
+import { useNotificationSocket } from '~/composables/useNotificationSocket'
 import { useToastStore } from '~/stores/toast'
 import type { Notification, NotificationType } from '~/api/types/notification'
 
@@ -9,11 +10,24 @@ const { t } = useTranslation()
 const toastStore = useToastStore()
 const router = useRouter()
 const { showBadge, refresh: refreshBadge, decrement, reset: resetBadge } = useNotificationBadge()
+const { latestNotification, urgentAlert, dismissUrgentAlert } = useNotificationSocket()
 
 const isOpen = ref(false)
 const notifications = ref<Notification[]>([])
 const loading = ref(false)
 const markingAll = ref(false)
+
+// Prepend real-time notification when dropdown is open
+watch(latestNotification, (incoming) => {
+  if (!incoming || !isOpen.value) return
+  const exists = notifications.value.some((n) => n.notification_id === incoming.notification_id)
+  if (!exists) {
+    notifications.value.unshift(incoming)
+    if (notifications.value.length > 15) {
+      notifications.value.pop()
+    }
+  }
+})
 
 // Toggle dropdown
 function toggle() {
@@ -82,6 +96,36 @@ async function handleMarkAllRead() {
   } finally {
     markingAll.value = false
   }
+}
+
+// Urgent alert modal handling
+async function handleUrgentView() {
+  if (!urgentAlert.value) return
+
+  // Mark as read if it has a real notification id
+  if (typeof urgentAlert.value.notification_id === 'number' && urgentAlert.value.notification_id > 0) {
+    try {
+      await notificationApi.markAsRead(urgentAlert.value.notification_id, { showLoading: false })
+      decrement()
+    } catch {
+      // Continue even if marking fails
+    }
+  }
+
+  // Navigate to linked entity
+  if (urgentAlert.value.payload?.entity_type && urgentAlert.value.payload?.entity_id) {
+    const path = resolveEntityPath(urgentAlert.value.payload.entity_type, urgentAlert.value.payload.entity_id)
+    if (path) {
+      router.push(path)
+    }
+  }
+
+  close()
+  dismissUrgentAlert()
+}
+
+function handleUrgentDismiss() {
+  dismissUrgentAlert()
 }
 
 // Click on a notification item
@@ -180,17 +224,17 @@ function getTypeIcon(type: NotificationType): string {
 function formatRelativeTime(utcDateStr: string): string {
   const local = moment.utc(utcDateStr).local()
   const now = moment()
-  const diffMin = now.diff(local, 'minutes')
-  const diffHr = now.diff(local, 'hours')
+  const diffMin = Math.max(0, now.diff(local, 'minutes'))
+  const diffHr = Math.max(0, now.diff(local, 'hours'))
   const diffDay = now.diff(local, 'days')
 
   if (diffMin < 1) return t('notifications.time.just_now')
   if (diffMin < 60) return t('notifications.time.minutes_ago', { n: String(diffMin) })
   if (diffHr < 24) return t('notifications.time.hours_ago', { n: String(diffHr) })
   if (diffDay === 1) return t('notifications.time.yesterday')
-  if (diffDay < 7) return t('notifications.time.days_ago', { n: String(diffDay) })
+  if (diffDay >= 2 && diffDay < 7) return t('notifications.time.days_ago', { n: String(diffDay) })
 
-  // 7+ days: formatted date
+  // 7+ days (or future/invalid): formatted date
   return local.format('MMM D, YYYY')
 }
 
@@ -263,6 +307,20 @@ defineExpose({ toggle, close, isOpen })
         </div>
       </div>
     </Transition>
+
+    <!-- Urgent alert modal -->
+    <AppModal
+      :show="!!urgentAlert"
+      :title="urgentAlert?.title"
+      :ok-text="t('notifications.urgent.view')"
+      :cancel-text="t('notifications.urgent.dismiss')"
+      @ok="handleUrgentView"
+      @cancel="handleUrgentDismiss"
+      @close="handleUrgentDismiss"
+    >
+      <p class="urgent-alert__message">{{ urgentAlert?.message }}</p>
+      <p v-if="urgentAlert?.created_on" class="urgent-alert__time">{{ formatRelativeTime(urgentAlert.created_on) }}</p>
+    </AppModal>
   </div>
 </template>
 
@@ -514,5 +572,19 @@ defineExpose({ toggle, close, isOpen })
 .notif-dropdown-leave-to {
   opacity: 0;
   transform: translateY(-4px) scale(0.98);
+}
+
+/* Urgent alert modal */
+.urgent-alert__message {
+  margin: 0 0 var(--space-2);
+  font-size: var(--font-size-md);
+  color: var(--color-text-primary);
+  line-height: 1.5;
+}
+
+.urgent-alert__time {
+  margin: 0;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
 }
 </style>

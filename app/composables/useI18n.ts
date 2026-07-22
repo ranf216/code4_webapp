@@ -1142,6 +1142,8 @@ const translations: Record<string, Record<string, string>> = {
     'notifications.time.hours_ago': '{n}h ago',
     'notifications.time.yesterday': 'Yesterday',
     'notifications.time.days_ago': '{n} days ago',
+    'notifications.urgent.view': 'View',
+    'notifications.urgent.dismiss': 'Dismiss',
     'settings.poi.page_title': 'POI & Trespass Settings',
     'settings.poi.page_subtitle': 'Configure record management parameters and default response guidance texts.',
     'settings.poi.parameters_title': 'General Parameters',

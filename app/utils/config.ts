@@ -45,6 +45,9 @@ export const DateTimeConfig = {
 export const NotificationConfig = {
   /** Polling interval in ms for fetching unread notification count */
   pollIntervalMs: 60_000, // 60 seconds
+
+  /** WebSocket server URL for real-time notification events */
+  socketUrl: 'https://stg.ws.code4.iuetechnologies.com/',
 } as const
 
 // Search Configuration

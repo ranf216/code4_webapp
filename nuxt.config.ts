@@ -60,7 +60,7 @@ export default defineNuxtConfig({
 
   vite: {
     optimizeDeps: {
-      include: ['@googlemaps/js-api-loader'],
+      include: ['@googlemaps/js-api-loader', 'socket.io-client'],
     },
   },
 
