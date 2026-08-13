@@ -1,6 +1,9 @@
 <script setup lang="ts">
+import { callApi } from '~/api/call'
+import type { Call as ApiCall } from '~/api/types/call'
+
 interface CallCategory {
-  type: 'medical' | 'security' | 'concierge' | 'test'
+  type: 'medical' | 'security' | 'panic' | 'concierge' | 'test'
   label: string
   icon: string
   color: string
@@ -40,9 +43,131 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   close: []
+  resolved: []
+  canceled: []
 }>()
 
 const { t } = useTranslation()
+
+const loading = ref(false)
+const error = ref('')
+const fetchedCall = ref<Call | null>(null)
+
+const call = computed(() => fetchedCall.value ?? props.call)
+
+const showImagePreview = ref(false)
+const previewImages = ref<string[]>([])
+const previewInitialIndex = ref(0)
+
+function openImagePreview(images: string[], index: number) {
+  previewImages.value = images
+  previewInitialIndex.value = index
+  showImagePreview.value = true
+}
+
+function closeImagePreview() {
+  showImagePreview.value = false
+}
+
+const resolving = ref(false)
+const canceling = ref(false)
+
+const canResolve = computed(() => call.value?.status === 'accepted')
+const canCancel = computed(() => call.value?.status === 'accepted' && call.value?.category.type === 'concierge')
+const okDisabled = computed(() => resolving.value || canceling.value)
+const okText = computed(() => canResolve.value ? 'Resolve' : '')
+const cancelText = computed(() => canCancel.value ? 'Cancel' : '')
+
+async function handleResolve() {
+  if (!call.value) return
+  resolving.value = true
+  try {
+    await callApi.resolveCall({ call_id: Number(call.value.id) })
+    emit('resolved')
+    emit('close')
+  } catch (err: any) {
+    console.error('Resolve call failed:', err)
+  } finally {
+    resolving.value = false
+  }
+}
+
+async function handleCancel() {
+  if (!call.value) return
+  canceling.value = true
+  try {
+    await callApi.cancelCall(Number(call.value.id))
+    emit('canceled')
+    emit('close')
+  } catch (err: any) {
+    console.error('Cancel call failed:', err)
+  } finally {
+    canceling.value = false
+  }
+}
+
+function getCategoryInfo(category: ApiCall['category']): CallCategory {
+  const map: Record<ApiCall['category'], CallCategory> = {
+    medical_emergency: { type: 'medical', label: 'Medical Emergency', icon: 'lucide:heart-pulse', color: '#ef4444' },
+    security_emergency: { type: 'security', label: 'Security Emergency', icon: 'lucide:shield-alert', color: '#f97316' },
+    panic: { type: 'panic', label: 'Panic Button', icon: 'lucide:siren', color: '#ef4444' },
+    concierge_service: { type: 'concierge', label: 'Concierge Service', icon: 'lucide:bell-concierge', color: '#3b82f6' },
+    test: { type: 'test', label: 'Test Call', icon: 'lucide:test-tube', color: '#8b5cf6' },
+  }
+  return map[category]
+}
+
+function mapCall(apiCall: ApiCall): Call {
+  const category = getCategoryInfo(apiCall.category)
+  const serviceName = apiCall.service_type || category.label
+  const serviceIcon = apiCall.category === 'concierge_service' ? 'lucide:bell-concierge' : category.icon
+  const scheduledDateTime = apiCall.scheduled_date
+    ? `${apiCall.scheduled_date}${apiCall.scheduled_time_from ? ' ' + apiCall.scheduled_time_from : ''}`
+    : null
+
+  return {
+    id: apiCall.call_id.toString(),
+    category,
+    serviceType: { name: serviceName, icon: serviceIcon },
+    callDateTime: apiCall.created_on,
+    residentName: apiCall.resident_name || '',
+    communityName: apiCall.community_name || '',
+    address: apiCall.address || '',
+    currentAddress: apiCall.current_address || undefined,
+    description: apiCall.description || undefined,
+    scheduledDateTime,
+    officerName: apiCall.officer_name,
+    status: apiCall.status === 'resolved' ? 'done' : apiCall.status,
+    media: apiCall.media,
+    confirmationImages: apiCall.confirmation_media,
+    audioUrl: apiCall.audio_url || undefined,
+    videoUrl: apiCall.video_url || undefined,
+    officerComments: apiCall.officer_comments || undefined,
+    likeReaction: apiCall.reaction === 1,
+    residentComments: apiCall.resident_comment || undefined,
+  }
+}
+
+async function fetchCallDetails() {
+  if (!props.call) return
+  loading.value = true
+  error.value = ''
+  try {
+    const res = await callApi.getCall(Number(props.call.id))
+    fetchedCall.value = mapCall(res.call)
+  } catch (err: any) {
+    error.value = err.message || 'Failed to load call details'
+  } finally {
+    loading.value = false
+  }
+}
+
+watch(() => props.show, (show) => {
+  if (show && props.call) {
+    fetchedCall.value = null
+    fetchCallDetails()
+  }
+})
 
 function handleClose() {
   emit('close')
@@ -73,15 +198,27 @@ function getStatusLabel(status: string): string {
   <AppModal
     :show="show"
     :title="t('calls.call_details_title')"
-    cancel-text=""
-    ok-text=""
+    :cancel-text="cancelText"
+    :ok-text="okText"
+    :ok-disabled="okDisabled"
     max-width="50vw"
     @close="handleClose"
+    @ok="handleResolve"
+    @cancel="handleCancel"
   >
     <template #default>
       <div v-if="call" class="call-details-modal">
-        <!-- Header: Category + Service Type + Status -->
-        <div class="details-header">
+        <div v-if="loading" class="loading-state">
+          <Icon name="lucide:loader-2" :size="24" class="spinner" />
+          <span>Loading call details...</span>
+        </div>
+        <div v-else-if="error" class="error-state">
+          <Icon name="lucide:alert-circle" :size="24" />
+          <span>{{ error }}</span>
+        </div>
+        <template v-else>
+          <!-- Header: Category + Service Type + Status -->
+          <div class="details-header">
           <div class="category-service">
             <div class="category-badge" :style="{ backgroundColor: call.category.color + '20', color: call.category.color }">
               <Icon :name="call.category.icon" :size="20" />
@@ -147,9 +284,10 @@ function getStatusLabel(status: string): string {
               <img
                 v-for="(img, idx) in call.media"
                 :key="idx"
-                :src="`https://picsum.photos/seed/call${call.id}${idx}/150/150`"
+                :src="img"
                 class="media-thumb"
                 alt="Call media"
+                @click="openImagePreview(call.media, idx)"
               />
             </div>
           </div>
@@ -180,6 +318,7 @@ function getStatusLabel(status: string): string {
                 :src="img"
                 class="media-thumb"
                 alt="Confirmation"
+                @click="openImagePreview(call.confirmationImages, idx)"
               />
             </div>
           </div>
@@ -215,9 +354,17 @@ function getStatusLabel(status: string): string {
             </div>
           </div>
         </div>
+        </template>
       </div>
     </template>
   </AppModal>
+
+  <MImagePreview
+    :show="showImagePreview"
+    :images="previewImages"
+    :initial-index="previewInitialIndex"
+    @close="closeImagePreview"
+  />
 </template>
 
 <style scoped>
@@ -225,6 +372,30 @@ function getStatusLabel(status: string): string {
   max-height: 66vh;
   display: flex;
   flex-direction: column;
+}
+
+.loading-state,
+.error-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-8);
+  color: var(--color-text-secondary);
+}
+
+.error-state {
+  color: #ef4444;
+}
+
+.spinner {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
 /* Header */

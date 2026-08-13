@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { callApi } from '~/api/call'
+import type { Call as ApiCall, GetCallsRequest } from '~/api/types/call'
 import CallsFilters from './CallsFilters.vue'
 import CallDetailsModal from './CallDetailsModal.vue'
 
@@ -9,21 +11,7 @@ const selectedCall = ref<HistoryCall | null>(null)
 const showDetailsModal = ref(false)
 
 function openCallDetails(call: HistoryCall) {
-  selectedCall.value = {
-    ...call,
-    callDateTime: call.closedDateTime || call.scheduledDateTime || '2024-06-10 14:30:00',
-    description: 'Service completed successfully. Resident confirmed satisfaction.',
-    media: [
-      `https://picsum.photos/seed/history${call.id}1/150/150`,
-      `https://picsum.photos/seed/history${call.id}2/150/150`,
-    ],
-    confirmationImages: [
-      `https://picsum.photos/seed/confirm${call.id}/150/150`,
-    ],
-    officerComments: 'Arrived on time, completed the task efficiently.',
-    likeReaction: call.status === 'done',
-    residentComments: call.status === 'done' ? 'Great service, thank you!' : '',
-  }
+  selectedCall.value = call
   showDetailsModal.value = true
 }
 
@@ -32,9 +20,19 @@ function closeCallDetails() {
   selectedCall.value = null
 }
 
+async function handleResolved() {
+  await fetchHistoryCalls()
+  closeCallDetails()
+}
+
+async function handleCanceled() {
+  await fetchHistoryCalls()
+  closeCallDetails()
+}
+
 // Types for Call Category
 interface CallCategory {
-  type: 'medical' | 'security' | 'concierge' | 'test'
+  type: 'medical' | 'security' | 'panic' | 'concierge' | 'test'
   label: string
   icon: string
   color: string
@@ -101,85 +99,126 @@ const activeFilters = ref<Record<string, string>>({})
 
 function handleFilterChange(filters: Record<string, string>) {
   activeFilters.value = filters
+  fetchHistoryCalls()
 }
 
-// Mock data for history calls
-const historyCalls = ref<HistoryCall[]>([
-  {
-    id: 'hist-001',
-    category: { type: 'medical', label: 'Medical', icon: 'lucide:heart-pulse', color: '#ef4444' },
-    serviceType: { name: 'Medical Assistance', icon: 'lucide:stethoscope' },
-    residentName: 'Sarah Johnson',
-    communityName: 'Sunset Valley',
-    address: '123 Maple Drive, Apt 4B',
-    scheduledDateTime: '2024-06-15 09:00:00',
-    closedDateTime: '2024-06-15 09:45:00',
-    officerName: 'Dr. Michael Chen',
-    status: 'done',
-  },
-  {
-    id: 'hist-002',
-    category: { type: 'security', label: 'Security', icon: 'lucide:shield', color: '#f97316' },
-    serviceType: { name: 'Security Patrol', icon: 'lucide:shield-check' },
-    residentName: 'Robert Williams',
-    communityName: 'Greenwood Heights',
-    address: '456 Oak Avenue, House 12',
-    scheduledDateTime: '2024-06-14 22:00:00',
-    closedDateTime: '2024-06-14 22:30:00',
-    officerName: 'Officer James Martinez',
-    status: 'done',
-  },
-  {
-    id: 'hist-003',
-    category: { type: 'concierge', label: 'Concierge', icon: 'lucide:bell', color: '#3b82f6' },
-    serviceType: { name: 'Package Delivery', icon: 'lucide:package' },
-    residentName: 'Emily Davis',
-    communityName: 'Riverside Commons',
-    address: '789 River Road, Suite 301',
-    scheduledDateTime: '2024-06-13 14:00:00',
-    closedDateTime: '2024-06-13 16:00:00',
-    officerName: null,
-    status: 'canceled',
-  },
-  {
-    id: 'hist-004',
-    category: { type: 'concierge', label: 'Concierge', icon: 'lucide:bell', color: '#3b82f6' },
-    serviceType: { name: 'Maintenance Request', icon: 'lucide:wrench' },
-    residentName: 'David Thompson',
-    communityName: 'Sunset Valley',
-    address: '321 Pine Street, Villa 7',
-    scheduledDateTime: '2024-06-12 10:00:00',
-    closedDateTime: '2024-06-12 11:30:00',
-    officerName: 'Technician Lisa Park',
-    status: 'done',
-  },
-  {
-    id: 'hist-005',
-    category: { type: 'test', label: 'Test', icon: 'lucide:activity', color: '#22c55e' },
-    serviceType: { name: 'Communication Test', icon: 'lucide:phone' },
-    residentName: 'Test User',
-    communityName: 'Sunset Valley',
-    address: '999 Test Lane',
-    scheduledDateTime: null,
-    closedDateTime: '2024-06-11 08:00:00',
-    officerName: null,
-    status: 'done',
-  },
-])
+const historyCalls = ref<HistoryCall[]>([])
+const loading = ref(false)
+const error = ref('')
 
-// Filtered history calls (AND relation between all filters)
+function getCategoryInfo(category: ApiCall['category']): CallCategory {
+  const map: Record<ApiCall['category'], CallCategory> = {
+    medical_emergency: { type: 'medical', label: 'Medical', icon: 'lucide:heart-pulse', color: '#ef4444' },
+    security_emergency: { type: 'security', label: 'Security', icon: 'lucide:shield', color: '#f97316' },
+    panic: { type: 'panic', label: 'Panic', icon: 'lucide:siren', color: '#ef4444' },
+    concierge_service: { type: 'concierge', label: 'Concierge', icon: 'lucide:bell', color: '#3b82f6' },
+    test: { type: 'test', label: 'Test', icon: 'lucide:activity', color: '#22c55e' },
+  }
+  return map[category]
+}
+
+function getClosedDateTime(apiCall: ApiCall): string | undefined {
+  if (apiCall.resolved_on) return apiCall.resolved_on
+  if (apiCall.canceled_on) return apiCall.canceled_on
+  return undefined
+}
+
+function mapHistoryCall(apiCall: ApiCall): HistoryCall {
+  const category = getCategoryInfo(apiCall.category)
+  const serviceName = apiCall.service_type || category.label
+  const serviceIcon = apiCall.category === 'concierge_service' ? 'lucide:bell-concierge' : category.icon
+  const scheduledDateTime = apiCall.scheduled_date
+    ? `${apiCall.scheduled_date}${apiCall.scheduled_time_from ? ' ' + apiCall.scheduled_time_from : ''}`
+    : null
+  const closedDateTime = getClosedDateTime(apiCall)
+
+  return {
+    id: apiCall.call_id.toString(),
+    category,
+    serviceType: { name: serviceName, icon: serviceIcon },
+    residentName: apiCall.resident_name || '',
+    communityName: apiCall.community_name || '',
+    address: apiCall.address || '',
+    scheduledDateTime,
+    closedDateTime,
+    officerName: apiCall.officer_name,
+    status: apiCall.status === 'resolved' ? 'done' : 'canceled',
+    callDateTime: apiCall.created_on,
+    currentAddress: apiCall.current_address || undefined,
+    description: apiCall.description || undefined,
+    media: apiCall.media,
+    confirmationImages: apiCall.confirmation_media,
+    audioUrl: apiCall.audio_url || undefined,
+    videoUrl: apiCall.video_url || undefined,
+    officerComments: apiCall.officer_comments || undefined,
+    likeReaction: apiCall.reaction === 1,
+    residentComments: apiCall.resident_comment || undefined,
+  }
+}
+
+function buildGetHistoryRequest(filters: Record<string, string>): Omit<GetCallsRequest, '#request'> {
+  const categoryMap: Record<string, ApiCall['category'] | undefined> = {
+    'Medical Assistance': 'medical_emergency',
+    'Security Patrol': 'security_emergency',
+    'Package Delivery': 'concierge_service',
+    'Communication Test': 'test',
+  }
+
+  const statusMap: Record<string, ApiCall['status'] | undefined> = {
+    new: 'new',
+    accepted: 'accepted',
+    done: 'resolved',
+    canceled: 'canceled',
+  }
+
+  const params: Omit<GetCallsRequest, '#request'> = {
+    is_open: false,
+    limit: 100,
+  }
+
+  if (filters.status) {
+    const status = statusMap[filters.status]
+    if (status) {
+      params.status = status
+    }
+  }
+
+  const category = filters.serviceType ? categoryMap[filters.serviceType] : undefined
+  if (category) {
+    params.category = category
+  }
+
+  if (filters.search) {
+    params.search_text = filters.search
+  }
+
+  if (filters.community) {
+    params.community_id = Number(filters.community)
+  }
+
+  return params
+}
+
+async function fetchHistoryCalls() {
+  loading.value = true
+  error.value = ''
+  try {
+    const res = await callApi.getCalls(buildGetHistoryRequest(activeFilters.value), { showLoading: false })
+    historyCalls.value = res.calls.map(mapHistoryCall)
+  } catch (err: any) {
+    error.value = err.message || 'Failed to load call history'
+  } finally {
+    loading.value = false
+  }
+}
+
+onMounted(() => {
+  fetchHistoryCalls()
+})
+
+// Local filters for fields not supported by get_calls API
 const filteredHistoryCalls = computed(() => {
   return historyCalls.value.filter((call) => {
-    // Community filter
-    if (activeFilters.value.community && call.communityName !== activeFilters.value.community) {
-      return false
-    }
-
-    // Service type filter
-    if (activeFilters.value.serviceType && call.serviceType.name !== activeFilters.value.serviceType) {
-      return false
-    }
-
     // Resident name filter
     if (activeFilters.value.residentName &&
         !call.residentName.toLowerCase().includes(activeFilters.value.residentName.toLowerCase())) {
@@ -190,30 +229,6 @@ const filteredHistoryCalls = computed(() => {
     if (activeFilters.value.officerName) {
       if (!call.officerName) return false
       if (!call.officerName.toLowerCase().includes(activeFilters.value.officerName.toLowerCase())) {
-        return false
-      }
-    }
-
-    // Status filter (adapted for history)
-    if (activeFilters.value.status && call.status !== activeFilters.value.status) {
-      return false
-    }
-
-    // Free search across all columns
-    if (activeFilters.value.search) {
-      const search = activeFilters.value.search.toLowerCase()
-      const searchable = [
-        call.id,
-        call.category.label,
-        call.serviceType.name,
-        call.residentName,
-        call.communityName,
-        call.address,
-        call.officerName || '',
-        call.status,
-      ].join(' ').toLowerCase()
-
-      if (!searchable.includes(search)) {
         return false
       }
     }
@@ -237,8 +252,19 @@ function getStatusLabel(status: string): string {
     <!-- Filters -->
     <CallsFilters @filter-change="handleFilterChange" />
 
-    <!-- Table -->
-    <div class="table-wrapper">
+    <div v-if="loading" class="empty-state">
+      <Icon name="lucide:loader-2" :size="24" class="spinner" />
+      <span>Loading history...</span>
+    </div>
+    <div v-else-if="error" class="empty-state">
+      <Icon name="lucide:alert-circle" :size="24" />
+      <span>{{ error }}</span>
+    </div>
+    <div v-else-if="historyCalls.length === 0" class="empty-state">
+      <Icon name="lucide:phone-off" :size="24" />
+      <span>No history found</span>
+    </div>
+    <div v-else class="table-wrapper">
       <table class="data-table">
         <thead>
           <tr>
@@ -358,6 +384,8 @@ function getStatusLabel(status: string): string {
       :show="showDetailsModal"
       :call="selectedCall"
       @close="closeCallDetails"
+      @resolved="handleResolved"
+      @canceled="handleCanceled"
     />
   </div>
 </template>
@@ -512,8 +540,18 @@ function getStatusLabel(status: string): string {
   flex-direction: column;
   align-items: center;
   justify-content: center;
+  gap: var(--space-2);
   padding: var(--space-12);
   color: var(--color-text-secondary);
+}
+
+.spinner {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
 /* Responsive */

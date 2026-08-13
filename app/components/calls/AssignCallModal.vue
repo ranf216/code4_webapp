@@ -1,6 +1,9 @@
 <script setup lang="ts">
+import { officerApi } from '~/api/officer'
+import type { Officer } from '~/api/types/officer'
+
 interface CallCategory {
-  type: 'medical' | 'security' | 'concierge' | 'test'
+  type: 'medical' | 'security' | 'panic' | 'concierge' | 'test'
   label: string
   icon: string
   color: string
@@ -13,6 +16,7 @@ interface ServiceType {
 
 interface Call {
   id: string
+  communityId: number
   category: CallCategory
   serviceType: ServiceType
   residentName: string
@@ -23,11 +27,6 @@ interface Call {
   status: 'new' | 'accepted' | 'done' | 'canceled'
 }
 
-interface Officer {
-  id: string
-  name: string
-}
-
 const props = defineProps<{
   show: boolean
   call: Call | null
@@ -35,40 +34,45 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   close: []
-  assign: [data: { officerId: string; officerName: string; scheduleDate: string; scheduleTime: string }]
+  assign: [data: { officerId: string; officerName: string }]
 }>()
 
 const { t } = useTranslation()
 
-// Mock officers for the community
-const officers = ref<Officer[]>([
-  { id: 'off-001', name: 'Dr. Michael Chen' },
-  { id: 'off-002', name: 'Officer James Martinez' },
-  { id: 'off-003', name: 'Technician Lisa Park' },
-  { id: 'off-004', name: 'Security Guard Tom Wilson' },
-])
+const officers = ref<Officer[]>([])
+const officersLoading = ref(false)
+const officersError = ref('')
 
 // Form state
 const selectedOfficer = ref<string>('')
-const scheduleDate = ref<string>('')
-const scheduleTime = ref<string>('')
 
-// Reset form when modal opens
-watch(() => props.show, (show) => {
-  if (show) {
+// Fetch officers when modal opens
+watch(() => props.show, async (show) => {
+  if (show && props.call) {
     selectedOfficer.value = ''
-    scheduleDate.value = ''
-    scheduleTime.value = ''
+    officersLoading.value = true
+    officersError.value = ''
+    try {
+      const res = await officerApi.getOfficers({
+        community_id: props.call.communityId,
+        include_inactive: false,
+      })
+      officers.value = res.officers
+    } catch (err: any) {
+      officersError.value = err.message || 'Failed to load officers'
+    } finally {
+      officersLoading.value = false
+    }
   }
 })
 
 const selectedOfficerName = computed(() => {
-  const officer = officers.value.find(o => o.id === selectedOfficer.value)
-  return officer?.name || ''
+  const officer = officers.value.find(o => o.user_id === selectedOfficer.value)
+  return officer ? `${officer.first_name} ${officer.last_name}`.trim() : ''
 })
 
 const canSubmit = computed(() => {
-  return selectedOfficer.value && scheduleDate.value && scheduleTime.value
+  return !!selectedOfficer.value
 })
 
 function handleClose() {
@@ -81,8 +85,6 @@ function handleAssign() {
   emit('assign', {
     officerId: selectedOfficer.value,
     officerName: selectedOfficerName.value,
-    scheduleDate: scheduleDate.value,
-    scheduleTime: scheduleTime.value,
   })
 }
 </script>
@@ -135,27 +137,17 @@ function handleAssign() {
           <!-- Officer Selection -->
           <div class="form-field">
             <label class="field-label">{{ t('calls.officer') }} <span class="required">*</span></label>
-            <select v-model="selectedOfficer" class="field-select">
+            <div v-if="officersLoading" class="field-loading">Loading officers...</div>
+            <div v-else-if="officersError" class="field-error">{{ officersError }}</div>
+            <select v-else v-model="selectedOfficer" class="field-select">
               <option value="">{{ t('calls.select_officer') }}</option>
-              <option v-for="officer in officers" :key="officer.id" :value="officer.id">
-                {{ officer.name }}
+              <option v-for="officer in officers" :key="officer.user_id" :value="officer.user_id">
+                {{ officer.first_name }} {{ officer.last_name }}
               </option>
             </select>
             <p v-if="selectedOfficerName" class="selected-officer">
               {{ t('calls.selected') }}: <strong>{{ selectedOfficerName }}</strong>
             </p>
-          </div>
-
-          <!-- Schedule Date -->
-          <div class="form-field">
-            <label class="field-label">{{ t('calls.schedule_date') }} <span class="required">*</span></label>
-            <input v-model="scheduleDate" type="date" class="field-input" />
-          </div>
-
-          <!-- Schedule Time -->
-          <div class="form-field">
-            <label class="field-label">{{ t('calls.schedule_time') }} <span class="required">*</span></label>
-            <input v-model="scheduleTime" type="time" class="field-input" />
           </div>
         </div>
 
@@ -271,6 +263,17 @@ function handleAssign() {
 .field-input:focus {
   outline: none;
   border-color: var(--color-accent);
+}
+
+.field-loading,
+.field-error {
+  padding: var(--space-2) 0;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+}
+
+.field-error {
+  color: #ef4444;
 }
 
 .selected-officer {

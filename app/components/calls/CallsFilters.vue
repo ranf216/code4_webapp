@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import { communityApi } from '~/api/community'
+import type { Community } from '~/api/community'
+
 const { t } = useTranslation()
 
 // Filter state
@@ -15,10 +18,28 @@ const filters = reactive({
   search: '',
 })
 
-// Mock options for dropdowns
-const communities = ['Sunset Valley', 'Greenwood Heights', 'Riverside Commons']
+// Communities from API
+const communities = ref<Community[]>([])
+const communitiesLoading = ref(false)
+const communitiesError = ref('')
+
+// Service type options (UI only)
 const serviceTypes = ['Medical Assistance', 'Security Patrol', 'Package Delivery', 'Communication Test']
 const statuses = ['new', 'accepted']
+
+// Fetch communities on mount
+onMounted(async () => {
+  communitiesLoading.value = true
+  communitiesError.value = ''
+  try {
+    const res = await communityApi.getCommunities({ include_inactive: false }, { showLoading: false })
+    communities.value = res.communities
+  } catch (err: any) {
+    communitiesError.value = err.message || 'Failed to load communities'
+  } finally {
+    communitiesLoading.value = false
+  }
+})
 
 // Emit filter changes
 const emit = defineEmits<{
@@ -75,9 +96,11 @@ const hasActiveFilters = computed(() => {
       <!-- Community -->
       <div class="filter-field">
         <label class="filter-label">{{ t('calls.filters.community') }}</label>
-        <select v-model="filters.community" class="filter-select">
+        <div v-if="communitiesLoading" class="field-loading">Loading communities...</div>
+        <div v-else-if="communitiesError" class="field-error">{{ communitiesError }}</div>
+        <select v-else v-model="filters.community" class="filter-select">
           <option value="">{{ t('calls.filters.all') }}</option>
-          <option v-for="c in communities" :key="c" :value="c">{{ c }}</option>
+          <option v-for="c in communities" :key="c.community_id" :value="String(c.community_id)">{{ c.name }}</option>
         </select>
       </div>
 
@@ -284,6 +307,17 @@ const hasActiveFilters = computed(() => {
 .range-separator {
   color: var(--color-text-muted);
   font-size: var(--font-size-sm);
+}
+
+.field-loading,
+.field-error {
+  padding: var(--space-2) 0;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+}
+
+.field-error {
+  color: #ef4444;
 }
 
 /* Responsive */
