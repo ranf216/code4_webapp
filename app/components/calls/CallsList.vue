@@ -61,19 +61,9 @@ function closeAssignModal() {
   callToAssign.value = null
 }
 
-async function handleAssign(data: { officerId: string; officerName: string }) {
-  if (!callToAssign.value) return
-
-  try {
-    await callApi.assignCall({
-      call_id: Number(callToAssign.value.id),
-      officer_user_id: data.officerId,
-    })
-    await fetchCalls()
-    closeAssignModal()
-  } catch (err: any) {
-    console.error('Assign call failed:', err)
-  }
+async function handleAssigned() {
+  await fetchCalls()
+  closeAssignModal()
 }
 
 // Types for Call Category
@@ -105,6 +95,7 @@ interface Call {
   // Optional fields for Call Details
   callDateTime?: string
   currentAddress?: string
+  displayId?: string
   description?: string
   media?: string[]
   audioUrl?: string
@@ -144,12 +135,14 @@ function mapCall(apiCall: ApiCall): Call {
 
   return {
     id: apiCall.call_id.toString(),
+    displayId: `CL-${apiCall.call_id}`,
     category,
     serviceType: { name: serviceName, icon: serviceIcon },
     residentName: apiCall.resident_name || '',
     communityName: apiCall.community_name || '',
     communityId: apiCall.community_id,
     address: apiCall.address || '',
+    description: apiCall.description || undefined,
     scheduledDateTime,
     officerName: apiCall.officer_name,
     status: apiCall.status as 'new' | 'accepted',
@@ -345,7 +338,7 @@ function getStatusLabel(status: string): string {
       :show="showAssignModal"
       :call="callToAssign"
       @close="closeAssignModal"
-      @assign="handleAssign"
+      @assigned="handleAssigned"
     />
   </div>
 </template>

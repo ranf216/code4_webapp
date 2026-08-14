@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { callApi } from '~/api/call'
+import FileUpload from '~/components/FileUpload.vue'
+import { useAuthStore } from '~/stores/auth'
 import type { Call as ApiCall } from '~/api/types/call'
 
 interface CallCategory {
@@ -16,19 +18,29 @@ interface ServiceType {
 
 interface Call {
   id: string
+  displayId?: string
   category: CallCategory
   serviceType: ServiceType
+  priority?: string | null
   callDateTime?: string
+  createdOn?: string
+  lastUpdate?: string
   residentName: string
   communityName: string
   address: string
   currentAddress?: string
+  latitude?: number | string | null
+  longitude?: number | string | null
   description?: string
   scheduledDateTime?: string | null
   officerName?: string | null
+  assignedBy?: string | null
+  acceptedOn?: string | null
+  resolvedOn?: string | null
   status: 'new' | 'accepted' | 'done' | 'canceled'
   media?: string[]
   confirmationImages?: string[]
+  confirmationVideoUrl?: string | null
   audioUrl?: string
   videoUrl?: string
   officerComments?: string
@@ -71,21 +83,55 @@ function closeImagePreview() {
 
 const resolving = ref(false)
 const canceling = ref(false)
+const showResolveModal = ref(false)
+const resolveComments = ref('')
+const resolvePhotoIds = ref<string[]>([])
+const resolveVideoIds = ref<string[]>([])
+const resolveError = ref('')
+const photoUploadRef = ref<InstanceType<typeof FileUpload> | null>(null)
+const videoUploadRef = ref<InstanceType<typeof FileUpload> | null>(null)
 
-const canResolve = computed(() => call.value?.status === 'accepted')
+const authStore = useAuthStore()
+
+const canResolve = computed(() => call.value?.status === 'accepted' && (call.value?.category.type !== 'panic' || authStore.isAdmin))
 const canCancel = computed(() => call.value?.status === 'accepted' && call.value?.category.type === 'concierge')
 const okDisabled = computed(() => resolving.value || canceling.value)
-const okText = computed(() => canResolve.value ? 'Resolve' : '')
+const okText = computed(() => canResolve.value ? 'Resolve Call' : '')
 const cancelText = computed(() => canCancel.value ? 'Cancel' : '')
 
-async function handleResolve() {
+function openResolveModal() {
+  if (!canResolve.value) return
+  resolveComments.value = ''
+  resolvePhotoIds.value = []
+  resolveVideoIds.value = []
+  resolveError.value = ''
+  showResolveModal.value = true
+}
+
+function closeResolveModal() {
+  showResolveModal.value = false
+}
+
+async function submitResolve() {
   if (!call.value) return
   resolving.value = true
+  resolveError.value = ''
   try {
-    await callApi.resolveCall({ call_id: Number(call.value.id) })
+    const photoIds = photoUploadRef.value ? await photoUploadRef.value.uploadAll() : []
+    const videoIds = videoUploadRef.value ? await videoUploadRef.value.uploadAll() : []
+    await callApi.resolveCall({
+      call_id: Number(call.value.id),
+      officer_comments: resolveComments.value || undefined,
+      confirmation_media_file_ids: photoIds.length ? photoIds : undefined,
+      confirmation_video_file_id: videoIds[0] || undefined,
+    })
+    resolveComments.value = ''
+    resolvePhotoIds.value = []
+    resolveVideoIds.value = []
+    showResolveModal.value = false
     emit('resolved')
-    emit('close')
   } catch (err: any) {
+    resolveError.value = err.message || 'Resolve call failed'
     console.error('Resolve call failed:', err)
   } finally {
     resolving.value = false
@@ -127,19 +173,29 @@ function mapCall(apiCall: ApiCall): Call {
 
   return {
     id: apiCall.call_id.toString(),
+    displayId: `CL-${apiCall.call_id}`,
     category,
     serviceType: { name: serviceName, icon: serviceIcon },
+    priority: apiCall.priority,
     callDateTime: apiCall.created_on,
+    createdOn: apiCall.created_on,
+    lastUpdate: apiCall.last_update || undefined,
     residentName: apiCall.resident_name || '',
     communityName: apiCall.community_name || '',
     address: apiCall.address || '',
     currentAddress: apiCall.current_address || undefined,
+    latitude: apiCall.latitude,
+    longitude: apiCall.longitude,
     description: apiCall.description || undefined,
     scheduledDateTime,
     officerName: apiCall.officer_name,
+    assignedBy: apiCall.assigned_by || undefined,
+    acceptedOn: apiCall.accepted_on || undefined,
+    resolvedOn: apiCall.resolved_on || undefined,
     status: apiCall.status === 'resolved' ? 'done' : apiCall.status,
     media: apiCall.media,
     confirmationImages: apiCall.confirmation_media,
+    confirmationVideoUrl: apiCall.confirmation_video_url || undefined,
     audioUrl: apiCall.audio_url || undefined,
     videoUrl: apiCall.video_url || undefined,
     officerComments: apiCall.officer_comments || undefined,
@@ -192,6 +248,17 @@ function getStatusLabel(status: string): string {
     default: return status
   }
 }
+
+function getPriorityClass(priority: string | null | undefined): string {
+  const p = priority || 'normal'
+  switch (p) {
+    case 'urgent': return 'priority-urgent'
+    case 'important': return 'priority-important'
+    case 'normal': return 'priority-normal'
+    case 'low': return 'priority-low'
+    default: return 'priority-normal'
+  }
+}
 </script>
 
 <template>
@@ -203,7 +270,7 @@ function getStatusLabel(status: string): string {
     :ok-disabled="okDisabled"
     max-width="50vw"
     @close="handleClose"
-    @ok="handleResolve"
+    @ok="openResolveModal"
     @cancel="handleCancel"
   >
     <template #default>
@@ -219,20 +286,30 @@ function getStatusLabel(status: string): string {
         <template v-else>
           <!-- Header: Category + Service Type + Status -->
           <div class="details-header">
-          <div class="category-service">
-            <div class="category-badge" :style="{ backgroundColor: call.category.color + '20', color: call.category.color }">
-              <Icon :name="call.category.icon" :size="20" />
-              <span>{{ call.category.label }}</span>
+            <div class="category-service">
+              <div class="category-badge" :style="{ backgroundColor: call.category.color + '20', color: call.category.color }">
+                <Icon :name="call.category.icon" :size="20" />
+                <span>{{ call.category.label }}</span>
+              </div>
+              <div class="service-type">
+                <Icon :name="call.serviceType.icon" :size="16" />
+                <span>{{ call.serviceType.name }}</span>
+              </div>
             </div>
-            <div class="service-type">
-              <Icon :name="call.serviceType.icon" :size="16" />
-              <span>{{ call.serviceType.name }}</span>
+            <div class="header-badges">
+              <span class="text-muted text-sm">{{ call.displayId }}</span>
+              <span :class="['status-badge', getStatusClass(call.status)]">
+                {{ getStatusLabel(call.status) }}
+              </span>
+              <span :class="['status-badge', getPriorityClass(call.priority)]">
+                {{ call.priority }}
+              </span>
             </div>
           </div>
-          <span :class="['status-badge', getStatusClass(call.status)]">
-            {{ getStatusLabel(call.status) }}
-          </span>
-        </div>
+          <div class="details-meta">
+            <span class="text-muted text-xs">Created: {{ call.createdOn }}</span>
+            <span v-if="call.lastUpdate" class="text-muted text-xs">Updated: {{ call.lastUpdate }}</span>
+          </div>
 
         <!-- Scrollable Content -->
         <div class="details-content">
@@ -241,8 +318,16 @@ function getStatusLabel(status: string): string {
             <h4 class="section-title">{{ t('calls.call_info') }}</h4>
             <div class="info-grid">
               <div class="info-item">
-                <label>{{ t('calls.call_datetime') }}</label>
-                <span>{{ call.callDateTime }}</span>
+                <label>Call ID</label>
+                <span>{{ call.displayId }}</span>
+              </div>
+              <div class="info-item">
+                <label>Created</label>
+                <span>{{ call.createdOn }}</span>
+              </div>
+              <div v-if="call.lastUpdate" class="info-item">
+                <label>Last update</label>
+                <span>{{ call.lastUpdate }}</span>
               </div>
               <div class="info-item">
                 <label>{{ t('calls.resident') }}</label>
@@ -256,13 +341,25 @@ function getStatusLabel(status: string): string {
                 <label>{{ t('calls.address') }}</label>
                 <span>{{ call.address }}</span>
               </div>
-              <div v-if="call.currentAddress" class="info-item">
+              <div v-if="call.currentAddress" class="info-item info-item--highlight">
                 <label>{{ t('calls.current_address') }}</label>
                 <span>{{ call.currentAddress }}</span>
+              </div>
+              <div v-if="call.latitude != null && call.longitude != null" class="info-item">
+                <label>GPS coordinates</label>
+                <span>{{ call.latitude }}, {{ call.longitude }}</span>
               </div>
               <div class="info-item">
                 <label>{{ t('calls.officer') }}</label>
                 <span>{{ call.officerName || '—' }}</span>
+              </div>
+              <div v-if="call.assignedBy" class="info-item">
+                <label>Assigned by</label>
+                <span>{{ call.assignedBy }}</span>
+              </div>
+              <div v-if="call.acceptedOn" class="info-item">
+                <label>Accepted on</label>
+                <span>{{ call.acceptedOn }}</span>
               </div>
               <div class="info-item">
                 <label>{{ t('calls.scheduled_datetime') }}</label>
@@ -308,10 +405,15 @@ function getStatusLabel(status: string): string {
             </video>
           </div>
 
-          <!-- Confirmation Images (for completed calls) -->
-          <div v-if="call.confirmationImages && call.confirmationImages.length > 0" class="details-section">
-            <h4 class="section-title">{{ t('calls.confirmation_images') }}</h4>
-            <div class="media-gallery">
+          <!-- Resolution (for completed calls) -->
+          <div v-if="call.status === 'done'" class="details-section resolution-section">
+            <h4 class="section-title">Resolution</h4>
+            <div v-if="call.resolvedOn" class="info-item">
+              <label>Resolved on</label>
+              <span>{{ call.resolvedOn }}</span>
+            </div>
+            <p v-if="call.officerComments" class="description-text">{{ call.officerComments }}</p>
+            <div v-if="call.confirmationImages && call.confirmationImages.length > 0" class="media-gallery">
               <img
                 v-for="(img, idx) in call.confirmationImages"
                 :key="idx"
@@ -321,12 +423,11 @@ function getStatusLabel(status: string): string {
                 @click="openImagePreview(call.confirmationImages, idx)"
               />
             </div>
-          </div>
-
-          <!-- Officer Comments (for completed calls) -->
-          <div v-if="call.officerComments" class="details-section">
-            <h4 class="section-title">{{ t('calls.officer_comments') }}</h4>
-            <p class="description-text">{{ call.officerComments }}</p>
+            <div v-if="call.confirmationVideoUrl" class="media-gallery">
+              <video controls class="video-player">
+                <source :src="call.confirmationVideoUrl" type="video/mp4" />
+              </video>
+            </div>
           </div>
 
           <!-- Resident Feedback Section (for completed calls) -->
@@ -355,6 +456,63 @@ function getStatusLabel(status: string): string {
           </div>
         </div>
         </template>
+      </div>
+    </template>
+  </AppModal>
+
+  <!-- Resolve Call Modal -->
+  <AppModal
+    :show="showResolveModal"
+    title="Resolve Call"
+    cancel-text="Cancel"
+    ok-text="Resolve"
+    :ok-disabled="resolving"
+    max-width="500px"
+    @close="closeResolveModal"
+    @cancel="closeResolveModal"
+    @ok="submitResolve"
+  >
+    <template #default>
+      <div v-if="call" class="resolve-call-modal">
+        <div v-if="call.category.type === 'panic'" class="panic-notice">
+          <Icon name="lucide:alert-triangle" :size="18" />
+          <span><strong>Security Notice:</strong> You are closing a panic alert. Please confirm that safety has been verified via direct communication with the officer on scene.</span>
+        </div>
+
+        <div class="form-field">
+          <label class="field-label">Officer Comments</label>
+          <textarea v-model="resolveComments" class="field-textarea" rows="4" placeholder="Optional comments..."></textarea>
+        </div>
+
+        <div class="form-field">
+          <label class="field-label">Confirmation Photos (max 5)</label>
+          <FileUpload
+            ref="photoUploadRef"
+            v-model="resolvePhotoIds"
+            accept="image/*"
+            :max-files="5"
+            :call-api="true"
+            hint="Upload up to 5 confirmation photos"
+          />
+        </div>
+
+        <div class="form-field">
+          <label class="field-label">Confirmation Video (max 1)</label>
+          <FileUpload
+            ref="videoUploadRef"
+            v-model="resolveVideoIds"
+            accept="video/*"
+            :max-files="1"
+            :call-api="true"
+            hint="Upload one confirmation video"
+          />
+        </div>
+
+        <div v-if="resolving" class="resolve-loading">
+          <Icon name="lucide:loader-2" :size="18" class="spinner" />
+          <span>Resolving call...</span>
+        </div>
+        <div v-if="resolveError" class="resolve-error">{{ resolveError }}</div>
       </div>
     </template>
   </AppModal>
@@ -616,5 +774,110 @@ function getStatusLabel(status: string): string {
     align-items: flex-start;
     gap: var(--space-2);
   }
+}
+
+/* Header badges */
+.header-badges {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.details-meta {
+  display: flex;
+  gap: var(--space-3);
+  padding: var(--space-2) 0 var(--space-4);
+  border-bottom: 1px solid var(--color-border);
+  margin-bottom: var(--space-4);
+}
+
+.priority-urgent {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+}
+
+.priority-important {
+  background: rgba(249, 115, 22, 0.15);
+  color: #f97316;
+}
+
+.priority-normal {
+  background: rgba(59, 130, 246, 0.15);
+  color: #3b82f6;
+}
+
+.priority-low {
+  background: rgba(107, 114, 128, 0.15);
+  color: #9ca3af;
+}
+
+.info-item--highlight span {
+  color: #ef4444;
+  font-weight: 500;
+}
+
+.resolution-section .info-item {
+  margin-bottom: var(--space-2);
+}
+
+/* Resolve Call Modal */
+.resolve-call-modal {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.panic-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  background: rgba(239, 68, 68, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: var(--radius-md);
+  color: #ef4444;
+  font-size: var(--font-size-sm);
+  line-height: 1.5;
+}
+
+.panic-notice :deep(svg) {
+  flex-shrink: 0;
+  color: #ef4444;
+}
+
+.form-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.field-label {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  font-weight: 500;
+}
+
+.field-textarea {
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-elevated);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+  resize: vertical;
+  min-height: 80px;
+}
+
+.resolve-loading,
+.resolve-error {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--font-size-sm);
+}
+
+.resolve-error {
+  color: #ef4444;
 }
 </style>

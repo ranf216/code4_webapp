@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { callApi } from '~/api/call'
 import { officerApi } from '~/api/officer'
 import type { Officer } from '~/api/types/officer'
 
@@ -16,12 +17,14 @@ interface ServiceType {
 
 interface Call {
   id: string
+  displayId?: string
   communityId: number
   category: CallCategory
   serviceType: ServiceType
   residentName: string
   communityName: string
   address: string
+  description?: string
   scheduledDateTime?: string | null
   officerName?: string | null
   status: 'new' | 'accepted' | 'done' | 'canceled'
@@ -34,7 +37,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   close: []
-  assign: [data: { officerId: string; officerName: string }]
+  assigned: []
 }>()
 
 const { t } = useTranslation()
@@ -42,6 +45,8 @@ const { t } = useTranslation()
 const officers = ref<Officer[]>([])
 const officersLoading = ref(false)
 const officersError = ref('')
+const assigning = ref(false)
+const assignError = ref('')
 
 // Form state
 const selectedOfficer = ref<string>('')
@@ -72,20 +77,38 @@ const selectedOfficerName = computed(() => {
 })
 
 const canSubmit = computed(() => {
-  return !!selectedOfficer.value
+  return !!selectedOfficer.value && !assigning.value
 })
 
 function handleClose() {
+  assignError.value = ''
   emit('close')
 }
 
-function handleAssign() {
-  if (!canSubmit.value) return
+async function handleAssign() {
+  if (!canSubmit.value || !props.call) return
 
-  emit('assign', {
-    officerId: selectedOfficer.value,
-    officerName: selectedOfficerName.value,
-  })
+  assigning.value = true
+  assignError.value = ''
+  try {
+    await callApi.assignCall({
+      call_id: Number(props.call.id),
+      officer_user_id: selectedOfficer.value,
+    })
+    selectedOfficer.value = ''
+    emit('assigned')
+    emit('close')
+  } catch (err: any) {
+    const message = err.message || 'Assign call failed'
+    if (message.toLowerCase().includes('already') || message.includes('568')) {
+      assignError.value = 'This call has already been assigned to an officer.'
+    } else {
+      assignError.value = message
+    }
+    console.error('Assign call failed:', err)
+  } finally {
+    assigning.value = false
+  }
 }
 </script>
 
@@ -95,6 +118,7 @@ function handleAssign() {
     :title="t('calls.assign_title')"
     :cancel-text="t('common.cancel')"
     :ok-text="t('calls.assign_button')"
+    :ok-disabled="!canSubmit"
     max-width="400px"
     @close="handleClose"
     @cancel="handleClose"
@@ -114,6 +138,12 @@ function handleAssign() {
           </div>
         </div>
 
+        <div v-if="call.displayId" class="call-id">Call ID: {{ call.displayId }}</div>
+
+        <div v-if="call.description" class="description-section">
+          <p class="description-text">{{ call.description }}</p>
+        </div>
+
         <!-- Resident Info -->
         <div class="info-section">
           <div class="info-row">
@@ -127,6 +157,10 @@ function handleAssign() {
           <div class="info-row">
             <label>{{ t('calls.address') }}:</label>
             <span>{{ call.address }}</span>
+          </div>
+          <div class="info-row">
+            <label>Scheduled:</label>
+            <span>{{ call.scheduledDateTime || '—' }}</span>
           </div>
         </div>
 
@@ -148,6 +182,8 @@ function handleAssign() {
             <p v-if="selectedOfficerName" class="selected-officer">
               {{ t('calls.selected') }}: <strong>{{ selectedOfficerName }}</strong>
             </p>
+            <p v-if="assigning" class="field-loading">Assigning...</p>
+            <p v-if="assignError" class="field-error">{{ assignError }}</p>
           </div>
         </div>
 
@@ -302,5 +338,24 @@ function handleAssign() {
 .note-section :deep(svg) {
   color: var(--color-accent);
   flex-shrink: 0;
+}
+
+.call-id {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+}
+
+.description-section {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+}
+
+.description-text {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
+  line-height: 1.5;
 }
 </style>
