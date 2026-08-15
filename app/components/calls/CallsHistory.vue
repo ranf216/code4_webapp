@@ -30,6 +30,11 @@ async function handleCanceled() {
   closeCallDetails()
 }
 
+async function handleDeleted() {
+  await fetchHistoryCalls()
+  closeCallDetails()
+}
+
 // Types for Call Category
 interface CallCategory {
   type: 'medical' | 'security' | 'panic' | 'concierge' | 'test'
@@ -386,6 +391,7 @@ function getStatusLabel(status: string): string {
       @close="closeCallDetails"
       @resolved="handleResolved"
       @canceled="handleCanceled"
+      @deleted="handleDeleted"
     />
   </div>
 </template>

@@ -50,6 +50,11 @@ async function handleCanceled() {
   closeCallDetails()
 }
 
+async function handleDeleted() {
+  await fetchCalls()
+  closeCallDetails()
+}
+
 // Assign call functions
 function openAssignModal(call: Call) {
   callToAssign.value = call
@@ -331,6 +336,7 @@ function getStatusLabel(status: string): string {
       @close="closeCallDetails"
       @resolved="handleResolved"
       @canceled="handleCanceled"
+      @deleted="handleDeleted"
     />
 
     <!-- Assign Call Modal -->

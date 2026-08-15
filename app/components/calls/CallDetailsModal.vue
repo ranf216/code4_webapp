@@ -57,6 +57,7 @@ const emit = defineEmits<{
   close: []
   resolved: []
   canceled: []
+  deleted: []
 }>()
 
 const { t } = useTranslation()
@@ -83,7 +84,12 @@ function closeImagePreview() {
 
 const resolving = ref(false)
 const canceling = ref(false)
+const deletingTest = ref(false)
 const showResolveModal = ref(false)
+const showCancelModal = ref(false)
+const showDeleteTestModal = ref(false)
+const cancelError = ref('')
+const deleteTestError = ref('')
 const resolveComments = ref('')
 const resolvePhotoIds = ref<string[]>([])
 const resolveVideoIds = ref<string[]>([])
@@ -94,10 +100,19 @@ const videoUploadRef = ref<InstanceType<typeof FileUpload> | null>(null)
 const authStore = useAuthStore()
 
 const canResolve = computed(() => call.value?.status === 'accepted' && (call.value?.category.type !== 'panic' || authStore.isAdmin))
-const canCancel = computed(() => call.value?.status === 'accepted' && call.value?.category.type === 'concierge')
-const okDisabled = computed(() => resolving.value || canceling.value)
-const okText = computed(() => canResolve.value ? 'Resolve Call' : '')
-const cancelText = computed(() => canCancel.value ? 'Cancel' : '')
+const canCancel = computed(() => (call.value?.status === 'new' || call.value?.status === 'accepted') && call.value?.category.type === 'concierge')
+const canDeleteTest = computed(() => call.value?.category.type === 'test' && authStore.isAdmin)
+const okDisabled = computed(() => resolving.value || canceling.value || deletingTest.value)
+const okText = computed(() => canDeleteTest.value ? 'Delete Test Call' : (canResolve.value ? 'Resolve Call' : ''))
+const cancelText = computed(() => canCancel.value ? 'Cancel Call' : '')
+
+function handleOk() {
+  if (canDeleteTest.value) {
+    openDeleteTestModal()
+  } else if (canResolve.value) {
+    openResolveModal()
+  }
+}
 
 function openResolveModal() {
   if (!canResolve.value) return
@@ -106,6 +121,32 @@ function openResolveModal() {
   resolveVideoIds.value = []
   resolveError.value = ''
   showResolveModal.value = true
+}
+
+function openDeleteTestModal() {
+  if (!canDeleteTest.value) return
+  deleteTestError.value = ''
+  showDeleteTestModal.value = true
+}
+
+function closeDeleteTestModal() {
+  showDeleteTestModal.value = false
+}
+
+async function confirmDeleteTest() {
+  if (!call.value) return
+  deletingTest.value = true
+  deleteTestError.value = ''
+  try {
+    await callApi.deleteTestCall(Number(call.value.id))
+    showDeleteTestModal.value = false
+    emit('deleted')
+  } catch (err: any) {
+    deleteTestError.value = err.message || 'Delete test call failed'
+    console.error('Delete test call failed:', err)
+  } finally {
+    deletingTest.value = false
+  }
 }
 
 function closeResolveModal() {
@@ -138,14 +179,26 @@ async function submitResolve() {
   }
 }
 
-async function handleCancel() {
+function openCancelModal() {
+  if (!canCancel.value) return
+  cancelError.value = ''
+  showCancelModal.value = true
+}
+
+function closeCancelModal() {
+  showCancelModal.value = false
+}
+
+async function confirmCancel() {
   if (!call.value) return
   canceling.value = true
+  cancelError.value = ''
   try {
     await callApi.cancelCall(Number(call.value.id))
+    showCancelModal.value = false
     emit('canceled')
-    emit('close')
   } catch (err: any) {
+    cancelError.value = err.message || 'Cancel call failed'
     console.error('Cancel call failed:', err)
   } finally {
     canceling.value = false
@@ -270,8 +323,8 @@ function getPriorityClass(priority: string | null | undefined): string {
     :ok-disabled="okDisabled"
     max-width="50vw"
     @close="handleClose"
-    @ok="openResolveModal"
-    @cancel="handleCancel"
+    @ok="handleOk"
+    @cancel="openCancelModal"
   >
     <template #default>
       <div v-if="call" class="call-details-modal">
@@ -516,6 +569,34 @@ function getPriorityClass(priority: string | null | undefined): string {
       </div>
     </template>
   </AppModal>
+
+  <!-- Cancel Call Modal -->
+  <AppModal
+    :show="showCancelModal"
+    title="Cancel Call"
+    :message="call ? (cancelError || 'Are you sure you want to cancel this call?') : ''"
+    cancel-text="No"
+    ok-text="Yes, Cancel"
+    :ok-disabled="canceling"
+    max-width="400px"
+    @close="closeCancelModal"
+    @cancel="closeCancelModal"
+    @ok="confirmCancel"
+  />
+
+  <!-- Delete Test Call Modal -->
+  <AppModal
+    :show="showDeleteTestModal"
+    title="Delete Test Call"
+    :message="call ? (deleteTestError || 'Are you sure you want to delete this test call?') : ''"
+    cancel-text="No"
+    ok-text="Yes, Delete"
+    :ok-disabled="deletingTest"
+    max-width="400px"
+    @close="closeDeleteTestModal"
+    @cancel="closeDeleteTestModal"
+    @ok="confirmDeleteTest"
+  />
 
   <MImagePreview
     :show="showImagePreview"

@@ -219,6 +219,11 @@ function handleCanceled() {
   fetchActiveCalls()
 }
 
+function handleDeleted() {
+  closeCallDetails()
+  fetchActiveCalls()
+}
+
 onMounted(() => {
   fetchCommunities()
   fetchActiveCalls()
@@ -318,6 +323,7 @@ watch(
       @close="closeCallDetails"
       @resolved="handleResolved"
       @canceled="handleCanceled"
+      @deleted="handleDeleted"
     />
   </div>
 </template>
