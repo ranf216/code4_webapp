@@ -199,6 +199,12 @@ const editableEta = ref('')
 const showImagePreview = ref(false)
 const previewImages = ref<string[]>([])
 const previewInitialIndex = ref(0)
+const showApproveModal = ref(false)
+const approveReassignTo = ref('')
+const approveNotes = ref('')
+const showReassignModal = ref(false)
+const reassignTo = ref('')
+const reassignComment = ref('')
 
 const isOpenTask = computed(() => ['new', 'accepted', 'approved'].includes(selectedTask.value?.status || ''))
 const taskDetailTitle = computed(() => {
@@ -491,17 +497,77 @@ async function cancelTask() {
   }
 }
 
-async function approveTask() {
+function openApproveModal() {
+  if (!selectedTask.value) return
+  approveReassignTo.value = ''
+  approveNotes.value = ''
+  showApproveModal.value = true
+}
+
+function closeApproveModal() {
+  showApproveModal.value = false
+  approveReassignTo.value = ''
+  approveNotes.value = ''
+}
+
+async function confirmApprove() {
   if (!selectedTask.value) return
   isProcessing.value = true
   try {
+    if (approveNotes.value.trim()) {
+      await taskApi.addTaskComment({
+        task_id: selectedTask.value.task_id,
+        comment: approveNotes.value.trim(),
+      })
+    }
     await taskApi.approveTask({
       task_id: selectedTask.value.task_id,
+      assigned_to: approveReassignTo.value || undefined,
     })
+    closeApproveModal()
     await fetchTaskDetail(selectedTask.value.task_id)
     await fetchTasks()
+    toastStore.success('Task approved')
   } catch (err: any) {
     console.error('Approve task failed:', err)
+  } finally {
+    isProcessing.value = false
+  }
+}
+
+function openReassignModal() {
+  if (!selectedTask.value) return
+  reassignTo.value = ''
+  reassignComment.value = ''
+  showReassignModal.value = true
+}
+
+function closeReassignModal() {
+  showReassignModal.value = false
+  reassignTo.value = ''
+  reassignComment.value = ''
+}
+
+async function confirmReassign() {
+  if (!selectedTask.value || !reassignTo.value) return
+  isProcessing.value = true
+  try {
+    await taskApi.reassignTask({
+      task_id: selectedTask.value.task_id,
+      assigned_to: reassignTo.value,
+    })
+    if (reassignComment.value.trim()) {
+      await taskApi.addTaskComment({
+        task_id: selectedTask.value.task_id,
+        comment: reassignComment.value.trim(),
+      })
+    }
+    closeReassignModal()
+    await fetchTaskDetail(selectedTask.value.task_id)
+    await fetchTasks()
+    toastStore.success('Task reassigned')
+  } catch (err: any) {
+    console.error('Reassign failed:', err)
   } finally {
     isProcessing.value = false
   }
@@ -749,6 +815,7 @@ async function handleAddTask() {
           <div class="detail-row">
             <span class="detail-label">Assigned to:</span>
             <span>{{ selectedTask.assigned_to_name || 'Unassigned' }}</span>
+            <button v-if="authStore.isAdmin && isOpenTask" class="btn btn--link" @click="openReassignModal">Reassign</button>
           </div>
           <div class="detail-row">
             <span class="detail-label">ETA:</span>
@@ -804,7 +871,7 @@ async function handleAddTask() {
           <button v-if="canAccept(selectedTask)" class="btn btn--success" :disabled="isProcessing" @click="acceptTask(selectedTask)">
             <Icon name="lucide:check" :size="16" /> Accept
           </button>
-          <button v-if="canApprove(selectedTask)" class="btn btn--primary" :disabled="isProcessing" @click="approveTask">
+          <button v-if="canApprove(selectedTask)" class="btn btn--primary" :disabled="isProcessing" @click="openApproveModal">
             <Icon name="lucide:thumbs-up" :size="16" /> Approve
           </button>
           <button v-if="canComplete(selectedTask)" class="btn btn--primary" :disabled="isProcessing" @click="openCompleteModal(selectedTask)">
@@ -830,6 +897,39 @@ async function handleAddTask() {
     <AppModal :show="showCompleteModal" :title="t('tasks.complete_task')" :cancel-text="t('common.cancel')" :ok-text="t('tasks.confirm_complete')" @close="closeCompleteModal" @cancel="closeCompleteModal" @ok="confirmComplete">
       <p>{{ t('tasks.complete_description') }}</p>
       <textarea v-model="completeComment" class="form-textarea" rows="4" :placeholder="t('tasks.complete_placeholder')"></textarea>
+    </AppModal>
+
+    <!-- Approve Modal -->
+    <AppModal :show="showApproveModal" title="Approve task" cancel-text="Cancel" ok-text="Confirm approval" :ok-disabled="isProcessing" @close="closeApproveModal" @cancel="closeApproveModal" @ok="confirmApprove">
+      <div class="approve-form">
+        <div class="form-group">
+          <label>Reassign To</label>
+          <select v-model="approveReassignTo" class="form-input">
+            <option value="">Keep current assignee</option>
+            <option v-for="o in officers" :key="o.user_id" :value="o.user_id">{{ o.first_name }} {{ o.last_name }} — {{ o.community_name || '—' }}</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Approval Notes</label>
+          <textarea v-model="approveNotes" class="form-textarea" rows="4" placeholder="Add approval notes (optional)"></textarea>
+        </div>
+      </div>
+    </AppModal>
+
+    <!-- Reassign Modal -->
+    <AppModal :show="showReassignModal" title="Reassign task" cancel-text="Cancel" ok-text="Confirm reassign" :ok-disabled="isProcessing" @close="closeReassignModal" @cancel="closeReassignModal" @ok="confirmReassign">
+      <div class="reassign-form">
+        <div class="form-group">
+          <label>Reassign To</label>
+          <select v-model="reassignTo" class="form-input">
+            <option v-for="o in officers" :key="o.user_id" :value="o.user_id">{{ o.first_name }} {{ o.last_name }} — {{ o.community_name || '—' }}</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Comment</label>
+          <textarea v-model="reassignComment" class="form-textarea" rows="3" placeholder="Add a note (optional)"></textarea>
+        </div>
+      </div>
     </AppModal>
 
     <!-- Add Task Modal -->
