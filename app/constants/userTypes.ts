@@ -7,6 +7,7 @@ import { UserTypeConfig } from '~/utils/config'
  */
 
 export enum UserType {
+  ACCOUNT_IMPERSONATION = UserTypeConfig.types.ACCOUNT_IMPERSONATION.value,
   ADMIN = UserTypeConfig.types.ADMIN.value,
   MANAGER = UserTypeConfig.types.MANAGER.value,
   PLANNING = UserTypeConfig.types.PLANNING.value,
@@ -15,6 +16,7 @@ export enum UserType {
 }
 
 export const UserTypeLabels: Record<UserType, string> = {
+  [UserType.ACCOUNT_IMPERSONATION]: UserTypeConfig.types.ACCOUNT_IMPERSONATION.label,
   [UserType.ADMIN]: UserTypeConfig.types.ADMIN.label,
   [UserType.MANAGER]: UserTypeConfig.types.MANAGER.label,
   [UserType.PLANNING]: UserTypeConfig.types.PLANNING.label,
@@ -23,6 +25,7 @@ export const UserTypeLabels: Record<UserType, string> = {
 }
 
 export const UserTypeColors: Record<UserType, string> = {
+  [UserType.ACCOUNT_IMPERSONATION]: UserTypeConfig.types.ACCOUNT_IMPERSONATION.color,
   [UserType.ADMIN]: UserTypeConfig.types.ADMIN.color,
   [UserType.MANAGER]: UserTypeConfig.types.MANAGER.color,
   [UserType.PLANNING]: UserTypeConfig.types.PLANNING.color,

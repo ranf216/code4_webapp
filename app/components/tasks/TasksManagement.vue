@@ -204,8 +204,6 @@ const approveReassignTo = ref('')
 const approveNotes = ref('')
 const showReassignModal = ref(false)
 const reassignTo = ref('')
-const reassignComment = ref('')
-
 const isOpenTask = computed(() => ['new', 'accepted', 'approved'].includes(selectedTask.value?.status || ''))
 const taskDetailTitle = computed(() => {
   if (!selectedTask.value) return t('tasks.task_details')
@@ -228,6 +226,10 @@ const addTaskError = ref('')
 const mediaUploadRef = ref<InstanceType<typeof FileUpload> | null>(null)
 const videoUploadRef = ref<InstanceType<typeof FileUpload> | null>(null)
 const documentUploadRef = ref<InstanceType<typeof FileUpload> | null>(null)
+const completeImageFileIds = ref<string[]>([])
+const completeVideoFileIds = ref<string[]>([])
+const completeImageUploadRef = ref<InstanceType<typeof FileUpload> | null>(null)
+const completeVideoUploadRef = ref<InstanceType<typeof FileUpload> | null>(null)
 
 const authStore = useAuthStore()
 const toastStore = useToastStore()
@@ -373,23 +375,27 @@ function closeTaskModal() {
 }
 
 function canAccept(task: Task): boolean {
-  return task.status === 'new'
+  return task.status === 'new' && authStore.isAdmin
 }
 
 function canReject(task: Task): boolean {
-  return ['new', 'accepted'].includes(task.status)
+  return ['new', 'accepted'].includes(task.status) && authStore.isAdmin
 }
 
 function canComplete(task: Task): boolean {
-  return ['accepted', 'approved'].includes(task.status)
+  return ['accepted', 'approved'].includes(task.status) && authStore.isAdmin
 }
 
 function canCancel(task: Task): boolean {
-  return ['new', 'accepted', 'approved'].includes(task.status)
+  return ['new', 'accepted', 'approved'].includes(task.status) && authStore.isAdmin
 }
 
 function canApprove(task: Task): boolean {
-  return task.status === 'accepted' && ['supply_request', 'damaged_equipment'].includes(task.task_type) && authStore.isAdmin
+  return task.status === 'accepted' && ['supply_request', 'damaged_equipment'].includes(task.task_type) && authStore.isApprover
+}
+
+function canReassign(task: Task): boolean {
+  return ['new', 'accepted', 'approved'].includes(task.status) && authStore.isAdmin
 }
 
 async function acceptTask(task: Task) {
@@ -424,7 +430,7 @@ async function confirmReject() {
   try {
     await taskApi.rejectTask({
       task_id: selectedTask.value.task_id,
-      comment: rejectComment.value,
+      comment: rejectComment.value.trim(),
     })
     closeRejectModal()
     closeTaskModal()
@@ -452,13 +458,20 @@ async function confirmComplete() {
   if (!selectedTask.value) return
   isProcessing.value = true
   try {
+    await completeImageUploadRef.value?.uploadAll()
+    await completeVideoUploadRef.value?.uploadAll()
+
     await taskApi.completeTask({
       task_id: selectedTask.value.task_id,
       comment: completeComment.value.trim() || undefined,
+      confirmation_media_file_ids: completeImageFileIds.value.length ? completeImageFileIds.value : undefined,
+      confirmation_video_file_id: completeVideoFileIds.value[0] || undefined,
     })
+
     closeCompleteModal()
     closeTaskModal()
     await fetchTasks()
+    toastStore.success('Task completed')
   } catch (err: any) {
     console.error('Complete task failed:', err)
   } finally {
@@ -501,6 +514,7 @@ function openApproveModal() {
   if (!selectedTask.value) return
   approveReassignTo.value = ''
   approveNotes.value = ''
+  showTaskModal.value = false
   showApproveModal.value = true
 }
 
@@ -508,6 +522,7 @@ function closeApproveModal() {
   showApproveModal.value = false
   approveReassignTo.value = ''
   approveNotes.value = ''
+  showTaskModal.value = true
 }
 
 async function confirmApprove() {
@@ -524,10 +539,10 @@ async function confirmApprove() {
       task_id: selectedTask.value.task_id,
       assigned_to: approveReassignTo.value || undefined,
     })
-    closeApproveModal()
     await fetchTaskDetail(selectedTask.value.task_id)
     await fetchTasks()
     toastStore.success('Task approved')
+    closeApproveModal()
   } catch (err: any) {
     console.error('Approve task failed:', err)
   } finally {
@@ -538,14 +553,14 @@ async function confirmApprove() {
 function openReassignModal() {
   if (!selectedTask.value) return
   reassignTo.value = ''
-  reassignComment.value = ''
+  showTaskModal.value = false
   showReassignModal.value = true
 }
 
 function closeReassignModal() {
   showReassignModal.value = false
   reassignTo.value = ''
-  reassignComment.value = ''
+  showTaskModal.value = true
 }
 
 async function confirmReassign() {
@@ -556,16 +571,10 @@ async function confirmReassign() {
       task_id: selectedTask.value.task_id,
       assigned_to: reassignTo.value,
     })
-    if (reassignComment.value.trim()) {
-      await taskApi.addTaskComment({
-        task_id: selectedTask.value.task_id,
-        comment: reassignComment.value.trim(),
-      })
-    }
-    closeReassignModal()
     await fetchTaskDetail(selectedTask.value.task_id)
     await fetchTasks()
     toastStore.success('Task reassigned')
+    closeReassignModal()
   } catch (err: any) {
     console.error('Reassign failed:', err)
   } finally {
@@ -735,7 +744,9 @@ async function handleAddTask() {
             <td class="col-id">
               <span class="id-link" @click="viewTask(task)">{{ task.id }}</span>
             </td>
-            <td class="col-type">{{ taskTypeMap[task.task_type] || task.task_type }}</td>
+            <td class="col-type">
+              <span class="col-type__text">{{ taskTypeMap[task.task_type] || task.task_type }}</span>
+            </td>
             <td class="col-desc" :title="task.description">{{ task.description }}</td>
             <td class="col-priority">
               <Badge :type="priorityBadge[task.priority] ?? 'taskPriority'" :value="task.priority" />
@@ -791,7 +802,7 @@ async function handleAddTask() {
     </div>
 
     <!-- Task Details Modal -->
-    <AppModal v-if="selectedTask" :show="showTaskModal" :title="taskDetailTitle" :cancel-text="t('common.close')" :ok-text="undefined" @close="closeTaskModal" @cancel="closeTaskModal">
+    <AppModal v-if="selectedTask" :show="showTaskModal" :title="taskDetailTitle" :cancel-text="t('common.close')" :ok-text="''" @close="closeTaskModal" @cancel="closeTaskModal">
       <div class="task-detail">
         <div class="task-detail__header">
           <h3 class="task-detail__title">
@@ -815,7 +826,6 @@ async function handleAddTask() {
           <div class="detail-row">
             <span class="detail-label">Assigned to:</span>
             <span>{{ selectedTask.assigned_to_name || 'Unassigned' }}</span>
-            <button v-if="authStore.isAdmin && isOpenTask" class="btn btn--link" @click="openReassignModal">Reassign</button>
           </div>
           <div class="detail-row">
             <span class="detail-label">ETA:</span>
@@ -845,6 +855,11 @@ async function handleAddTask() {
           <div v-if="selectedTask.comments.length === 0" class="empty-section">No comments yet.</div>
         </div>
 
+        <div class="task-detail__comment-form">
+          <textarea v-model="newComment" class="form-input" rows="2" placeholder="Add a comment..."></textarea>
+          <button class="btn btn--primary" :disabled="isProcessing" @click="addComment">Send</button>
+        </div>
+
         <div v-if="selectedTask.media && selectedTask.media.length > 0" class="task-detail__section">
           <h4 class="task-detail__section-title">Media</h4>
           <div class="media-thumbnails">
@@ -860,11 +875,6 @@ async function handleAddTask() {
               </a>
             </template>
           </div>
-        </div>
-
-        <div class="task-detail__comment-form">
-          <textarea v-model="newComment" class="form-input" rows="2" placeholder="Add a comment..."></textarea>
-          <button class="btn btn--primary" :disabled="isProcessing" @click="addComment">Send</button>
         </div>
 
         <div class="task-detail__actions">
@@ -883,20 +893,51 @@ async function handleAddTask() {
           <button v-if="canCancel(selectedTask)" class="btn btn--ghost" :disabled="isProcessing" @click="cancelTask">
             <Icon name="lucide:ban" :size="16" /> Cancel
           </button>
+          <button v-if="canReassign(selectedTask)" class="btn btn--ghost" :disabled="isProcessing" @click="openReassignModal">
+            <Icon name="lucide:users" :size="16" /> Reassign
+          </button>
         </div>
       </div>
     </AppModal>
 
     <!-- Reject Modal -->
-    <AppModal :show="showRejectModal" :title="t('tasks.reject_task')" :cancel-text="t('common.cancel')" :ok-text="t('tasks.confirm_reject')" @close="closeRejectModal" @cancel="closeRejectModal" @ok="confirmReject">
-      <p>{{ t('tasks.reject_description') }}</p>
-      <textarea v-model="rejectComment" class="form-textarea" rows="4" :placeholder="t('tasks.reject_placeholder')"></textarea>
+    <AppModal :show="showRejectModal" :title="t('tasks.reject_task')" :cancel-text="t('common.cancel')" :ok-text="t('tasks.confirm_reject')" :ok-disabled="!rejectComment.trim() || isProcessing" @close="closeRejectModal" @cancel="closeRejectModal" @ok="confirmReject">
+      <div class="form-group">
+        <label>Rejection Reason <span class="required">*</span></label>
+        <textarea v-model="rejectComment" class="form-textarea" rows="4" :placeholder="t('tasks.reject_placeholder')"></textarea>
+      </div>
     </AppModal>
 
     <!-- Complete Modal -->
-    <AppModal :show="showCompleteModal" :title="t('tasks.complete_task')" :cancel-text="t('common.cancel')" :ok-text="t('tasks.confirm_complete')" @close="closeCompleteModal" @cancel="closeCompleteModal" @ok="confirmComplete">
-      <p>{{ t('tasks.complete_description') }}</p>
-      <textarea v-model="completeComment" class="form-textarea" rows="4" :placeholder="t('tasks.complete_placeholder')"></textarea>
+    <AppModal :show="showCompleteModal" :title="t('tasks.complete_task')" :cancel-text="t('common.cancel')" :ok-text="t('tasks.confirm_complete')" :ok-disabled="isProcessing" @close="closeCompleteModal" @cancel="closeCompleteModal" @ok="confirmComplete">
+      <div class="complete-form">
+        <div class="form-group">
+          <label>Resolution Comment</label>
+          <textarea v-model="completeComment" class="form-textarea" rows="4" :placeholder="t('tasks.complete_placeholder')"></textarea>
+        </div>
+        <div class="form-group">
+          <label>Confirmation Images</label>
+          <FileUpload
+            ref="completeImageUploadRef"
+            v-model="completeImageFileIds"
+            :callApi="true"
+            accept="image/*"
+            :maxFiles="5"
+            hint="Max 5 images"
+          />
+        </div>
+        <div class="form-group">
+          <label>Confirmation Video</label>
+          <FileUpload
+            ref="completeVideoUploadRef"
+            v-model="completeVideoFileIds"
+            :callApi="true"
+            accept="video/*"
+            :maxFiles="1"
+            hint="Max 1 video"
+          />
+        </div>
+      </div>
     </AppModal>
 
     <!-- Approve Modal -->
@@ -917,17 +958,14 @@ async function handleAddTask() {
     </AppModal>
 
     <!-- Reassign Modal -->
-    <AppModal :show="showReassignModal" title="Reassign task" cancel-text="Cancel" ok-text="Confirm reassign" :ok-disabled="isProcessing" @close="closeReassignModal" @cancel="closeReassignModal" @ok="confirmReassign">
+    <AppModal :show="showReassignModal" title="Reassign task" cancel-text="Cancel" ok-text="Confirm reassign" :ok-disabled="!reassignTo || isProcessing" @close="closeReassignModal" @cancel="closeReassignModal" @ok="confirmReassign">
       <div class="reassign-form">
         <div class="form-group">
-          <label>Reassign To</label>
+          <label>New Assignee <span class="required">*</span></label>
           <select v-model="reassignTo" class="form-input">
+            <option value="" disabled>Select an officer</option>
             <option v-for="o in officers" :key="o.user_id" :value="o.user_id">{{ o.first_name }} {{ o.last_name }} — {{ o.community_name || '—' }}</option>
           </select>
-        </div>
-        <div class="form-group">
-          <label>Comment</label>
-          <textarea v-model="reassignComment" class="form-textarea" rows="3" placeholder="Add a note (optional)"></textarea>
         </div>
       </div>
     </AppModal>
@@ -1185,6 +1223,7 @@ async function handleAddTask() {
 .tasks-table {
   width: 100%;
   border-collapse: collapse;
+  table-layout: fixed;
 }
 
 .tasks-table th {
@@ -1213,15 +1252,30 @@ async function handleAddTask() {
 }
 
 .col-desc {
-  max-width: 300px;
+  width: 15%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+.col-type {
+  width: 15%;
+}
+
+.col-community {
+  width: 15%;
+}
+
+.col-type__text {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  width: 100%;
+}
+
 .col-actions {
   text-align: center;
-  min-width: 140px;
 }
 
 .action-badges {
@@ -1708,6 +1762,12 @@ async function handleAddTask() {
   gap: var(--space-2);
   border-top: 1px solid var(--color-border);
   padding-top: var(--space-3);
+}
+
+.task-detail__comment-form .btn {
+  align-self: flex-end;
+  width: auto;
+  padding: 10px 15px;
 }
 
 .task-detail__actions {

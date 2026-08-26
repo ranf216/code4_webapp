@@ -73,6 +73,15 @@ export const useAuthStore = defineStore('auth', {
       if (!state.user) return false
       return state.user.type === UserType.ADMIN
     },
+
+    /** Check if user can approve tasks (admin or planning/logistics/finance) */
+    isApprover: (state) => {
+      if (!state.user) return false
+      return (
+        state.user.type === UserType.ADMIN ||
+        [UserType.PLANNING, UserType.LOGISTICS, UserType.FINANCE].includes(state.user.type)
+      )
+    },
   },
 
   actions: {

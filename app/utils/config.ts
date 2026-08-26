@@ -15,14 +15,15 @@ export const FileUploadConfig = {
 // User Type Configuration
 export const UserTypeConfig = {
   types: {
-    ADMIN: { value: 1, label: 'Admin', color: '#ef4444' },
-    MANAGER: { value: 2, label: 'Manager', color: '#3b82f6' },
-    PLANNING: { value: 3, label: 'Planning', color: '#10b981' },
-    LOGISTICS: { value: 4, label: 'Logistics', color: '#f59e0b' },
-    FINANCE: { value: 5, label: 'Finance', color: '#8b5cf6' },
+    ACCOUNT_IMPERSONATION: { value: 1, label: 'Account Impersonation', color: '#6b7280' },
+    ADMIN: { value: 2, label: 'Super Admin', color: '#ef4444' },
+    MANAGER: { value: 3, label: 'Manager', color: '#3b82f6' },
+    PLANNING: { value: 4, label: 'Planning', color: '#10b981' },
+    LOGISTICS: { value: 5, label: 'Logistics', color: '#f59e0b' },
+    FINANCE: { value: 6, label: 'Finance', color: '#8b5cf6' },
   } as const,
 
-  defaultType: 1, // Admin
+  defaultType: 2, // Super Admin
 
   /** Minimum number of admins required in the system */
   minAdminCount: 1,
