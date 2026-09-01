@@ -80,6 +80,18 @@ export class UserApi extends BaseApiClient {
     
     return this.requestWithToken(request, token)
   }
+
+  /**
+   * Get current user roles
+   * @returns List of role IDs
+   */
+  async getMyRoles(): Promise<ApiResponse<{ roles: number[] }>> {
+    const request = {
+      '#request': 'UserRole/get_my_roles',
+    }
+    
+    return this.request<{ roles: number[] }>(request)
+  }
 }
 
 // Export singleton instance

@@ -391,6 +391,7 @@ function canCancel(task: Task): boolean {
 }
 
 function canApprove(task: Task): boolean {
+  console.log('canApprove debug user.type:', authStore.user?.type, 'isApprover:', authStore.isApprover, 'status:', task.status, 'task_type:', task.task_type)
   return task.status === 'accepted' && ['supply_request', 'damaged_equipment'].includes(task.task_type) && authStore.isApprover
 }
 

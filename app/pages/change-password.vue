@@ -114,6 +114,14 @@ async function handleSubmit() {
         response.need_change_password ?? false
       )
 
+      try {
+        const rolesRes = await userApi.getMyRoles()
+        authStore.setRoles(rolesRes.roles || [])
+      } catch (err: any) {
+        console.error('Failed to load user roles:', err)
+        authStore.setRoles([])
+      }
+
       // Redirect to dashboard
       await router.push('/dashboard')
     } else {

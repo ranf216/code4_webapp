@@ -85,6 +85,14 @@ export const useAuth = () => {
             loginData.need_change_password ? loginData.x_token : null
           )
 
+          try {
+            const rolesRes = await userApi.getMyRoles()
+            authStore.setRoles(rolesRes.roles || [])
+          } catch (err: any) {
+            console.error('Failed to load user roles:', err)
+            authStore.setRoles([])
+          }
+
           currentStep.value = 'success'
 
           // Redirect based on password change requirement
@@ -170,6 +178,14 @@ export const useAuth = () => {
           response.need_change_password ?? false,
           restrictedToken
         )
+
+        try {
+          const rolesRes = await userApi.getMyRoles()
+          authStore.setRoles(rolesRes.roles || [])
+        } catch (err: any) {
+          console.error('Failed to load user roles:', err)
+          authStore.setRoles([])
+        }
 
         currentStep.value = 'success'
 
