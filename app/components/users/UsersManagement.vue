@@ -2,9 +2,11 @@
 import { AdminUserRole, type AdminUserRoleValue, type UpdateAdminUserParams } from '~/api/types/adminUser'
 import { adminUserApi } from '~/api/adminUser'
 import { useAuthStore } from '~/stores/auth'
+import { useToastStore } from '~/stores/toast'
 
 const { t } = useTranslation()
 const authStore = useAuthStore()
+const toastStore = useToastStore()
 
 // User interface matching AdminUser API response
 interface User {
@@ -21,6 +23,15 @@ interface User {
 
 function isValidEmail(email: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())
+}
+
+function formatDate(iso: string): string {
+  if (!iso) return '—'
+  return new Date(iso).toLocaleDateString('en-US', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+  })
 }
 
 // Users data from API
@@ -445,6 +456,7 @@ async function handleAddSubmit() {
     if (response.rc === 0) {
       await fetchUsers(true)
       closeAddModal()
+      toastStore.success('User created successfully.')
       return
     }
 
@@ -732,7 +744,7 @@ const totalUsers = computed(() => totalCount.value)
             <td class="col-role">
               <Badge type="adminRole" :value="user.role" />
             </td>
-            <td class="col-date">{{ user.created_on }}</td>
+            <td class="col-date">{{ formatDate(user.created_on) }}</td>
             <td class="col-active">
               <Badge type="active" :value="user.is_active" />
             </td>

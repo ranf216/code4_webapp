@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { useAuthStore } from '~/stores/auth'
+import { AdminUserRole } from '~/api/types/adminUser'
 import PanicCallModal from './calls/PanicCallModal.vue'
 
 interface NavItem {
@@ -43,19 +44,25 @@ const baseGroups: NavGroup[] = [
   },
 ]
 
-const adminGroup: NavGroup = {
-  label: t('nav.admin'),
-  items: [
-    { key: 'users',    label: t('nav.users'),    icon: 'lucide:user',    to: '/users',    badge: null },
-    { key: 'settings', label: t('nav.settings'), icon: 'lucide:settings', to: '/settings', badge: null },
-  ],
-}
+const isSuperAdmin = computed(() => authStore.roles.includes(AdminUserRole.SUPER_ADMIN))
 
 const navGroups = computed<NavGroup[]>(() => {
-  if (authStore.isAdmin) {
-    return [...baseGroups, adminGroup]
+  const groups = [...baseGroups]
+  const adminItems: NavItem[] = []
+
+  if (isSuperAdmin.value) {
+    adminItems.push({ key: 'users', label: t('nav.users'), icon: 'lucide:user', to: '/users', badge: null })
   }
-  return baseGroups
+
+  if (authStore.isAdmin || isSuperAdmin.value) {
+    adminItems.push({ key: 'settings', label: t('nav.settings'), icon: 'lucide:settings', to: '/settings', badge: null })
+  }
+
+  if (adminItems.length) {
+    groups.push({ label: t('nav.admin'), items: adminItems })
+  }
+
+  return groups
 })
 
 function isActive(to: string) {
