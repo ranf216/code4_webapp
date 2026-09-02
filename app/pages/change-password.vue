@@ -110,6 +110,7 @@ async function handleSubmit() {
           type: response.type,
           first_name: response.first_name,
           last_name: response.last_name,
+          email: authStore.user?.email || '',
         },
         response.need_change_password ?? false
       )

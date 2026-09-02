@@ -1208,6 +1208,7 @@ const translations: Record<string, Record<string, string>> = {
     'users.add_user': 'Add User',
     'users.add_title': 'Add New User',
     'users.edit_title': 'Edit User',
+    'users.edit_success': 'User updated successfully.',
     'users.basic_info': 'Basic Information',
     'users.email_placeholder': 'email@example.com',
     'users.password_hint': 'Initial password. User must change on first login.',

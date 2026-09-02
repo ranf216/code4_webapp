@@ -13,6 +13,7 @@ export const useAuth = () => {
   const isLoading = ref(false)
   const error = ref<string | null>(null)
   const secondFactorKey = ref<string>('')
+  const pendingEmail = ref<string>('')
   const currentStep = ref<'credentials' | 'otp' | 'success'>('credentials')
   const factorType = ref<FactorType>('EMAIL')
 
@@ -61,7 +62,8 @@ export const useAuth = () => {
       if (response.rc === 0) {
         // Extract data from response - handle both wrapped and direct response structures
         const loginData = response.data || response
-        
+        pendingEmail.value = email
+
         // Check if 2FA is required
         if (isTwoFactorRequired(loginData)) {
           // 2FA flow - save second factor key and send OTP
@@ -80,6 +82,7 @@ export const useAuth = () => {
               type: loginData.type,
               first_name: loginData.first_name,
               last_name: loginData.last_name,
+              email,
             },
             loginData.need_change_password ?? false,
             loginData.need_change_password ? loginData.x_token : null
@@ -174,6 +177,7 @@ export const useAuth = () => {
             type: response.type,
             first_name: response.first_name,
             last_name: response.last_name,
+            email: pendingEmail.value,
           },
           response.need_change_password ?? false,
           restrictedToken

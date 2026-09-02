@@ -378,11 +378,12 @@ const isEditOwnAccount = computed(() => {
   return originalEditUser.value.email === authStore.user.email
 })
 const isCurrentUserSuperAdmin = computed(() => {
-  if (!authStore.user?.email) return false
-  const currentUser = users.value.find((u: User) => u.email === authStore.user!.email)
+  const currentEmail = authStore.user?.email
+  if (!currentEmail) return false
+  const currentUser = users.value.find((u: User) => u.email === currentEmail)
   return currentUser?.role === AdminUserRole.SUPER_ADMIN
 })
-const isEditRoleDisabled = computed(() => !isCurrentUserSuperAdmin.value)
+const isEditRoleDisabled = computed(() => isEditOwnAccount.value || !isCurrentUserSuperAdmin.value)
 const isEditFormValid = computed(() => {
   if (!originalEditUser.value) return false
   const baseValid =
@@ -596,6 +597,7 @@ async function handleEditSubmit() {
     if ((!userResponse || userResponse.rc === 0) && (!roleResponse || roleResponse.rc === 0)) {
       await fetchUsers(true)
       closeEditModal()
+      toastStore.success(t('users.edit_success'))
       return
     }
 
