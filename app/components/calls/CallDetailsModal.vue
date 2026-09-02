@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { callApi } from '~/api/call'
 import FileUpload from '~/components/FileUpload.vue'
+import GoogleMap from '~/components/GoogleMap.vue'
 import { useAuthStore } from '~/stores/auth'
 import type { Call as ApiCall } from '~/api/types/call'
 
@@ -54,11 +55,23 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  close: []
-  resolved: []
-  canceled: []
-  deleted: []
+  (e: 'close'): void
+  (e: 'resolved'): void
+  (e: 'canceled'): void
+  (e: 'deleted'): void
 }>()
+
+function formatDateTime(iso: string | undefined | null): string {
+  if (!iso) return '—'
+  const d = new Date(iso)
+  return d.toLocaleString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
 
 const { t } = useTranslation()
 
@@ -286,6 +299,7 @@ function getStatusClass(status: string): string {
   switch (status) {
     case 'new': return 'status-new'
     case 'accepted': return 'status-accepted'
+    case 'resolved':
     case 'done': return 'status-done'
     case 'canceled': return 'status-canceled'
     default: return 'status-new'
@@ -296,6 +310,7 @@ function getStatusLabel(status: string): string {
   switch (status) {
     case 'new': return t('calls.status.new')
     case 'accepted': return t('calls.status.accepted')
+    case 'resolved':
     case 'done': return t('calls.status.done')
     case 'canceled': return t('calls.status.canceled')
     default: return status
@@ -360,8 +375,8 @@ function getPriorityClass(priority: string | null | undefined): string {
             </div>
           </div>
           <div class="details-meta">
-            <span class="text-muted text-xs">Created: {{ call.createdOn }}</span>
-            <span v-if="call.lastUpdate" class="text-muted text-xs">Updated: {{ call.lastUpdate }}</span>
+            <span class="text-muted text-xs">Created: {{ formatDateTime(call.createdOn) }}</span>
+            <span v-if="call.lastUpdate" class="text-muted text-xs">Updated: {{ formatDateTime(call.lastUpdate) }}</span>
           </div>
 
         <!-- Scrollable Content -->
@@ -370,18 +385,6 @@ function getPriorityClass(priority: string | null | undefined): string {
           <div class="details-section">
             <h4 class="section-title">{{ t('calls.call_info') }}</h4>
             <div class="info-grid">
-              <div class="info-item">
-                <label>Call ID</label>
-                <span>{{ call.displayId }}</span>
-              </div>
-              <div class="info-item">
-                <label>Created</label>
-                <span>{{ call.createdOn }}</span>
-              </div>
-              <div v-if="call.lastUpdate" class="info-item">
-                <label>Last update</label>
-                <span>{{ call.lastUpdate }}</span>
-              </div>
               <div class="info-item">
                 <label>{{ t('calls.resident') }}</label>
                 <span>{{ call.residentName }}</span>
@@ -398,9 +401,22 @@ function getPriorityClass(priority: string | null | undefined): string {
                 <label>{{ t('calls.current_address') }}</label>
                 <span>{{ call.currentAddress }}</span>
               </div>
-              <div v-if="call.latitude != null && call.longitude != null" class="info-item">
+              <div v-if="call.latitude != null && call.longitude != null" class="info-item info-item--full">
                 <label>GPS coordinates</label>
-                <span>{{ call.latitude }}, {{ call.longitude }}</span>
+                <span class="gps-coords">{{ Number(call.latitude).toFixed(6) }}, {{ Number(call.longitude).toFixed(6) }}</span>
+                <div class="map-container">
+                  <GoogleMap
+                    :center="{ lat: Number(call.latitude), lng: Number(call.longitude) }"
+                    :zoom="16"
+                    :height="'100%'"
+                    :markers="['medical', 'security', 'panic'].includes(call.category.type)
+                      ? []
+                      : [{ lat: Number(call.latitude), lng: Number(call.longitude), status: 'active', label: call.displayId || call.id }]"
+                    :emergency-calls="['medical', 'security', 'panic'].includes(call.category.type)
+                      ? [{ lat: Number(call.latitude), lng: Number(call.longitude), id: call.displayId || call.id }]
+                      : []"
+                  />
+                </div>
               </div>
               <div class="info-item">
                 <label>{{ t('calls.officer') }}</label>
@@ -412,7 +428,7 @@ function getPriorityClass(priority: string | null | undefined): string {
               </div>
               <div v-if="call.acceptedOn" class="info-item">
                 <label>Accepted on</label>
-                <span>{{ call.acceptedOn }}</span>
+                <span>{{ formatDateTime(call.acceptedOn) }}</span>
               </div>
               <div class="info-item">
                 <label>{{ t('calls.scheduled_datetime') }}</label>
@@ -737,6 +753,10 @@ function getPriorityClass(priority: string | null | undefined): string {
   gap: var(--space-1);
 }
 
+.info-item--full {
+  grid-column: span 2;
+}
+
 .info-item label {
   font-size: var(--font-size-xs);
   color: var(--color-text-secondary);
@@ -745,6 +765,20 @@ function getPriorityClass(priority: string | null | undefined): string {
 .info-item span {
   font-size: var(--font-size-sm);
   color: var(--color-text-primary);
+}
+
+.gps-coords {
+  font-family: monospace;
+  color: var(--color-text-secondary);
+}
+
+.map-container {
+  position: relative;
+  width: 100%;
+  height: 220px;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  margin-top: var(--space-2);
 }
 
 .description-text {
@@ -961,4 +995,25 @@ function getPriorityClass(priority: string | null | undefined): string {
 .resolve-error {
   color: #ef4444;
 }
+
+/* Status & Priority badges */
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-xs);
+  font-weight: 500;
+  text-transform: capitalize;
+}
+
+.status-new { background: rgba(214, 158, 46, 0.15); color: #d69e2e; }
+.status-accepted { background: rgba(49, 130, 206, 0.15); color: #3182ce; }
+.status-done { background: rgba(56, 161, 105, 0.15); color: #38a169; }
+.status-canceled { background: rgba(160, 174, 192, 0.15); color: #a0aec0; }
+
+.priority-urgent { background: rgba(239, 68, 68, 0.15); color: #ef4444; }
+.priority-important { background: rgba(249, 115, 22, 0.15); color: #f97316; }
+.priority-normal { background: rgba(59, 130, 246, 0.15); color: #3b82f6; }
+.priority-low { background: rgba(107, 114, 128, 0.15); color: #9ca3af; }
 </style>

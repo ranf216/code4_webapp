@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { callApi } from '~/api/call'
-import type { Call as ApiCall, GetCallsRequest } from '~/api/types/call'
+import type { Call as ApiCall, GetCallsRequest, CallPriority, CallStatus } from '~/api/types/call'
 import CallsFilters from './CallsFilters.vue'
 import CallDetailsModal from './CallDetailsModal.vue'
+import { useNotificationSocket } from '~/composables/useNotificationSocket'
 
 const { t } = useTranslation()
+const { latestNotification } = useNotificationSocket()
 
 // Selected call for details modal
 const selectedCall = ref<HistoryCall | null>(null)
@@ -52,6 +54,7 @@ interface ServiceType {
 // History Call interface
 interface HistoryCall {
   id: string
+  displayId: string
   category: CallCategory
   serviceType: ServiceType
   residentName: string
@@ -61,6 +64,8 @@ interface HistoryCall {
   closedDateTime?: string
   officerName: string | null
   status: 'done' | 'canceled'
+  priority: CallPriority | null
+  createdOn: string
   // Optional fields for Call Details
   callDateTime?: string
   currentAddress?: string
@@ -113,11 +118,11 @@ const error = ref('')
 
 function getCategoryInfo(category: ApiCall['category']): CallCategory {
   const map: Record<ApiCall['category'], CallCategory> = {
-    medical_emergency: { type: 'medical', label: 'Medical', icon: 'lucide:heart-pulse', color: '#ef4444' },
-    security_emergency: { type: 'security', label: 'Security', icon: 'lucide:shield', color: '#f97316' },
-    panic: { type: 'panic', label: 'Panic', icon: 'lucide:siren', color: '#ef4444' },
-    concierge_service: { type: 'concierge', label: 'Concierge', icon: 'lucide:bell', color: '#3b82f6' },
-    test: { type: 'test', label: 'Test', icon: 'lucide:activity', color: '#22c55e' },
+    medical_emergency: { type: 'medical', label: 'Medical Emergency', icon: 'lucide:heart-pulse', color: '#ef4444' },
+    security_emergency: { type: 'security', label: 'Security Emergency', icon: 'lucide:shield-alert', color: '#f97316' },
+    panic: { type: 'panic', label: 'Panic Button', icon: 'lucide:siren', color: '#ef4444' },
+    concierge_service: { type: 'concierge', label: 'Concierge Service', icon: 'lucide:bell-concierge', color: '#3b82f6' },
+    test: { type: 'test', label: 'Test Call', icon: 'lucide:test-tube', color: '#8b5cf6' },
   }
   return map[category]
 }
@@ -131,7 +136,6 @@ function getClosedDateTime(apiCall: ApiCall): string | undefined {
 function mapHistoryCall(apiCall: ApiCall): HistoryCall {
   const category = getCategoryInfo(apiCall.category)
   const serviceName = apiCall.service_type || category.label
-  const serviceIcon = apiCall.category === 'concierge_service' ? 'lucide:bell-concierge' : category.icon
   const scheduledDateTime = apiCall.scheduled_date
     ? `${apiCall.scheduled_date}${apiCall.scheduled_time_from ? ' ' + apiCall.scheduled_time_from : ''}`
     : null
@@ -139,8 +143,9 @@ function mapHistoryCall(apiCall: ApiCall): HistoryCall {
 
   return {
     id: apiCall.call_id.toString(),
+    displayId: `CL-${apiCall.call_id}`,
     category,
-    serviceType: { name: serviceName, icon: serviceIcon },
+    serviceType: { name: serviceName, icon: category.icon },
     residentName: apiCall.resident_name || '',
     communityName: apiCall.community_name || '',
     address: apiCall.address || '',
@@ -148,6 +153,8 @@ function mapHistoryCall(apiCall: ApiCall): HistoryCall {
     closedDateTime,
     officerName: apiCall.officer_name,
     status: apiCall.status === 'resolved' ? 'done' : 'canceled',
+    priority: apiCall.priority,
+    createdOn: apiCall.created_on,
     callDateTime: apiCall.created_on,
     currentAddress: apiCall.current_address || undefined,
     description: apiCall.description || undefined,
@@ -162,35 +169,17 @@ function mapHistoryCall(apiCall: ApiCall): HistoryCall {
 }
 
 function buildGetHistoryRequest(filters: Record<string, string>): Omit<GetCallsRequest, '#request'> {
-  const categoryMap: Record<string, ApiCall['category'] | undefined> = {
-    'Medical Assistance': 'medical_emergency',
-    'Security Patrol': 'security_emergency',
-    'Package Delivery': 'concierge_service',
-    'Communication Test': 'test',
-  }
-
-  const statusMap: Record<string, ApiCall['status'] | undefined> = {
-    new: 'new',
-    accepted: 'accepted',
-    done: 'resolved',
-    canceled: 'canceled',
-  }
-
   const params: Omit<GetCallsRequest, '#request'> = {
     is_open: false,
     limit: 100,
   }
 
   if (filters.status) {
-    const status = statusMap[filters.status]
-    if (status) {
-      params.status = status
-    }
+    params.status = filters.status as CallStatus
   }
 
-  const category = filters.serviceType ? categoryMap[filters.serviceType] : undefined
-  if (category) {
-    params.category = category
+  if (filters.serviceType) {
+    params.category = filters.serviceType as ApiCall['category']
   }
 
   if (filters.search) {
@@ -221,35 +210,87 @@ onMounted(() => {
   fetchHistoryCalls()
 })
 
+function formatTime(iso: string): string {
+  const d = new Date(iso)
+  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+}
+
+function timeSince(iso: string): string {
+  const seconds = Math.floor((Date.now() - new Date(iso).getTime()) / 1000)
+  if (seconds < 60) return `${seconds}s`
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) return `${minutes}m`
+  const hours = Math.floor(minutes / 60)
+  return `${hours}h`
+}
+
+function formatDateTime(iso: string): string {
+  return new Date(iso).toLocaleString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
 // Local filters for fields not supported by get_calls API
 const filteredHistoryCalls = computed(() => {
-  return historyCalls.value.filter((call) => {
-    // Resident name filter
-    if (activeFilters.value.residentName &&
-        !call.residentName.toLowerCase().includes(activeFilters.value.residentName.toLowerCase())) {
-      return false
-    }
-
-    // Officer name filter
-    if (activeFilters.value.officerName) {
-      if (!call.officerName) return false
-      if (!call.officerName.toLowerCase().includes(activeFilters.value.officerName.toLowerCase())) {
+  return historyCalls.value
+    .filter((call: HistoryCall) => {
+      if (activeFilters.value.residentName &&
+          !call.residentName.toLowerCase().includes(activeFilters.value.residentName.toLowerCase())) {
         return false
       }
-    }
-
-    return true
-  })
+      if (activeFilters.value.officerName) {
+        if (!call.officerName) return false
+        if (!call.officerName.toLowerCase().includes(activeFilters.value.officerName.toLowerCase())) {
+          return false
+        }
+      }
+      return true
+    })
+    .sort((a: HistoryCall, b: HistoryCall) => new Date(b.createdOn).getTime() - new Date(a.createdOn).getTime())
 })
+
+function getPriorityClass(priority: string | null | undefined): string {
+  const p = priority || 'normal'
+  switch (p) {
+    case 'urgent': return 'priority-urgent'
+    case 'important': return 'priority-important'
+    case 'normal': return 'priority-normal'
+    case 'low': return 'priority-low'
+    default: return 'priority-normal'
+  }
+}
 
 // Status display functions
 function getStatusClass(status: string): string {
-  return status === 'done' ? 'status-done' : 'status-canceled'
+  switch (status) {
+    case 'done':
+    case 'resolved': return 'status-done'
+    case 'canceled': return 'status-canceled'
+    default: return status
+  }
 }
 
 function getStatusLabel(status: string): string {
-  return status === 'done' ? t('calls.status.done') : t('calls.status.canceled')
+  switch (status) {
+    case 'done':
+    case 'resolved': return t('calls.status.done')
+    case 'canceled': return t('calls.status.canceled')
+    default: return status
+  }
 }
+
+watch(
+  () => latestNotification.value,
+  (n: any) => {
+    if (n && ['new_service_call', 'new_emergency', 'panic_button', 'call_status_changed'].includes(n.type)) {
+      fetchHistoryCalls()
+    }
+  }
+)
 </script>
 
 <template>
@@ -273,22 +314,29 @@ function getStatusLabel(status: string): string {
       <table class="data-table">
         <thead>
           <tr>
+            <th class="col-id">Call #</th>
             <th class="col-category">{{ t('calls.category') }}</th>
-            <th class="col-service">{{ t('calls.service_type') }}</th>
+            <th class="col-status">{{ t('calls.status') }}</th>
+            <th class="col-priority">Priority</th>
             <th class="col-resident">{{ t('calls.resident') }}</th>
             <th class="col-community">{{ t('calls.community') }}</th>
             <th class="col-address">{{ t('calls.address') }}</th>
+            <th class="col-created">Created</th>
             <th class="col-scheduled">{{ t('calls.scheduled_datetime') }}</th>
             <th class="col-closed">{{ t('calls.closed_datetime') }}</th>
             <th class="col-officer">{{ t('calls.officer') }}</th>
             <th class="col-confirmation">{{ t('calls.confirmation_short') }}</th>
             <th class="col-comments">{{ t('calls.officer_comments_short') }}</th>
             <th class="col-feedback">{{ t('calls.resident_feedback_short') }}</th>
-            <th class="col-status">{{ t('calls.status') }}</th>
           </tr>
         </thead>
         <tbody>
           <tr v-for="call in filteredHistoryCalls" :key="call.id" class="call-row" @click="openCallDetails(call)">
+            <!-- Call # -->
+            <td class="col-id">
+              <span class="call-id">{{ call.displayId }}</span>
+            </td>
+
             <!-- Call Category -->
             <td class="col-category">
               <div class="category-cell">
@@ -297,12 +345,19 @@ function getStatusLabel(status: string): string {
               </div>
             </td>
 
-            <!-- Service Type -->
-            <td class="col-service">
-              <div class="service-cell">
-                <Icon :name="call.serviceType.icon" :size="16" class="text-secondary" />
-                <span>{{ call.serviceType.name }}</span>
-              </div>
+            <!-- Status -->
+            <td class="col-status">
+              <span :class="['status-badge', getStatusClass(call.status)]">
+                {{ getStatusLabel(call.status) }}
+              </span>
+            </td>
+
+            <!-- Priority -->
+            <td class="col-priority">
+              <span v-if="call.priority" :class="['priority-badge', getPriorityClass(call.priority)]">
+                {{ call.priority }}
+              </span>
+              <span v-else class="no-content">—</span>
             </td>
 
             <!-- Resident -->
@@ -318,6 +373,12 @@ function getStatusLabel(status: string): string {
             <!-- Address -->
             <td class="col-address">
               <span class="address-text">{{ call.address }}</span>
+            </td>
+
+            <!-- Created -->
+            <td class="col-created" :title="formatDateTime(call.createdOn)">
+              <span class="elapsed-time">{{ timeSince(call.createdOn) }}</span>
+              <span class="created-time">{{ formatTime(call.createdOn) }}</span>
             </td>
 
             <!-- Scheduled Date/Time -->
@@ -373,12 +434,6 @@ function getStatusLabel(status: string): string {
               <span v-else class="no-content">—</span>
             </td>
 
-            <!-- Status -->
-            <td class="col-status">
-              <span :class="['status-badge', getStatusClass(call.status)]">
-                {{ getStatusLabel(call.status) }}
-              </span>
-            </td>
           </tr>
         </tbody>
       </table>
@@ -446,18 +501,42 @@ function getStatusLabel(status: string): string {
 }
 
 /* Column widths */
-.col-category { width: 140px; min-width: 140px; }
-.col-service { width: 160px; min-width: 160px; }
+.col-id { width: 90px; min-width: 90px; }
+.col-category { width: 160px; min-width: 160px; }
+.col-status { width: 90px; min-width: 90px; }
+.col-priority { width: 90px; min-width: 90px; }
 .col-resident { width: 140px; min-width: 140px; }
 .col-community { width: 160px; min-width: 160px; }
 .col-address { min-width: 180px; width: 180px; }
+.col-created { width: 100px; min-width: 100px; }
 .col-scheduled { width: 140px; min-width: 140px; }
 .col-closed { width: 140px; min-width: 140px; }
 .col-officer { width: 160px; min-width: 160px; }
 .col-confirmation { width: 80px; min-width: 80px; text-align: center; }
 .col-comments { width: 80px; min-width: 80px; text-align: center; }
 .col-feedback { width: 140px; min-width: 140px; }
-.col-status { width: 100px; min-width: 100px; }
+
+.call-id {
+  font-family: monospace;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+}
+
+/* Created time */
+.col-created {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.elapsed-time {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-primary);
+  font-weight: 500;
+}
+.created-time {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+}
 
 /* Category cell */
 .category-cell {
@@ -499,14 +578,29 @@ function getStatusLabel(status: string): string {
 }
 
 .status-done {
-  background: rgba(34, 197, 94, 0.15);
-  color: #22c55e;
+  background: rgba(56, 161, 105, 0.15);
+  color: #38a169;
 }
 
 .status-canceled {
-  background: rgba(239, 68, 68, 0.15);
-  color: #ef4444;
+  background: rgba(160, 174, 192, 0.15);
+  color: #a0aec0;
 }
+
+/* Priority badge */
+.priority-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-xs);
+  font-weight: 500;
+  text-transform: capitalize;
+}
+.priority-urgent { background: rgba(239, 68, 68, 0.15); color: #ef4444; }
+.priority-important { background: rgba(249, 115, 22, 0.15); color: #f97316; }
+.priority-normal { background: rgba(59, 130, 246, 0.15); color: #3b82f6; }
+.priority-low { background: rgba(107, 114, 128, 0.15); color: #9ca3af; }
 
 /* History-specific column styles */
 .has-content-icon {

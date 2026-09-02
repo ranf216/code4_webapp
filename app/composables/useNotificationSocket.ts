@@ -61,6 +61,42 @@ function createNotificationFromMessage(msg: SocketMessage): Notification {
   }
 }
 
+function playAlarm() {
+  try {
+    const AudioContext = (window as any).AudioContext || (window as any).webkitAudioContext
+    if (!AudioContext) return
+    const ctx = new AudioContext()
+    if (ctx.state === 'suspended') ctx.resume()
+    const osc = ctx.createOscillator()
+    const gain = ctx.createGain()
+    osc.type = 'sine'
+    osc.frequency.setValueAtTime(880, ctx.currentTime)
+    gain.gain.setValueAtTime(0.4, ctx.currentTime)
+    gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.4)
+    osc.connect(gain)
+    gain.connect(ctx.destination)
+    osc.start()
+    osc.stop(ctx.currentTime + 0.4)
+  } catch {}
+}
+
+function requestNotificationPermission() {
+  try {
+    if (typeof window === 'undefined' || !('Notification' in window)) return
+    if (Notification.permission === 'default') {
+      Notification.requestPermission()
+    }
+  } catch {}
+}
+
+function showDesktopNotification(title: string, body: string) {
+  try {
+    if (typeof window === 'undefined' || !('Notification' in window)) return
+    if (Notification.permission !== 'granted') return
+    new Notification(title, { body, icon: '/favicon.ico' })
+  } catch {}
+}
+
 export function useNotificationSocket() {
   const authStore = useAuthStore()
   const toastStore = useToastStore()
@@ -161,7 +197,13 @@ export function useNotificationSocket() {
       if (URGENT_TYPES.includes(notification.type)) {
         toastStore.error(toastMessage, 8000)
         urgentAlert.value = notification
+        playAlarm()
+        showDesktopNotification(notification.title || 'Emergency alert', notification.message)
         console.log('[NotificationSocket] Urgent alert set:', notification.type)
+      } else if (notification.type === 'new_service_call') {
+        toastStore.info(toastMessage, 4500)
+        showDesktopNotification(notification.title || 'New call', notification.message)
+        console.log('[NotificationSocket] Info toast shown:', notification.type)
       } else {
         toastStore.info(toastMessage, 4500)
         console.log('[NotificationSocket] Info toast shown:', notification.type)
@@ -175,6 +217,7 @@ export function useNotificationSocket() {
     activeInstances++
     if (activeInstances === 1) {
       connect()
+      requestNotificationPermission()
     }
   })
 

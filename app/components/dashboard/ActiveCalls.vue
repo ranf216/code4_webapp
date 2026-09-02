@@ -4,6 +4,7 @@ import { communityApi } from '~/api/community'
 import type { Call as ApiCall, GetCallsRequest, CallCategory as ApiCallCategory, CallStatus } from '~/api/types/call'
 import type { Community } from '~/api/community'
 import CallDetailsModal from '../calls/CallDetailsModal.vue'
+import AssignCallModal from '../calls/AssignCallModal.vue'
 import { useNotificationSocket } from '~/composables/useNotificationSocket'
 
 const { t } = useTranslation()
@@ -32,12 +33,13 @@ interface ActiveCall {
   communityId: number
   address: string
   officerName: string | null
-  status: CallStatus
+  status: 'new' | 'accepted' | 'done' | 'canceled'
   priority: string
   note: string
   time: string
   elapsed: string
   isEmergency: boolean
+  createdOn: string
   // For CallDetailsModal
   callDateTime?: string
   currentAddress?: string
@@ -71,9 +73,36 @@ const communities = ref<Community[]>([])
 
 const urgentCount = computed(() => calls.value.filter((c: ActiveCall) => c.isEmergency && c.status === 'new').length)
 
+const sortedCalls = computed<ActiveCall[]>(() => {
+  return [...calls.value].sort((a, b) => {
+    const aUrgent = a.isEmergency && a.status === 'new' ? 1 : 0
+    const bUrgent = b.isEmergency && b.status === 'new' ? 1 : 0
+    if (aUrgent !== bUrgent) return bUrgent - aUrgent
+    return new Date(b.createdOn).getTime() - new Date(a.createdOn).getTime()
+  })
+})
+
 const selectedCall = ref<ActiveCall | null>(null)
 const detailsCall = computed(() => selectedCall.value as any)
 const showDetailsModal = ref(false)
+
+const callToAssign = ref<ActiveCall | null>(null)
+const showAssignModal = ref(false)
+
+function openAssignModal(call: ActiveCall) {
+  callToAssign.value = call
+  showAssignModal.value = true
+}
+
+function closeAssignModal() {
+  showAssignModal.value = false
+  callToAssign.value = null
+}
+
+async function handleAssigned() {
+  await fetchActiveCalls()
+  closeAssignModal()
+}
 
 const statusOptions: { value: CallStatus | ''; label: string }[] = [
   { value: '', label: t('calls.filters.all') },
@@ -92,11 +121,15 @@ const categoryOptions: { value: ApiCallCategory | ''; label: string; icon: strin
   { value: 'test', label: 'Test Call', icon: 'lucide:test-tube' },
 ]
 
-const statusColor: Record<string, string> = {
-  new: 'pill--critical',
-  accepted: 'pill--info',
-  resolved: 'pill--success',
-  canceled: 'pill--ghost',
+function getStatusClass(status: string): string {
+  switch (status) {
+    case 'new': return 'status-new'
+    case 'accepted': return 'status-accepted'
+    case 'resolved':
+    case 'done': return 'status-done'
+    case 'canceled': return 'status-canceled'
+    default: return 'status-new'
+  }
 }
 
 const priorityColor: Record<string, string> = {
@@ -131,6 +164,16 @@ function timeSince(createdOn: string): string {
   return `${hours}h`
 }
 
+function formatDateTime(iso: string): string {
+  return new Date(iso).toLocaleString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
 function mapCall(apiCall: ApiCall): ActiveCall {
   const category = getCategoryInfo(apiCall.category)
   const serviceName = apiCall.service_type || category.label
@@ -145,12 +188,13 @@ function mapCall(apiCall: ApiCall): ActiveCall {
     communityId: apiCall.community_id,
     address: apiCall.address || '',
     officerName: apiCall.officer_name,
-    status: apiCall.status,
+    status: apiCall.status === 'resolved' ? 'done' : apiCall.status,
     priority: apiCall.priority,
     note: apiCall.description || '',
     time: formatTime(apiCall.created_on),
     elapsed: timeSince(apiCall.created_on),
     isEmergency: ['medical_emergency', 'security_emergency', 'panic'].includes(apiCall.category),
+    createdOn: apiCall.created_on,
     callDateTime: apiCall.created_on,
     currentAddress: apiCall.current_address || undefined,
     description: apiCall.description || undefined,
@@ -282,10 +326,14 @@ watch(
     <div v-else class="active-calls__list">
       <div v-if="calls.length === 0" class="active-calls__state active-calls__state--empty">No active calls</div>
       <div
-        v-for="call in calls"
+        v-for="call in sortedCalls"
         :key="call.id"
         class="call-row"
-        :class="[`call-row--${call.status}`, { 'call-row--emergency': call.isEmergency && call.status === 'new' }]"
+        :class="[
+          `call-row--${call.status}`,
+          { 'call-row--emergency': call.isEmergency && call.status === 'new' },
+          { 'call-row--panic': call.category.type === 'panic' && call.status === 'new' },
+        ]"
         @click="openCallDetails(call)"
       >
         <div class="call-row__indicator" :class="`call-row__indicator--${call.status}`" />
@@ -295,12 +343,16 @@ watch(
               <Icon :name="call.category.icon" :size="16" class="call-row__type-icon" :style="{ color: call.category.color }" />
               <span class="call-row__name">{{ call.residentName }}</span>
               <span class="call-row__id text-muted text-xs">{{ call.displayId }}</span>
-              <span :class="['pill', statusColor[call.status] ?? 'pill--ghost']">{{ call.status }}</span>
+              <span :class="['status-badge', getStatusClass(call.status)]">{{ call.status }}</span>
               <span :class="['pill', priorityColor[call.priority] ?? 'pill--ghost']">{{ call.priority }}</span>
             </div>
-            <div class="call-row__right">
+            <div class="call-row__right" :title="formatDateTime(call.createdOn)">
               <span class="call-row__time">{{ call.time }}</span>
               <span class="call-row__elapsed">{{ call.elapsed }}</span>
+              <button v-if="call.status === 'new'" class="assign-btn" @click.stop="openAssignModal(call)">
+                <Icon name="lucide:user-plus" :size="12" />
+                Assign
+              </button>
             </div>
           </div>
           <div class="call-row__mid text-xs">
@@ -324,6 +376,13 @@ watch(
       @resolved="handleResolved"
       @canceled="handleCanceled"
       @deleted="handleDeleted"
+    />
+
+    <AssignCallModal
+      :show="showAssignModal"
+      :call="callToAssign"
+      @close="closeAssignModal"
+      @assigned="handleAssigned"
     />
   </div>
 </template>
@@ -431,6 +490,24 @@ watch(
   font-size: var(--font-size-base);
   color: var(--color-text-muted);
 }
+
+.assign-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 2px var(--space-2);
+  background: var(--color-accent);
+  color: white;
+  border: none;
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+  margin-top: var(--space-1);
+}
+
+.assign-btn:hover {
+  filter: brightness(1.15);
+}
 .call-row__mid {
   display: flex;
   align-items: center;
@@ -507,5 +584,36 @@ watch(
 .call-row--emergency .call-row__name {
   color: #ef4444;
   font-weight: 600;
+}
+
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-xs);
+  font-weight: 500;
+  text-transform: capitalize;
+}
+
+.status-new { background: rgba(214, 158, 46, 0.15); color: #d69e2e; }
+.status-accepted { background: rgba(49, 130, 206, 0.15); color: #3182ce; }
+.status-done { background: rgba(56, 161, 105, 0.15); color: #38a169; }
+.status-canceled { background: rgba(160, 174, 192, 0.15); color: #a0aec0; }
+
+.call-row--panic .call-row__body {
+  background: rgba(197, 48, 48, 0.18) !important;
+  border-left: 4px solid #c53030;
+  animation: panic-pulse 1s infinite;
+}
+
+.call-row--panic .call-row__name {
+  color: #c53030;
+  font-weight: 700;
+}
+
+@keyframes panic-pulse {
+  0%, 100% { background: rgba(197, 48, 48, 0.18); }
+  50% { background: rgba(197, 48, 48, 0.32); }
 }
 </style>

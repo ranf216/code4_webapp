@@ -23,9 +23,19 @@ const communities = ref<Community[]>([])
 const communitiesLoading = ref(false)
 const communitiesError = ref('')
 
-// Service type options (UI only)
-const serviceTypes = ['Medical Assistance', 'Security Patrol', 'Package Delivery', 'Communication Test']
-const statuses = ['new', 'accepted']
+// Service type options matching CallCategory values
+const serviceTypes = [
+  { value: 'medical_emergency', label: 'Medical Emergency' },
+  { value: 'security_emergency', label: 'Security Emergency' },
+  { value: 'concierge_service', label: 'Concierge Service' },
+  { value: 'test', label: 'Test Call' },
+]
+const statuses = [
+  { value: 'new', label: 'New' },
+  { value: 'accepted', label: 'Accepted' },
+  { value: 'resolved', label: 'Resolved' },
+  { value: 'canceled', label: 'Canceled' },
+]
 
 // Fetch communities on mount
 onMounted(async () => {
@@ -109,7 +119,7 @@ const hasActiveFilters = computed(() => {
         <label class="filter-label">{{ t('calls.filters.service_type') }}</label>
         <select v-model="filters.serviceType" class="filter-select">
           <option value="">{{ t('calls.filters.all') }}</option>
-          <option v-for="s in serviceTypes" :key="s" :value="s">{{ s }}</option>
+          <option v-for="s in serviceTypes" :key="s.value" :value="s.value">{{ s.label }}</option>
         </select>
       </div>
 
@@ -118,9 +128,7 @@ const hasActiveFilters = computed(() => {
         <label class="filter-label">{{ t('calls.filters.status') }}</label>
         <select v-model="filters.status" class="filter-select">
           <option value="">{{ t('calls.filters.all') }}</option>
-          <option v-for="s in statuses" :key="s" :value="s">
-            {{ s === 'new' ? t('calls.status.new') : t('calls.status.accepted') }}
-          </option>
+          <option v-for="s in statuses" :key="s.value" :value="s.value">{{ s.label }}</option>
         </select>
       </div>
 
