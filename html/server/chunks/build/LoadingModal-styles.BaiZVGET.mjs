@@ -1,0 +1,9 @@
+//#region app/components/LoadingModal.vue?vue&type=style&index=0&scoped=bcf0b29f&inline&used&lang.css
+var LoadingModal_vue_vue_type_style_index_0_scoped_bcf0b29f_inline_used_lang_default = ".loading-modal-overlay[data-v-bcf0b29f]{-webkit-backdrop-filter:blur(4px);backdrop-filter:blur(4px);z-index:9999;background:#0009;justify-content:center;align-items:center;display:flex;position:fixed;inset:0}.loading-modal[data-v-bcf0b29f]{align-items:center;gap:var(--space-4);padding:var(--space-8);background:var(--color-bg-elevated);border-radius:var(--radius-lg);border:1px solid var(--color-border);flex-direction:column;min-width:200px;display:flex;box-shadow:0 20px 25px -5px #0000001a,0 10px 10px -5px #0000000a}.loading-modal__spinner[data-v-bcf0b29f]{color:var(--color-accent)}.loading-modal__message[data-v-bcf0b29f]{color:var(--color-text-primary);font-size:var(--font-size-sm);text-align:center;margin:0;font-weight:500}.loading-modal-enter-active[data-v-bcf0b29f],.loading-modal-leave-active[data-v-bcf0b29f]{transition:all .3s}.loading-modal-enter-from[data-v-bcf0b29f],.loading-modal-leave-to[data-v-bcf0b29f]{opacity:0}.loading-modal-enter-active .loading-modal[data-v-bcf0b29f],.loading-modal-leave-active .loading-modal[data-v-bcf0b29f]{transition:all .3s}.loading-modal-enter-from .loading-modal[data-v-bcf0b29f],.loading-modal-leave-to .loading-modal[data-v-bcf0b29f]{opacity:0;transform:scale(.9)}.spin[data-v-bcf0b29f]{animation:1s linear infinite spin-bcf0b29f}@keyframes spin-bcf0b29f{to{transform:rotate(1turn)}}";
+
+const LoadingModalStyles_BaiZVGET = [
+  LoadingModal_vue_vue_type_style_index_0_scoped_bcf0b29f_inline_used_lang_default
+];
+
+export { LoadingModalStyles_BaiZVGET as default };
+//# sourceMappingURL=LoadingModal-styles.BaiZVGET.mjs.map

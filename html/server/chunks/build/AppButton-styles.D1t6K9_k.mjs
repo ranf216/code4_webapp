@@ -1,0 +1,9 @@
+//#region app/components/AppButton.vue?vue&type=style&index=0&scoped=07ae36f5&inline&used&lang.css
+var AppButton_vue_vue_type_style_index_0_scoped_07ae36f5_inline_used_lang_default = ".app-button[data-v-07ae36f5]{justify-content:center;align-items:center;gap:var(--space-2);border-radius:var(--radius-md);cursor:pointer;transition:all var(--transition-base);border:none;font-weight:600;display:inline-flex}.app-button[data-v-07ae36f5]:disabled{opacity:.5;cursor:not-allowed}.app-button--sm[data-v-07ae36f5]{height:32px;padding:0 var(--space-3);font-size:var(--font-size-xs)}.app-button--md[data-v-07ae36f5]{height:40px;padding:0 var(--space-4);font-size:var(--font-size-sm)}.app-button--lg[data-v-07ae36f5]{height:48px;padding:0 var(--space-5);font-size:var(--font-size-base)}.app-button--primary[data-v-07ae36f5]{background:var(--color-accent);color:#0a0c10}.app-button--primary[data-v-07ae36f5]:hover:not(:disabled){opacity:.9}.app-button--secondary[data-v-07ae36f5]{background:var(--color-bg-surface);border:1px solid var(--color-border);color:var(--color-text-primary)}.app-button--secondary[data-v-07ae36f5]:hover:not(:disabled){background:var(--color-bg-overlay);border-color:var(--color-accent)}.app-button--danger[data-v-07ae36f5]{background:var(--color-critical);color:#fff}.app-button--danger[data-v-07ae36f5]:hover:not(:disabled){opacity:.9}.app-button--ghost[data-v-07ae36f5]{border:1px solid var(--color-border);color:var(--color-text-secondary);background:0 0}.app-button--ghost[data-v-07ae36f5]:hover:not(:disabled){background:var(--color-bg-overlay);color:var(--color-text-primary)}";
+
+const AppButtonStyles_D1t6K9_k = [
+  AppButton_vue_vue_type_style_index_0_scoped_07ae36f5_inline_used_lang_default
+];
+
+export { AppButtonStyles_D1t6K9_k as default };
+//# sourceMappingURL=AppButton-styles.D1t6K9_k.mjs.map
