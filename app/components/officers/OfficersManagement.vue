@@ -97,6 +97,11 @@ const isLoadingCommunities = ref(false)
 const searchQuery = ref('')
 const filterCommunity = ref<number | 'all'>('all')
 const filterActive = ref<'all' | 'active' | 'inactive'>('active')
+const activeFilterOptions = computed(() => [
+  { label: t('common.active'), value: 'active' },
+  { label: t('common.inactive'), value: 'inactive' },
+  { label: t('officers.all'), value: 'all' },
+])
 const sortBy = ref<'first_name' | 'last_name' | 'community' | 'created_on' | ''>('')
 const sortDir = ref<'asc' | 'desc' | ''>('')
 
@@ -730,11 +735,11 @@ function toggleSort(col: 'first_name' | 'last_name' | 'community' | 'created_on'
         <option v-for="c in communities" :key="c.community_id" :value="c.community_id">{{ c.name }}</option>
       </select>
 
-      <div class="filter-toggle">
-        <button :class="['ftoggle-btn', { active: filterActive === 'active' }]" @click="filterActive = 'active'">{{ t('common.active') }}</button>
-        <button :class="['ftoggle-btn', { active: filterActive === 'inactive' }]" @click="filterActive = 'inactive'">{{ t('common.inactive') }}</button>
-        <button :class="['ftoggle-btn', { active: filterActive === 'all' }]" @click="filterActive = 'all'">{{ t('officers.all') }}</button>
-      </div>
+      <AppSegmentedControl
+        v-model="filterActive"
+        :options="activeFilterOptions"
+        :aria-label="t('common.status')"
+      />
     </div>
 
     <!-- Table -->
@@ -1280,30 +1285,6 @@ function toggleSort(col: 'first_name' | 'last_name' | 'community' | 'created_on'
   cursor: pointer;
   margin-left: 10px;
   margin-right: 10px;
-}
-
-.filter-toggle {
-  display: flex;
-  background: var(--color-bg-elevated);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  overflow: hidden;
-}
-
-.ftoggle-btn {
-  padding: var(--space-2) var(--space-3);
-  background: none;
-  border: none;
-  font-size: var(--font-size-xs);
-  color: var(--color-text-muted);
-  cursor: pointer;
-  transition: all var(--transition-base);
-}
-
-.ftoggle-btn.active {
-  background: var(--color-accent);
-  color: var(--color-bg-base);
-  font-weight: 500;
 }
 
 /* Table */

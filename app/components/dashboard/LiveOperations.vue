@@ -1,14 +1,42 @@
 <script setup lang="ts">
+const liveOpsRef = ref<HTMLElement | null>(null)
+const isFullscreen = ref(false)
+
 const sampleMarkers = [
   { lat: 34.0545, lng: -118.2450, status: 'active'     as const },
   { lat: 34.0510, lng: -118.2410, status: 'responding' as const },
   { lat: 34.0530, lng: -118.2480, status: 'idle'       as const },
   { lat: 34.0500, lng: -118.2460, status: 'active'     as const },
 ]
+
+function updateFullscreenState() {
+  isFullscreen.value = document.fullscreenElement === liveOpsRef.value
+}
+
+async function toggleFullscreen() {
+  if (!liveOpsRef.value) return
+  try {
+    if (document.fullscreenElement) {
+      await document.exitFullscreen()
+      return
+    }
+    await liveOpsRef.value.requestFullscreen()
+  } catch (error) {
+    console.error('Failed to toggle fullscreen:', error)
+  }
+}
+
+onMounted(() => {
+  document.addEventListener('fullscreenchange', updateFullscreenState)
+})
+
+onUnmounted(() => {
+  document.removeEventListener('fullscreenchange', updateFullscreenState)
+})
 </script>
 
 <template>
-  <div class="live-ops card">
+  <div ref="liveOpsRef" class="live-ops card">
     <!-- Header -->
     <div class="live-ops__header">
       <span class="live-ops__title">LIVE OPERATIONS</span>
@@ -17,8 +45,9 @@ const sampleMarkers = [
           <span class="live-badge__dot" />
           Live
         </span>
-        <button class="live-ops__fullscreen">
-          Open full screen
+        <button class="live-ops__fullscreen" @click="toggleFullscreen">
+          <Icon :name="isFullscreen ? 'lucide:minimize-2' : 'lucide:maximize-2'" :size="14" />
+          {{ isFullscreen ? 'Exit full screen' : 'Open full screen' }}
         </button>
       </div>
     </div>
@@ -40,6 +69,11 @@ const sampleMarkers = [
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+.live-ops:fullscreen {
+  width: 100vw;
+  height: 100vh;
+  background: var(--color-bg-surface);
 }
 .live-ops__header {
   display: flex;
@@ -84,6 +118,9 @@ const sampleMarkers = [
   50% { opacity: 0.4; }
 }
 .live-ops__fullscreen {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
   font-size: var(--font-size-base);
   font-weight: 500;
   padding: 5px var(--space-3);

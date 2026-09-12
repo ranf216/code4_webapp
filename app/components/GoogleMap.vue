@@ -29,6 +29,16 @@ interface PostMarker {
   type: string
 }
 
+interface WorkspaceMarker {
+  id: string
+  lat: number
+  lng: number
+  type: 'asset' | 'post'
+  label: string
+  color?: string
+  active?: boolean
+}
+
 interface EmergencyCallMarker {
   lat: number
   lng: number
@@ -42,6 +52,7 @@ interface CommunityBoundary {
 
 const emit = defineEmits<{
   (e: 'marker-click', marker: MarkerData): void
+  (e: 'workspace-marker-click', marker: WorkspaceMarker): void
 }>()
 
 const props = withDefaults(defineProps<{
@@ -51,6 +62,7 @@ const props = withDefaults(defineProps<{
   routes?: RouteOverlay[]
   waypoints?: WaypointMarker[]
   posts?: PostMarker[]
+  workspaceMarkers?: WorkspaceMarker[]
   emergencyCalls?: EmergencyCallMarker[]
   boundaries?: CommunityBoundary[]
   height?: string
@@ -61,6 +73,7 @@ const props = withDefaults(defineProps<{
   routes: () => [],
   waypoints: () => [],
   posts: () => [],
+  workspaceMarkers: () => [],
   emergencyCalls: () => [],
   boundaries: () => [],
   height: '100%',
@@ -212,6 +225,31 @@ onMounted(async () => {
         position: { lat: p.lat, lng: p.lng },
         content: el,
         title: p.type,
+      })
+    }
+
+    for (const item of props.workspaceMarkers) {
+      const el = document.createElement('button')
+      const color = item.color ?? (item.type === 'asset' ? '#4f6ef7' : '#22c55e')
+      el.type = 'button'
+      el.style.cssText = `
+        display:flex;align-items:center;justify-content:center;
+        width:34px;height:34px;border-radius:${item.type === 'asset' ? '8px' : '50%'};
+        background:${color};border:2px solid #fff;color:#fff;
+        box-shadow:0 2px 10px rgba(0,0,0,.45);cursor:pointer;
+        font:700 12px sans-serif;opacity:${item.active === false ? '.55' : '1'};
+      `
+      el.textContent = item.type === 'asset' ? 'A' : 'P'
+      const marker = new AdvancedMarkerElement({
+        map,
+        position: { lat: item.lat, lng: item.lng },
+        content: el,
+        title: item.label,
+      })
+      marker.addEventListener('gmp-click', () => emit('workspace-marker-click', item))
+      el.addEventListener('click', (event) => {
+        event.stopPropagation()
+        emit('workspace-marker-click', item)
       })
     }
 

@@ -7,9 +7,10 @@ interface NavItem {
   key: string
   label: string
   icon: string
-  to: string
+  to?: string
   badge: number | null
   badgeType?: 'critical'
+  children?: NavItem[]
 }
 
 interface NavGroup {
@@ -29,6 +30,17 @@ const baseGroups: NavGroup[] = [
       { key: 'live-tracking',   label: t('nav.live_tracking'),    icon: 'lucide:map',              to: '/live-tracking', badge: 24 },
       { key: 'calls-incidents', label: t('nav.calls_incidents'),  icon: 'lucide:phone',       to: '/calls',         badge: 1, badgeType: 'critical' },
       { key: 'tasks',           label: t('nav.tasks'),            icon: 'lucide:check-square',     to: '/tasks',         badge: 12 },
+      {
+        key: 'map-assets',
+        label: t('nav.map_assets'),
+        icon: 'lucide:map',
+        badge: null,
+        children: [
+          { key: 'map-workspace', label: t('nav.map_workspace'), icon: 'lucide:map-pinned', to: '/map', badge: null },
+          { key: 'posts', label: t('nav.posts'), icon: 'lucide:clipboard-list', to: '/map/posts', badge: null },
+          { key: 'asset-types', label: t('nav.asset_types'), icon: 'lucide:tags', to: '/settings/asset-types', badge: null },
+        ],
+      },
     ],
   },
   {
@@ -65,8 +77,26 @@ const navGroups = computed<NavGroup[]>(() => {
   return groups
 })
 
-function isActive(to: string) {
-  return route.path === to || route.path.startsWith(to + '/')
+function isActive(to?: string) {
+  return !!to && (route.path === to || route.path.startsWith(to + '/'))
+}
+
+function isAnyChildActive(item: NavItem) {
+  return item.children?.some(child => isActive(child.to)) ?? false
+}
+
+const expandedKeys = ref<Set<string>>(new Set())
+
+function isExpanded(item: NavItem) {
+  return expandedKeys.value.has(item.key) || isAnyChildActive(item)
+}
+
+function toggleExpanded(item: NavItem) {
+  if (expandedKeys.value.has(item.key)) {
+    expandedKeys.value.delete(item.key)
+  } else {
+    expandedKeys.value.add(item.key)
+  }
 }
 
 function handleLogout() {
@@ -112,21 +142,54 @@ function closePanicModal() {
         class="sidebar__group"
       >
         <span class="sidebar__group-label">{{ group.label }}</span>
-        <NuxtLink
-          v-for="item in group.items"
-          :key="item.key"
-          :to="item.to"
-          class="sidebar__item"
-          :class="{ 'sidebar__item--active': isActive(item.to) }"
-        >
-          <Icon :name="item.icon" :size="16" class="sidebar__item-icon" />
-          <span class="sidebar__item-label">{{ item.label }}</span>
-          <span
-            v-if="item.badge"
-            class="sidebar__item-badge"
-            :class="item.badgeType === 'critical' ? 'sidebar__item-badge--critical' : ''"
-          >{{ item.badge }}</span>
-        </NuxtLink>
+        <template v-for="item in group.items" :key="item.key">
+          <template v-if="item.children && item.children.length">
+            <div
+              class="sidebar__item"
+              :class="{ 'sidebar__item--active': isAnyChildActive(item) }"
+              @click="toggleExpanded(item)"
+            >
+              <Icon :name="item.icon" :size="16" class="sidebar__item-icon" />
+              <span class="sidebar__item-label">{{ item.label }}</span>
+              <Icon
+                :name="isExpanded(item) ? 'lucide:chevron-down' : 'lucide:chevron-right'"
+                :size="14"
+                class="sidebar__item-chevron"
+              />
+            </div>
+
+            <div
+              v-show="isExpanded(item)"
+              class="sidebar__submenu"
+            >
+              <NuxtLink
+                v-for="child in item.children"
+                :key="child.key"
+                :to="child.to"
+                class="sidebar__item sidebar__item--sub"
+                :class="{ 'sidebar__item--active': isActive(child.to) }"
+              >
+                <Icon :name="child.icon" :size="14" class="sidebar__item-icon" />
+                <span class="sidebar__item-label">{{ child.label }}</span>
+              </NuxtLink>
+            </div>
+          </template>
+
+          <NuxtLink
+            v-else
+            :to="item.to"
+            class="sidebar__item"
+            :class="{ 'sidebar__item--active': isActive(item.to) }"
+          >
+            <Icon :name="item.icon" :size="16" class="sidebar__item-icon" />
+            <span class="sidebar__item-label">{{ item.label }}</span>
+            <span
+              v-if="item.badge"
+              class="sidebar__item-badge"
+              :class="item.badgeType === 'critical' ? 'sidebar__item-badge--critical' : ''"
+            >{{ item.badge }}</span>
+          </NuxtLink>
+        </template>
       </div>
     </nav>
 
@@ -411,6 +474,40 @@ function closePanicModal() {
 .sidebar__logout-label {
   flex: 1;
   text-align: left;
+}
+
+/* Submenu */
+.sidebar__item {
+  cursor: pointer;
+}
+
+.sidebar__submenu {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding-left: var(--space-6);
+  border-left: 2px solid var(--color-sidebar-border);
+  margin-left: calc(var(--space-5));
+}
+
+.sidebar__item--sub {
+  padding-left: var(--space-1);
+}
+
+.sidebar__item--sub .sidebar__item-icon {
+  margin-left: 0;
+  opacity: 0.6;
+}
+
+.sidebar__item-chevron {
+  flex-shrink: 0;
+  opacity: 0.6;
+  color: var(--color-text-muted);
+}
+
+.sidebar__item:hover .sidebar__item-chevron {
+  opacity: 1;
+  color: var(--color-text-primary);
 }
 
 /* Panic Call Modal Styles Override */

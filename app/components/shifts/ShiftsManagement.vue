@@ -1,11 +1,21 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
 import { useTranslation } from '~/composables/useI18n'
 import { shifts, generateRoute, saveRoute, type Shift, type Waypoint } from '~/composables/useShifts'
 
 const { t } = useTranslation()
 
 const viewMode = ref<'day' | 'week' | 'month'>('week')
+const viewModeModel = computed({
+  get: () => viewMode.value,
+  set: (value: string) => {
+    if (value === 'day' || value === 'week' || value === 'month') viewMode.value = value
+  },
+})
+const viewModeOptions = computed(() => [
+  { label: t('shifts.day_view'), value: 'day' },
+  { label: t('shifts.week_view'), value: 'week' },
+  { label: t('shifts.month_view'), value: 'month' },
+])
 const currentDate = ref(new Date('2026-06-21'))
 const selectedShift = ref<Shift | null>(null)
 const showDetailsPanel = ref(false)
@@ -374,29 +384,11 @@ function toggleStatus(status: string) {
         </button>
       </div>
       <div class="calendar-range">{{ currentRangeLabel }}</div>
-      <div class="view-tabs">
-        <button
-          class="view-tab"
-          :class="{ 'view-tab--active': viewMode === 'day' }"
-          @click="viewMode = 'day'"
-        >
-          {{ t('shifts.day_view') }}
-        </button>
-        <button
-          class="view-tab"
-          :class="{ 'view-tab--active': viewMode === 'week' }"
-          @click="viewMode = 'week'"
-        >
-          {{ t('shifts.week_view') }}
-        </button>
-        <button
-          class="view-tab"
-          :class="{ 'view-tab--active': viewMode === 'month' }"
-          @click="viewMode = 'month'"
-        >
-          {{ t('shifts.month_view') }}
-        </button>
-      </div>
+      <AppSegmentedControl
+        v-model="viewModeModel"
+        :options="viewModeOptions"
+        :aria-label="t('shifts.view_mode')"
+      />
       <button class="btn btn--secondary allocation-board-btn" @click="openAllocationBoard">
         <Icon name="lucide:users" :size="16" />
         {{ t('shifts.allocation_board') }}
@@ -866,31 +858,6 @@ function toggleStatus(status: string) {
 .calendar-range {
   font-size: var(--font-size-lg);
   font-weight: 600;
-}
-
-.view-tabs {
-  display: flex;
-  gap: var(--space-1);
-  background: var(--color-bg-elevated);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  padding: 2px;
-}
-
-.view-tab {
-  padding: var(--space-2) var(--space-3);
-  border: none;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--color-text-secondary);
-  cursor: pointer;
-  font-size: var(--font-size-sm);
-  font-weight: 500;
-}
-
-.view-tab--active {
-  background: var(--color-accent);
-  color: white;
 }
 
 .calendar-container {
