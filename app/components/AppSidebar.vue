@@ -36,7 +36,7 @@ const baseGroups: NavGroup[] = [
         icon: 'lucide:map',
         badge: null,
         children: [
-          { key: 'map-workspace', label: t('nav.map_workspace'), icon: 'lucide:map-pinned', to: '/map', badge: null },
+          { key: 'map-workspace', label: t('nav.map_workspace'), icon: 'lucide:map-pinned', to: '/map-management', badge: null },
           { key: 'posts', label: t('nav.posts'), icon: 'lucide:clipboard-list', to: '/map/posts', badge: null },
           { key: 'asset-types', label: t('nav.asset_types'), icon: 'lucide:tags', to: '/settings/asset-types', badge: null },
         ],

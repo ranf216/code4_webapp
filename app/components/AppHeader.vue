@@ -123,7 +123,7 @@ async function performGlobalSearch(query: string, requestId: number) {
       type: 'post' as const,
       title: post.name,
       subtitle: [post.community_name, post.priority].filter(Boolean).join(' · '),
-      to: `/map?search=${encodeURIComponent(query)}&community_id=${post.community_id}&post_id=${post.post_id}`,
+      to: `/map-management?search=${encodeURIComponent(query)}&community_id=${post.community_id}&post_id=${post.post_id}`,
     })),
   ]
   isSearching.value = false

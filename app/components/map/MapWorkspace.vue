@@ -1,22 +1,24 @@
 <script setup lang="ts">
 import { ref, reactive, computed, watch, onMounted, onUnmounted } from 'vue'
+import { assetApi } from '~/api/asset'
+import { communityApi } from '~/api/community'
+import { useToastStore } from '~/stores/toast'
+import type { Community } from '~/api/community'
+import type { Asset as ApiAsset, AssetLocation, AssetTypeMeta, MapZone as ApiMapZone, Post as ApiPost, PostPriorityMeta } from '~/api/types/asset'
 import type { AssetFormData } from './AddAssetModal.vue'
 import type { PostFormData } from './AddPostModal.vue'
 
 const { t } = useTranslation()
+const toastStore = useToastStore()
+const route = useRoute()
 
-// Communities (replace with API call)
-const communities = [
-  { id: '1', name: 'Sunset Heights' },
-  { id: '2', name: 'Riverside Gardens' },
-  { id: '3', name: 'Metro Central' },
-]
-const selectedCommunityId = ref(communities[0]?.id ?? '1')
+const communities = ref<Community[]>([])
+const selectedCommunityId = ref('')
+const isLoadingMapData = ref(false)
+let mapDataRequestId = 0
 
-const selectedCommunityName = computed(() => {
-  const community = communities.find(c => c.id === selectedCommunityId.value)
-  return community?.name ?? ''
-})
+const selectedCommunity = computed(() => communities.value.find(community => String(community.community_id) === selectedCommunityId.value))
+const selectedCommunityName = computed(() => selectedCommunity.value?.name ?? '')
 
 // Map state
 const hasMap = ref(true)
@@ -54,15 +56,17 @@ watch(searchQuery, (value) => {
 const selectedAssetTypes = ref<string[]>([])
 const openAssetTypeFilter = ref(false)
 const assetTypeFilterRef = ref<HTMLElement | null>(null)
-const assetTypeOptions = ['Camera', 'Gate', 'Door', 'Alarm', 'Fence', 'Other']
+const assetTypeOptions = ref(['Camera', 'Gate', 'Door', 'Alarm', 'Fence', 'Other'])
+const assetTypeIds = ref<Record<string, string>>({})
+const getAssetTypeKey = (name: string) => assetTypeIds.value[name] || name.trim().toLowerCase().replace(/[\s/]+/g, '_')
 const selectedAssetTypesLabel = computed(() => {
-  if (selectedAssetTypes.value.length === 0 || selectedAssetTypes.value.length === assetTypeOptions.length) return t('map.all')
+  if (selectedAssetTypes.value.length === 0 || selectedAssetTypes.value.length === assetTypeOptions.value.length) return t('map.all')
   if (selectedAssetTypes.value.length === 1) return selectedAssetTypes.value[0]
   return `${selectedAssetTypes.value.length} selected`
 })
-const allAssetTypesSelected = computed(() => selectedAssetTypes.value.length === assetTypeOptions.length)
+const allAssetTypesSelected = computed(() => selectedAssetTypes.value.length === assetTypeOptions.value.length)
 function toggleAllAssetTypes() {
-  selectedAssetTypes.value = allAssetTypesSelected.value ? [] : [...assetTypeOptions]
+  selectedAssetTypes.value = allAssetTypesSelected.value ? [] : [...assetTypeOptions.value]
 }
 function closeAssetTypeFilter(event: MouseEvent) {
   if (assetTypeFilterRef.value && !assetTypeFilterRef.value.contains(event.target as Node)) {
@@ -82,13 +86,17 @@ const drawEntityOptions = computed(() => [
   { label: t('map.post'), value: 'post' },
   { label: t('map.zone'), value: 'zone' },
 ])
-const ASSET_TYPES = ['Camera', 'Door', 'Window', 'Gate', 'Sensor', 'Light', 'Other']
-const PRIORITIES = ['Urgent', 'Important', 'Normal', 'Low']
+const postPriorityOptions = ref(['Urgent', 'Important', 'Normal', 'Low'])
 
 // Items
 interface MapPoint { x: number; y: number; lat?: number; lng?: number }
+interface GeoPoint { lat: number; lng: number }
 
 const MAP_CENTER = { lat: 34.0522, lng: -118.2437 }
+const mapCenter = computed(() => ({
+  lat: selectedCommunity.value?.latitude ?? MAP_CENTER.lat,
+  lng: selectedCommunity.value?.longitude ?? MAP_CENTER.lng,
+}))
 
 interface MapAsset {
   id: string
@@ -118,6 +126,14 @@ interface MapPost {
   shape: 'place' | 'circle' | 'line'
   radius?: number
   points?: MapPoint[]
+  permissions?: {
+    required_roles?: string[]
+    required_badges?: string[]
+    required_equipment?: string[]
+  } | null
+  createdBy?: string
+  createdOn?: string
+  lastUpdated?: string
 }
 
 interface MapZone {
@@ -133,29 +149,113 @@ interface MapZone {
 
 type MapItem = MapAsset | MapPost | MapZone
 
-const mapItems = ref<MapItem[]>([
-  { id: 'AST-1001', type: 'asset', assetType: 'Camera', installationDate: '2024-01-10', replacementDate: '', description: 'Main entrance camera', location: { x: 35, y: 40, lat: 34.0528, lng: -118.2452 }, shape: 'place' },
-  { id: 'AST-1002', type: 'asset', assetType: 'Door', installationDate: '2024-02-15', replacementDate: '2026-02-15', description: 'Security door - North wing', location: { x: 55, y: 25, lat: 34.0541, lng: -118.2428 }, shape: 'place' },
-  { id: 'AST-1003', type: 'asset', assetType: 'Window', installationDate: '2024-03-20', replacementDate: '', description: '', location: { x: 70, y: 60, lat: 34.0514, lng: -118.2414 }, shape: 'circle', radius: 100, createdBy: 'Admin', createdOn: '2024-03-21', lastUpdated: '2024-03-21' },
-  { id: 'PST-1001', type: 'post', name: 'Main Gate', description: 'Primary entry point', priority: 'Urgent', equipment: 'Radio, Flashlight', active: true, location: { x: 20, y: 70, lat: 34.0506, lng: -118.2462 }, shape: 'place' },
-  { id: 'PST-1002', type: 'post', name: 'North Patrol', description: 'Northern perimeter', priority: 'Normal', equipment: 'Radio', active: true, location: { x: 65, y: 15, lat: 34.055, lng: -118.2418 }, shape: 'circle' },
-  { id: 'PST-1003', type: 'post', name: 'Parking Lot B', description: 'Secondary parking area', priority: 'Low', equipment: '', active: false, location: { x: 80, y: 75, lat: 34.0498, lng: -118.2405 }, shape: 'place' },
-  { id: 'ZN-1001', type: 'zone', zoneType: 'entry_exit', name: 'Main Entrance', location: { x: 45, y: 85, lat: 34.0492, lng: -118.2434 }, shape: 'place' },
-  {
-    id: 'ZN-1002',
+const mapItems = ref<MapItem[]>([])
+
+function locationPoints(location: AssetLocation): Array<{ lat: number; lng: number }> {
+  return 'points' in location ? location.points : []
+}
+
+function locationCenter(location: AssetLocation): { lat: number; lng: number } {
+  if ('lat' in location) return { lat: Number(location.lat), lng: Number(location.lng) }
+  const points = locationPoints(location)
+  if (!points.length) return MAP_CENTER
+  return {
+    lat: points.reduce((sum, point) => sum + Number(point.lat), 0) / points.length,
+    lng: points.reduce((sum, point) => sum + Number(point.lng), 0) / points.length,
+  }
+}
+
+function mapPoint(location: AssetLocation): MapPoint {
+  const center = locationCenter(location)
+  return { x: 50, y: 50, lat: center.lat, lng: center.lng }
+}
+
+function mapApiAsset(asset: ApiAsset): MapAsset {
+  return {
+    id: `AST-${asset.asset_id}`,
+    type: 'asset',
+    assetType: asset.asset_type_name || asset.asset_type,
+    installationDate: asset.installation_date || '',
+    replacementDate: asset.replacement_date || '',
+    description: asset.description || '',
+    location: mapPoint(asset.location),
+    shape: asset.shape,
+    radius: 'radius' in asset.location ? Number(asset.location.radius) : undefined,
+    points: locationPoints(asset.location).map(point => ({ x: 50, y: 50, lat: Number(point.lat), lng: Number(point.lng) })),
+    createdBy: String(asset.created_by),
+    createdOn: asset.created_on,
+    lastUpdated: asset.last_update || '',
+  }
+}
+
+function mapApiPost(post: ApiPost): MapPost {
+  return {
+    id: `PST-${post.post_id}`,
+    type: 'post',
+    name: post.name,
+    description: post.description || '',
+    priority: post.priority.charAt(0).toUpperCase() + post.priority.slice(1),
+    equipment: post.equipment || '',
+    active: post.is_active,
+    location: mapPoint(post.location),
+    shape: post.shape,
+    radius: 'radius' in post.location ? Number(post.location.radius) : undefined,
+    points: locationPoints(post.location).map(point => ({ x: 50, y: 50, lat: Number(point.lat), lng: Number(point.lng) })),
+    permissions: post.permissions,
+    createdBy: String(post.created_by),
+    createdOn: post.created_on,
+    lastUpdated: post.last_update || '',
+  }
+}
+
+function mapApiZone(zone: ApiMapZone): MapZone {
+  const points = locationPoints(zone.location)
+  return {
+    id: `ZN-${zone.zone_id}`,
     type: 'zone',
-    zoneType: 'high_priority',
-    name: 'Server Room',
-    location: { x: 25, y: 30, lat: 34.0542, lng: -118.2463 },
-    shape: 'polygon',
-    points: [
-      { x: 20, y: 24, lat: 34.0548, lng: -118.2469 },
-      { x: 31, y: 24, lat: 34.0548, lng: -118.2456 },
-      { x: 31, y: 37, lat: 34.0537, lng: -118.2456 },
-      { x: 20, y: 37, lat: 34.0537, lng: -118.2469 },
-    ],
-  },
-])
+    zoneType: zone.zone_type,
+    name: zone.name,
+    location: mapPoint(zone.location),
+    shape: points.length ? 'polygon' : 'place',
+    points: points.map(point => ({ x: 50, y: 50, lat: Number(point.lat), lng: Number(point.lng) })),
+  }
+}
+
+async function loadMapData() {
+  const communityId = Number(selectedCommunityId.value)
+  if (!communityId) return
+  const requestId = ++mapDataRequestId
+  isLoadingMapData.value = true
+  selectedItem.value = null
+  try {
+    const searchText = debouncedSearchQuery.value.trim() || undefined
+    const [assetsResponse, postsResponse, zonesResponse] = await Promise.all([
+      assetApi.getAssetsList({
+        community_id: communityId,
+        asset_type: selectedAssetTypes.value.length === 1 ? getAssetTypeKey(selectedAssetTypes.value[0]!) : undefined,
+        search_text: searchText,
+        page: 0,
+      }, { showLoading: false }),
+      assetApi.getPostsList({ community_id: communityId, include_inactive: true, search_text: searchText, page: 0 }, { showLoading: false }),
+      assetApi.getMapZones({ community_id: communityId, zone_type: selectedZoneType.value === 'all' ? undefined : selectedZoneType.value }, { showLoading: false }),
+    ])
+    if (requestId !== mapDataRequestId) return
+    mapItems.value = [
+      ...(assetsResponse.assets || []).map(mapApiAsset),
+      ...(postsResponse.posts || []).map(mapApiPost),
+      ...(zonesResponse.zones || []).map(mapApiZone),
+    ]
+    const requestedPostId = typeof route.query.post_id === 'string' ? `PST-${route.query.post_id}` : ''
+    if (requestedPostId) selectedItem.value = mapItems.value.find(item => item.id === requestedPostId) || null
+  } catch (error) {
+    if (requestId !== mapDataRequestId) return
+    console.error('Failed to load map data:', error)
+    mapItems.value = []
+    toastStore.error('Failed to load map data')
+  } finally {
+    if (requestId === mapDataRequestId) isLoadingMapData.value = false
+  }
+}
 
 const ITEM_LIMIT = 1000
 
@@ -212,8 +312,8 @@ const ZONE_TYPE_COLORS: Record<MapZone['zoneType'], string> = {
 
 function toGeoPoint(point: MapPoint) {
   return {
-    lat: point.lat ?? MAP_CENTER.lat + (50 - point.y) * 0.0001,
-    lng: point.lng ?? MAP_CENTER.lng + (point.x - 50) * 0.0001,
+    lat: point.lat ?? mapCenter.value.lat + (50 - point.y) * 0.0001,
+    lng: point.lng ?? mapCenter.value.lng + (point.x - 50) * 0.0001,
   }
 }
 
@@ -235,10 +335,30 @@ const workspaceMarkers = computed(() => visibleItems.value.map(item => ({
   points: item.points?.map(toGeoPoint),
   zoneType: item.type === 'zone' ? item.zoneType : undefined,
 })))
-const googleMapKey = computed(() => workspaceMarkers.value.map(item => item.id).join('|'))
+const googleMapKey = computed(() => `${selectedCommunityId.value}:${workspaceMarkers.value.map(item => `${item.id}:${item.lat}:${item.lng}`).join('|')}`)
+const drawingGeoPoints = computed(() => pendingPoints.value
+  .filter((point): point is MapPoint & GeoPoint => point.lat != null && point.lng != null)
+  .map(point => ({ lat: point.lat, lng: point.lng })))
+const drawingCircleCenter = computed<GeoPoint | null>(() => circleCenter.value?.lat != null && circleCenter.value.lng != null
+  ? { lat: circleCenter.value.lat, lng: circleCenter.value.lng }
+  : null)
 
-function handleWorkspaceMarkerClick(marker: { id: string }) {
-  selectedItem.value = mapItems.value.find(item => item.id === marker.id) ?? null
+async function handleWorkspaceMarkerClick(marker: { id: string }) {
+  const item = mapItems.value.find(candidate => candidate.id === marker.id) ?? null
+  selectedItem.value = item
+  if (!item || item.type === 'zone') return
+  const id = Number(item.id.replace(/^[A-Z]+-/, ''))
+  try {
+    if (item.type === 'asset') {
+      const response = await assetApi.getAsset(id, { showLoading: false })
+      if (response.asset) selectedItem.value = mapApiAsset(response.asset)
+    } else {
+      const response = await assetApi.getPost(id, { showLoading: false })
+      if (response.post) selectedItem.value = mapApiPost(response.post)
+    }
+  } catch (error) {
+    console.error('Failed to load map item details:', error)
+  }
 }
 
 // Drawing
@@ -314,7 +434,8 @@ function handleCanvasClick(event: MouseEvent) {
   const point = percentFromEvent(event, event.currentTarget as HTMLElement)
   if (activeShape.value === 'place') {
     pendingLocation.value = point
-    finishDrawing()
+    if (isBatchMode.value) pendingPoints.value.push(point)
+    else finishDrawing()
     return
   }
 
@@ -340,9 +461,72 @@ function handleCanvasDblclick() {
   if (activeShape.value === 'line' || activeShape.value === 'polygon') finishDrawing()
 }
 
+function mapGeoPoint(point: GeoPoint): MapPoint {
+  return { x: 50, y: 50, lat: point.lat, lng: point.lng }
+}
+
+function handleGoogleMapClick(point: GeoPoint) {
+  if (!activeShape.value || !drawEntityType.value || isLimitReached.value || activeShape.value === 'circle') return
+  const mappedPoint = mapGeoPoint(point)
+  if (activeShape.value === 'place') {
+    pendingLocation.value = mappedPoint
+    if (isBatchMode.value) pendingPoints.value.push(mappedPoint)
+    else finishDrawing()
+    return
+  }
+  const firstPoint = pendingPoints.value[0]
+  if (
+    activeShape.value === 'polygon' &&
+    firstPoint?.lat != null &&
+    firstPoint.lng != null &&
+    pendingPoints.value.length >= 3 &&
+    geographicDistance({ lat: firstPoint.lat, lng: firstPoint.lng }, point) <= 10
+  ) {
+    finishDrawing()
+    return
+  }
+  pendingPoints.value.push(mappedPoint)
+  if (!pendingLocation.value) pendingLocation.value = mappedPoint
+}
+
+function handleGoogleMapMousedown(point: GeoPoint) {
+  if (activeShape.value !== 'circle' || !drawEntityType.value || isLimitReached.value) return
+  circleCenter.value = mapGeoPoint(point)
+  pendingLocation.value = mapGeoPoint(point)
+  pendingCircleRadius.value = 0
+  isDrawingCircle.value = true
+}
+
+function geographicDistance(from: GeoPoint, to: GeoPoint): number {
+  const earthRadius = 6371000
+  const toRadians = (value: number) => value * Math.PI / 180
+  const latitudeDelta = toRadians(to.lat - from.lat)
+  const longitudeDelta = toRadians(to.lng - from.lng)
+  const fromLatitude = toRadians(from.lat)
+  const toLatitude = toRadians(to.lat)
+  const a = Math.sin(latitudeDelta / 2) ** 2
+    + Math.cos(fromLatitude) * Math.cos(toLatitude) * Math.sin(longitudeDelta / 2) ** 2
+  return earthRadius * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+}
+
+function handleGoogleMapMousemove(point: GeoPoint) {
+  if (!isDrawingCircle.value || circleCenter.value?.lat == null || circleCenter.value.lng == null) return
+  pendingCircleRadius.value = Math.max(1, Math.round(geographicDistance(
+    { lat: circleCenter.value.lat, lng: circleCenter.value.lng },
+    point,
+  )))
+}
+
+function handleGoogleMapMouseup(point: GeoPoint) {
+  if (!isDrawingCircle.value || circleCenter.value?.lat == null || circleCenter.value.lng == null) return
+  handleGoogleMapMousemove(point)
+  isDrawingCircle.value = false
+  finishDrawing()
+}
+
 function canFinishDrawing() {
   if (!drawEntityType.value) return false
-  if (activeShape.value === 'place') return !!pendingLocation.value
+  if (activeShape.value === 'place') return isBatchMode.value ? pendingPoints.value.length > 0 : !!pendingLocation.value
   if (activeShape.value === 'circle') return (pendingCircleRadius.value ?? 0) >= 1
   if (activeShape.value === 'line') return pendingPoints.value.length >= 2
   if (activeShape.value === 'polygon') return pendingPoints.value.length >= 3
@@ -387,9 +571,43 @@ function handleKeydown(event: KeyboardEvent) {
     undoLastDraw()
   }
 }
+async function initializeMapWorkspace() {
+  try {
+    const [communitiesResponse, metadataResponse] = await Promise.all([
+      communityApi.getCommunities({ include_inactive: false }, { showLoading: false }),
+      assetApi.getAssetMetadata({ showLoading: false }),
+    ])
+    communities.value = communitiesResponse.communities || []
+    const metadataAssetTypes: AssetTypeMeta[] = metadataResponse.asset_types || []
+    if (metadataAssetTypes.length) {
+      assetTypeOptions.value = metadataAssetTypes.map((type: AssetTypeMeta) => type.name)
+      assetTypeIds.value = Object.fromEntries(metadataAssetTypes.map((type: AssetTypeMeta) => [type.name, type.id]))
+    }
+    const metadataPriorities: PostPriorityMeta[] = metadataResponse.post_priorities || []
+    if (metadataPriorities.length) postPriorityOptions.value = metadataPriorities.map((priority: PostPriorityMeta) => priority.name)
+    if (communities.value.length) {
+      const requestedCommunityId = typeof route.query.community_id === 'string' ? route.query.community_id : ''
+      selectedCommunityId.value = communities.value.some(community => String(community.community_id) === requestedCommunityId)
+        ? requestedCommunityId
+        : String(communities.value[0]!.community_id)
+      if (typeof route.query.search === 'string') searchQuery.value = route.query.search
+    }
+  } catch (error) {
+    console.error('Failed to initialize map workspace:', error)
+    toastStore.error('Failed to initialize map workspace')
+  }
+}
+
+watch(selectedCommunityId, async () => {
+  mapImageUrl.value = null
+  await loadMapData()
+})
+watch([debouncedSearchQuery, selectedZoneType, selectedAssetTypes], loadMapData, { deep: true })
+
 onMounted(() => {
   window.addEventListener('click', closeAssetTypeFilter)
   window.addEventListener('keydown', handleKeydown)
+  initializeMapWorkspace()
 })
 onUnmounted(() => {
   window.removeEventListener('click', closeAssetTypeFilter)
@@ -422,6 +640,7 @@ const showAddZoneModal = ref(false)
 const showDeleteModal = ref(false)
 const selectedItem = ref<MapItem | null>(null)
 const itemToDelete = ref<MapItem | null>(null)
+const editingItem = ref<MapItem | null>(null)
 
 const addZoneForm = reactive({ name: '', zoneType: 'entry_exit' as 'entry_exit' | 'high_priority' })
 const addZoneError = ref('')
@@ -434,6 +653,7 @@ function selectItemType(type: 'asset' | 'post' | 'zone') {
 }
 
 function openDrawnEntityModal() {
+  editingItem.value = null
   if (drawEntityType.value === 'asset') showAddAssetModal.value = true
   else if (drawEntityType.value === 'post') showAddPostModal.value = true
   else if (drawEntityType.value === 'zone') {
@@ -444,72 +664,167 @@ function openDrawnEntityModal() {
   }
 }
 
-function handleAddAsset(data: AssetFormData) {
-  const base = {
-    id: data.id,
-    type: 'asset',
-    assetType: data.type,
-    installationDate: data.installationDate,
-    replacementDate: data.replacementDate,
-    description: data.description,
-    location: pendingLocation.value ?? { x: 50, y: 50 },
-    shape: activeShape.value ?? 'place',
-  } as MapAsset
-  if (activeShape.value === 'circle' && pendingCircleRadius.value) {
-    base.radius = pendingCircleRadius.value
+function pendingApiLocation(): AssetLocation | null {
+  const shape = activeShape.value
+  if (!shape || !pendingLocation.value) return null
+  if (shape === 'line' || shape === 'polygon') {
+    const points = pendingPoints.value.map(toGeoPoint)
+    return points.length ? { points } : null
   }
-  if ((activeShape.value === 'line' || activeShape.value === 'polygon') && pendingPoints.value.length) {
-    base.points = [...pendingPoints.value]
-  }
-  mapItems.value.push(base)
-  resetDraw()
+  const point = toGeoPoint(pendingLocation.value)
+  if (shape === 'circle') return { ...point, radius: pendingCircleRadius.value || 1 }
+  return point
 }
 
-function handleAddPost(data: PostFormData) {
-  const base = {
-    id: data.id,
-    type: 'post',
-    name: data.name,
-    description: data.description,
-    priority: data.priority,
-    equipment: data.equipment,
-    active: data.active,
-    location: pendingLocation.value ?? { x: 50, y: 50 },
-    shape: activeShape.value ?? 'place',
-  } as MapPost
-  if (activeShape.value === 'circle' && pendingCircleRadius.value) {
-    base.radius = pendingCircleRadius.value
+async function handleAddAsset(data: AssetFormData) {
+  const location = pendingApiLocation()
+  const communityId = Number(selectedCommunityId.value)
+  const shape = activeShape.value
+  if (editingItem.value?.type === 'asset') {
+    try {
+      await assetApi.updateAsset({
+        asset_id: Number(editingItem.value.id.replace('AST-', '')),
+        asset_type: getAssetTypeKey(data.type),
+        description: data.description || undefined,
+        installation_date: data.installationDate || undefined,
+        replacement_date: data.replacementDate || undefined,
+      })
+      editingItem.value = null
+      selectedItem.value = null
+      toastStore.success('Asset updated successfully')
+      await loadMapData()
+    } catch (error) {
+      console.error('Failed to update asset:', error)
+      toastStore.error('Failed to update asset')
+    }
+    return
   }
-  if ((activeShape.value === 'line' || activeShape.value === 'polygon') && pendingPoints.value.length) {
-    base.points = [...pendingPoints.value]
+  if (isBatchMode.value && communityId && pendingPoints.value.length) {
+    try {
+      await assetApi.createAssetsBatch({
+        community_id: communityId,
+        asset_type: getAssetTypeKey(data.type),
+        shape: 'place',
+        locations: pendingPoints.value.map(toGeoPoint),
+        description: data.description || undefined,
+        installation_date: data.installationDate || undefined,
+        replacement_date: data.replacementDate || undefined,
+      })
+      toastStore.success('Assets created successfully')
+      resetDraw()
+      await loadMapData()
+    } catch (error) {
+      console.error('Failed to create assets:', error)
+      toastStore.error('Failed to create assets')
+    }
+    return
   }
-  mapItems.value.push(base)
-  resetDraw()
+  if (!location || !communityId || !shape || shape === 'polygon') return
+  try {
+    await assetApi.createAsset({
+      community_id: communityId,
+      asset_type: getAssetTypeKey(data.type),
+      shape,
+      location,
+      description: data.description || undefined,
+      installation_date: data.installationDate || undefined,
+      replacement_date: data.replacementDate || undefined,
+    })
+    toastStore.success('Asset created successfully')
+    resetDraw()
+    await loadMapData()
+  } catch (error) {
+    console.error('Failed to create asset:', error)
+    toastStore.error('Failed to create asset')
+  }
 }
 
-function handleAddZone() {
+async function handleAddPost(data: PostFormData) {
+  const location = pendingApiLocation()
+  const communityId = Number(selectedCommunityId.value)
+  const shape = activeShape.value
+  if (editingItem.value?.type === 'post') {
+    try {
+      await assetApi.updatePost({
+        post_id: Number(editingItem.value.id.replace('PST-', '')),
+        name: data.name,
+        description: data.description || undefined,
+        priority: data.priority.toLowerCase() as 'urgent' | 'important' | 'normal' | 'low',
+        equipment: data.equipment || undefined,
+        is_active: data.active,
+      })
+      editingItem.value = null
+      selectedItem.value = null
+      toastStore.success('Post updated successfully')
+      await loadMapData()
+    } catch (error) {
+      console.error('Failed to update post:', error)
+      toastStore.error('Failed to update post')
+    }
+    return
+  }
+  if (!location || !communityId || !shape || shape === 'polygon') return
+  try {
+    await assetApi.createPost({
+      community_id: communityId,
+      name: data.name,
+      description: data.description || undefined,
+      priority: data.priority.toLowerCase() as 'urgent' | 'important' | 'normal' | 'low',
+      shape,
+      location,
+      equipment: data.equipment || undefined,
+      is_active: data.active,
+    })
+    toastStore.success('Post created successfully')
+    resetDraw()
+    await loadMapData()
+  } catch (error) {
+    console.error('Failed to create post:', error)
+    toastStore.error('Failed to create post')
+  }
+}
+
+async function handleAddZone() {
   if (!addZoneForm.name.trim()) {
     addZoneError.value = t('validation.required')
     return
   }
-  const prefix = addZoneForm.zoneType === 'entry_exit' ? 'EE' : 'ZN'
-  const base = {
-    id: `${prefix}-${Math.floor(Math.random() * 9000 + 1000)}`,
-    type: 'zone',
-    zoneType: addZoneForm.zoneType,
-    name: addZoneForm.name.trim(),
-    location: pendingLocation.value ?? { x: 50, y: 50 },
-    shape: activeShape.value ?? 'place',
-  } as MapZone
-  if (activeShape.value === 'circle' && pendingCircleRadius.value) {
-    base.radius = pendingCircleRadius.value
+  if (editingItem.value?.type === 'zone') {
+    try {
+      await assetApi.updateMapZone({
+        zone_id: Number(editingItem.value.id.replace('ZN-', '')),
+        zone_type: addZoneForm.zoneType,
+        name: addZoneForm.name.trim(),
+      })
+      editingItem.value = null
+      selectedItem.value = null
+      showAddZoneModal.value = false
+      toastStore.success('Map zone updated successfully')
+      await loadMapData()
+    } catch (error) {
+      console.error('Failed to update map zone:', error)
+      toastStore.error('Failed to update map zone')
+    }
+    return
   }
-  if ((activeShape.value === 'line' || activeShape.value === 'polygon') && pendingPoints.value.length) {
-    base.points = [...pendingPoints.value]
+  const location = pendingApiLocation()
+  const communityId = Number(selectedCommunityId.value)
+  if (!location || !communityId) return
+  try {
+    await assetApi.createMapZone({
+      community_id: communityId,
+      zone_type: addZoneForm.zoneType,
+      name: addZoneForm.name.trim(),
+      location,
+    })
+    showAddZoneModal.value = false
+    toastStore.success('Map zone created successfully')
+    resetDraw()
+    await loadMapData()
+  } catch (error) {
+    console.error('Failed to create map zone:', error)
+    toastStore.error('Failed to create map zone')
   }
-  mapItems.value.push(base)
-  showAddZoneModal.value = false
-  resetDraw()
 }
 
 function resetDraw() {
@@ -526,8 +841,56 @@ function resetDraw() {
 
 function openAddNew() {
   if (isLimitReached.value) return
+  editingItem.value = null
   pendingLocation.value = null
   showTypeSelect.value = true
+}
+
+function startBatchMode() {
+  if (isLimitReached.value) return
+  resetPendingShape()
+  editingItem.value = null
+  isBatchMode.value = true
+  drawEntityType.value = 'asset'
+  activeShape.value = 'place'
+}
+
+function openEditModal(item: MapItem) {
+  editingItem.value = item
+  if (item.type === 'asset') showAddAssetModal.value = true
+  else if (item.type === 'post') showAddPostModal.value = true
+  else {
+    addZoneForm.name = item.name
+    addZoneForm.zoneType = item.zoneType
+    showAddZoneModal.value = true
+  }
+}
+
+const editingAssetData = computed<AssetFormData | null>(() => editingItem.value?.type === 'asset' ? {
+  id: editingItem.value.id,
+  type: editingItem.value.assetType,
+  installationDate: editingItem.value.installationDate,
+  replacementDate: editingItem.value.replacementDate,
+  description: editingItem.value.description,
+  location: editingItem.value.location,
+} : null)
+
+const editingPostData = computed<PostFormData | null>(() => editingItem.value?.type === 'post' ? {
+  id: editingItem.value.id,
+  name: editingItem.value.name,
+  description: editingItem.value.description,
+  priority: editingItem.value.priority,
+  equipment: editingItem.value.equipment,
+  active: editingItem.value.active,
+  location: editingItem.value.location,
+} : null)
+
+function closeEditor() {
+  showAddAssetModal.value = false
+  showAddPostModal.value = false
+  showAddZoneModal.value = false
+  editingItem.value = null
+  pendingLocation.value = null
 }
 
 function openDeleteModal(item: MapItem) {
@@ -535,13 +898,37 @@ function openDeleteModal(item: MapItem) {
   showDeleteModal.value = true
 }
 
-function handleDeleteItem() {
-  if (!itemToDelete.value) return
-  const idx = mapItems.value.findIndex((i: MapItem) => i.id === itemToDelete.value!.id)
-  if (idx > -1) mapItems.value.splice(idx, 1)
-  if (selectedItem.value?.id === itemToDelete.value.id) selectedItem.value = null
-  showDeleteModal.value = false
-  itemToDelete.value = null
+async function togglePostActive(post: MapPost) {
+  try {
+    await assetApi.updatePost({
+      post_id: Number(post.id.replace('PST-', '')),
+      is_active: !post.active,
+    })
+    toastStore.success(post.active ? 'Post deactivated successfully' : 'Post activated successfully')
+    await loadMapData()
+  } catch (error) {
+    console.error('Failed to update post status:', error)
+    toastStore.error('Failed to update post status')
+  }
+}
+
+async function handleDeleteItem() {
+  const item = itemToDelete.value
+  if (!item) return
+  const id = Number(item.id.replace(/^[A-Z]+-/, ''))
+  try {
+    if (item.type === 'asset') await assetApi.deleteAsset(id)
+    else if (item.type === 'post') await assetApi.deletePost(id)
+    else await assetApi.deleteMapZone(id)
+    if (selectedItem.value?.id === item.id) selectedItem.value = null
+    showDeleteModal.value = false
+    itemToDelete.value = null
+    toastStore.success('Item deleted successfully')
+    await loadMapData()
+  } catch (error) {
+    console.error('Failed to delete map item:', error)
+    toastStore.error('Failed to delete item')
+  }
 }
 
 function getItemName(item: MapItem): string {
@@ -574,23 +961,32 @@ function getMarkerClass(item: MapItem): string {
   return `${base} marker--${item.shape}`
 }
 
-function getPriorityClass(priority: string): string {
-  const map: Record<string, string> = { Urgent: 'critical', Important: 'warn', Normal: 'accent', Low: 'muted' }
-  return map[priority] ?? 'muted'
-}
-
 function triggerUploadMap() {
   mapImageInput.value?.click()
 }
 
-function handleMapImageChange(event: Event) {
+async function handleMapImageChange(event: Event) {
   const input = event.target as HTMLInputElement
   const file = input.files?.[0]
-  if (!file) return
-  if (mapImageUrl.value) URL.revokeObjectURL(mapImageUrl.value)
-  mapImageUrl.value = URL.createObjectURL(file)
-  hasMap.value = true
-  input.value = ''
+  const communityId = Number(selectedCommunityId.value)
+  if (!file || !communityId) return
+  try {
+    const mapImage = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => resolve(String(reader.result).split(',')[1] || '')
+      reader.onerror = () => reject(reader.error)
+      reader.readAsDataURL(file)
+    })
+    const response = await assetApi.uploadCommunityMap({ community_id: communityId, map_image: mapImage })
+    mapImageUrl.value = response.map_image_url
+    hasMap.value = true
+    toastStore.success('Community map uploaded successfully')
+  } catch (error) {
+    console.error('Failed to upload community map:', error)
+    toastStore.error('Failed to upload community map')
+  } finally {
+    input.value = ''
+  }
 }
 </script>
 
@@ -601,7 +997,7 @@ function handleMapImageChange(event: Event) {
       <div class="toolbar-section">
         <label class="toolbar-label">{{ t('communities.community') }}</label>
         <select v-model="selectedCommunityId" class="toolbar-select">
-          <option v-for="c in communities" :key="c.id" :value="c.id">{{ c.name }}</option>
+          <option v-for="c in communities" :key="c.community_id" :value="String(c.community_id)">{{ c.name }}</option>
         </select>
       </div>
 
@@ -751,7 +1147,7 @@ function handleMapImageChange(event: Event) {
           <div v-if="isBatchMode" class="batch-badge">
             <Icon name="lucide:layers" :size="12" />
             {{ t('map.batch_mode') }}
-            <button class="batch-cancel" @click="isBatchMode = false">
+            <button class="batch-cancel" @click="resetDraw">
               <Icon name="lucide:x" :size="12" />
             </button>
           </div>
@@ -771,7 +1167,7 @@ function handleMapImageChange(event: Event) {
             icon="lucide:layers"
             size="sm"
             :disabled="isLimitReached"
-            @click="isBatchMode = true"
+            @click="startBatchMode"
           />
         </div>
 
@@ -779,11 +1175,6 @@ function handleMapImageChange(event: Event) {
         <div
           class="map-canvas"
           :class="{ 'cursor-crosshair': !!activeShape }"
-          @mousedown="handleCanvasMousedown($event)"
-          @mousemove="handleCanvasMousemove($event)"
-          @mouseup="handleCanvasMouseup"
-          @click="handleCanvasClick($event)"
-          @dblclick="handleCanvasDblclick"
         >
           <div v-if="!hasMap" class="map-empty" @click.stop>
             <Icon name="lucide:map" :size="48" class="map-empty__icon" />
@@ -793,20 +1184,39 @@ function handleMapImageChange(event: Event) {
           </div>
 
           <template v-else>
-            <div class="map-base-layer" :class="{ 'non-interactive': !!activeShape }">
+            <div class="map-base-layer" :class="{ 'non-interactive': !!activeShape && !!mapImageUrl }">
               <img v-if="mapImageUrl" :src="mapImageUrl" alt="Community map" class="map-bg-image">
               <GoogleMap
                 v-else
                 :key="googleMapKey"
-                :center="MAP_CENTER"
+                :center="mapCenter"
                 :zoom="15"
                 :workspace-markers="workspaceMarkers"
+                :drawing-mode="activeShape"
+                :drawing-points="drawingGeoPoints"
+                :drawing-circle-center="drawingCircleCenter"
+                :drawing-circle-radius="pendingCircleRadius || 0"
                 height="100%"
                 @workspace-marker-click="handleWorkspaceMarkerClick"
+                @draw-click="handleGoogleMapClick"
+                @draw-double-click="handleCanvasDblclick"
+                @draw-mousedown="handleGoogleMapMousedown"
+                @draw-mousemove="handleGoogleMapMousemove"
+                @draw-mouseup="handleGoogleMapMouseup"
               />
             </div>
 
-            <svg v-if="pendingPoints.length" class="drawing-overlay" viewBox="0 0 100 100" preserveAspectRatio="none">
+            <div
+              v-if="activeShape && mapImageUrl"
+              class="drawing-hit-area"
+              @mousedown="handleCanvasMousedown($event)"
+              @mousemove="handleCanvasMousemove($event)"
+              @mouseup="handleCanvasMouseup"
+              @click="handleCanvasClick($event)"
+              @dblclick.prevent="handleCanvasDblclick"
+            />
+
+            <svg v-if="mapImageUrl && pendingPoints.length" class="drawing-overlay" viewBox="0 0 100 100" preserveAspectRatio="none">
               <polyline
                 v-if="activeShape === 'line'"
                 :points="pendingPoints.map(p => `${p.x},${p.y}`).join(' ')"
@@ -824,8 +1234,15 @@ function handleMapImageChange(event: Event) {
               />
             </svg>
 
+            <span
+              v-for="(point, index) in isBatchMode && mapImageUrl ? pendingPoints : []"
+              :key="`batch-${index}`"
+              class="pending-place-marker"
+              :style="{ left: point.x + '%', top: point.y + '%' }"
+            >{{ index + 1 }}</span>
+
             <div
-              v-if="circleCenter && activeShape === 'circle'"
+              v-if="mapImageUrl && circleCenter && activeShape === 'circle'"
               class="circle-guide"
               :style="{
                 left: circleCenter.x + '%',
@@ -876,6 +1293,16 @@ function handleMapImageChange(event: Event) {
         v-if="selectedItem && selectedItem.type === 'asset'"
         :asset="asAsset(selectedItem)"
         @close="selectedItem = null"
+        @edit="openEditModal(selectedItem)"
+        @delete="openDeleteModal(selectedItem)"
+      />
+
+      <PostDetailDrawer
+        v-else-if="selectedItem && selectedItem.type === 'post'"
+        :post="selectedItem"
+        @close="selectedItem = null"
+        @edit="openEditModal(selectedItem)"
+        @toggle="togglePostActive(selectedItem)"
         @delete="openDeleteModal(selectedItem)"
       />
 
@@ -896,21 +1323,7 @@ function handleMapImageChange(event: Event) {
             <span class="detail-label">{{ t('map.location') }}</span>
             <span class="detail-value mono">x: {{ selectedItem.location.x }}, y: {{ selectedItem.location.y }}</span>
           </div>
-          <template v-if="selectedItem.type === 'post'">
-            <div class="detail-row">
-              <span class="detail-label">{{ t('map.priority') }}</span>
-              <span :class="`priority-badge priority-badge--${getPriorityClass(selectedItem.priority)}`">{{ selectedItem.priority }}</span>
-            </div>
-            <div class="detail-row">
-              <span class="detail-label">{{ t('map.active') }}</span>
-              <Badge type="status" :value="selectedItem.active ? 'active' : 'inactive'" />
-            </div>
-            <div class="detail-row">
-              <span class="detail-label">{{ t('map.equipment') }}</span>
-              <span class="detail-value">{{ selectedItem.equipment || '—' }}</span>
-            </div>
-          </template>
-          <template v-else-if="isZone(selectedItem)">
+          <template v-if="isZone(selectedItem)">
             <div class="detail-row">
               <span class="detail-label">{{ t('map.zone') }}</span>
               <span class="detail-value">{{ asZone(selectedItem).zoneType === 'entry_exit' ? t('map.entry_exit') : t('map.zone') }}</span>
@@ -919,7 +1332,7 @@ function handleMapImageChange(event: Event) {
         </div>
 
         <div class="detail-footer">
-          <AppButton text="Edit" type="secondary" icon="lucide:pencil" size="sm" />
+          <AppButton text="Edit" type="secondary" icon="lucide:pencil" size="sm" @click="openEditModal(selectedItem)" />
           <AppButton text="Delete" type="danger" icon="lucide:trash-2" size="sm" @click="openDeleteModal(selectedItem)" />
         </div>
       </aside>
@@ -953,16 +1366,20 @@ function handleMapImageChange(event: Event) {
     </AppModal>
 
     <!-- Add asset/post modals -->
-    <MapAddAssetModal
+    <AddAssetModal
       :show="showAddAssetModal"
       :location="pendingLocation"
-      @close="showAddAssetModal = false; pendingLocation = null"
+      :asset-types="assetTypeOptions"
+      :initial-data="editingAssetData"
+      @close="closeEditor"
       @save="handleAddAsset"
     />
-    <MapAddPostModal
+    <AddPostModal
       :show="showAddPostModal"
       :location="pendingLocation"
-      @close="showAddPostModal = false; pendingLocation = null"
+      :priorities="postPriorityOptions"
+      :initial-data="editingPostData"
+      @close="closeEditor"
       @save="handleAddPost"
     />
 
@@ -972,8 +1389,8 @@ function handleMapImageChange(event: Event) {
       :title="t('map.add_zone_title')"
       :cancel-text="t('common.cancel')"
       :ok-text="t('common.save')"
-      @close="showAddZoneModal = false; pendingLocation = null"
-      @cancel="showAddZoneModal = false; pendingLocation = null"
+      @close="closeEditor"
+      @cancel="closeEditor"
       @ok="handleAddZone"
     >
       <div class="zone-modal-form">
@@ -991,6 +1408,8 @@ function handleMapImageChange(event: Event) {
         </div>
       </div>
     </AppModal>
+
+    <LoadingModal :show="isLoadingMapData" message="Loading map data..." />
 
     <!-- Delete confirmation -->
     <AppModal
@@ -1309,6 +1728,13 @@ function handleMapImageChange(event: Event) {
   pointer-events: none;
 }
 
+.drawing-hit-area {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  cursor: crosshair;
+}
+
 .map-bg-image {
   position: absolute;
   inset: 0;
@@ -1325,6 +1751,22 @@ function handleMapImageChange(event: Event) {
   z-index: 5;
   width: 100%;
   height: 100%;
+  pointer-events: none;
+}
+
+.pending-place-marker {
+  position: absolute;
+  z-index: 11;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  color: #fff;
+  background: var(--color-accent);
+  border: 2px solid #fff;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
   pointer-events: none;
 }
 

@@ -4,6 +4,8 @@ import { reactive, computed } from 'vue'
 const props = defineProps<{
   show: boolean
   location?: { x: number; y: number } | null
+  assetTypes?: string[]
+  initialData?: AssetFormData | null
 }>()
 
 const emit = defineEmits<{
@@ -22,7 +24,7 @@ export interface AssetFormData {
 
 const { t } = useTranslation()
 
-const ASSET_TYPES = ['Door', 'Window', 'Camera', 'Gate', 'Sensor', 'Light', 'Other']
+const assetTypeOptions = computed(() => props.assetTypes?.length ? props.assetTypes : ['Door', 'Window', 'Camera', 'Gate', 'Sensor', 'Light', 'Other'])
 
 const form = reactive<AssetFormData>({
   id: `AST-${Math.floor(Math.random() * 9000 + 1000)}`,
@@ -31,6 +33,17 @@ const form = reactive<AssetFormData>({
   replacementDate: '',
   description: '',
   location: props.location ?? null,
+})
+
+watch(() => props.show, (show: boolean) => {
+  if (!show) return
+  const initial = props.initialData
+  form.id = initial?.id || `AST-${Math.floor(Math.random() * 9000 + 1000)}`
+  form.type = initial?.type || ''
+  form.installationDate = initial?.installationDate || ''
+  form.replacementDate = initial?.replacementDate || ''
+  form.description = initial?.description || ''
+  form.location = props.location ?? initial?.location ?? null
 })
 
 const errors = reactive<Record<string, string>>({})
@@ -68,7 +81,7 @@ function handleSave() {
           <label class="field-label">{{ t('map.asset_type') }} <span class="required">*</span></label>
           <select v-model="form.type" class="field-select">
             <option value="" disabled>{{ t('map.select_type') }}</option>
-            <option v-for="type in ASSET_TYPES" :key="type" :value="type">{{ type }}</option>
+            <option v-for="type in assetTypeOptions" :key="type" :value="type">{{ type }}</option>
           </select>
           <span v-if="errors.type" class="error-message">{{ errors.type }}</span>
         </div>

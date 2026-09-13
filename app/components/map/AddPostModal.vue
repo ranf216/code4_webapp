@@ -4,6 +4,8 @@ import { reactive } from 'vue'
 const props = defineProps<{
   show: boolean
   location?: { x: number; y: number } | null
+  priorities?: string[]
+  initialData?: PostFormData | null
 }>()
 
 const emit = defineEmits<{
@@ -23,7 +25,7 @@ export interface PostFormData {
 
 const { t } = useTranslation()
 
-const PRIORITIES = ['Urgent', 'Important', 'Normal', 'Low']
+const priorityOptions = computed(() => props.priorities?.length ? props.priorities : ['Urgent', 'Important', 'Normal', 'Low'])
 
 const form = reactive<PostFormData>({
   id: `PST-${Math.floor(Math.random() * 9000 + 1000)}`,
@@ -33,6 +35,18 @@ const form = reactive<PostFormData>({
   equipment: '',
   active: true,
   location: props.location ?? null,
+})
+
+watch(() => props.show, (show: boolean) => {
+  if (!show) return
+  const initial = props.initialData
+  form.id = initial?.id || `PST-${Math.floor(Math.random() * 9000 + 1000)}`
+  form.name = initial?.name || ''
+  form.description = initial?.description || ''
+  form.priority = initial?.priority || 'Normal'
+  form.equipment = initial?.equipment || ''
+  form.active = initial?.active ?? true
+  form.location = props.location ?? initial?.location ?? null
 })
 
 const errors = reactive<Record<string, string>>({})
@@ -84,7 +98,7 @@ function handleSave() {
           <div class="form-field">
             <label class="field-label">{{ t('map.priority') }}</label>
             <select v-model="form.priority" class="field-select">
-              <option v-for="p in PRIORITIES" :key="p" :value="p">{{ p }}</option>
+              <option v-for="p in priorityOptions" :key="p" :value="p">{{ p }}</option>
             </select>
           </div>
           <div class="form-field">

@@ -54,9 +54,16 @@ interface CommunityBoundary {
   paths: { lat: number; lng: number }[]
 }
 
+interface GeoPoint {
+  lat: number
+  lng: number
+}
+
 const emit = defineEmits<{
   (e: 'marker-click', marker: MarkerData): void
   (e: 'workspace-marker-click', marker: WorkspaceMarker): void
+  (e: 'draw-click' | 'draw-mousedown' | 'draw-mousemove' | 'draw-mouseup', point: GeoPoint): void
+  (e: 'draw-double-click'): void
 }>()
 
 const props = withDefaults(defineProps<{
@@ -70,6 +77,10 @@ const props = withDefaults(defineProps<{
   emergencyCalls?: EmergencyCallMarker[]
   boundaries?: CommunityBoundary[]
   height?: string
+  drawingMode?: 'place' | 'circle' | 'line' | 'polygon' | null
+  drawingPoints?: GeoPoint[]
+  drawingCircleCenter?: GeoPoint | null
+  drawingCircleRadius?: number
 }>(), {
   center: () => ({ lat: 34.0522, lng: -118.2437 }),
   zoom: 15,
@@ -81,12 +92,97 @@ const props = withDefaults(defineProps<{
   emergencyCalls: () => [],
   boundaries: () => [],
   height: '100%',
+  drawingMode: null,
+  drawingPoints: () => [],
+  drawingCircleCenter: null,
+  drawingCircleRadius: 0,
 })
 
 const config = useRuntimeConfig()
 const mapEl = ref<HTMLElement | null>(null)
 const error = ref<string | null>(null)
 const loading = ref(true)
+let mapInstance: google.maps.Map | null = null
+let drawingPathPreview: google.maps.Polyline | google.maps.Polygon | null = null
+let drawingCirclePreview: google.maps.Circle | null = null
+let drawingPointPreviews: google.maps.Circle[] = []
+
+function clearDrawingPreview() {
+  drawingPathPreview?.setMap(null)
+  drawingCirclePreview?.setMap(null)
+  drawingPointPreviews.forEach(preview => preview.setMap(null))
+  drawingPathPreview = null
+  drawingCirclePreview = null
+  drawingPointPreviews = []
+}
+
+function renderDrawingPreview() {
+  if (!mapInstance) return
+  clearDrawingPreview()
+  if (props.drawingMode === 'place' && props.drawingPoints.length) {
+    drawingPointPreviews = props.drawingPoints.map(point => new google.maps.Circle({
+      map: mapInstance,
+      center: point,
+      radius: 4,
+      fillColor: '#0D6EFD',
+      fillOpacity: 1,
+      strokeColor: '#FFFFFF',
+      strokeOpacity: 1,
+      strokeWeight: 2,
+    }))
+  }
+  if ((props.drawingMode === 'line' || props.drawingMode === 'polygon') && props.drawingPoints.length) {
+    drawingPathPreview = props.drawingMode === 'polygon'
+      ? new google.maps.Polygon({
+          map: mapInstance,
+          paths: props.drawingPoints,
+          fillColor: '#DC3545',
+          fillOpacity: 0.2,
+          strokeColor: '#DC3545',
+          strokeOpacity: 0.9,
+          strokeWeight: 2,
+        })
+      : new google.maps.Polyline({
+          map: mapInstance,
+          path: props.drawingPoints,
+          geodesic: true,
+          strokeColor: '#0D6EFD',
+          strokeOpacity: 0.9,
+          strokeWeight: 3,
+        })
+  }
+  if (props.drawingMode === 'circle' && props.drawingCircleCenter && props.drawingCircleRadius > 0) {
+    drawingCirclePreview = new google.maps.Circle({
+      map: mapInstance,
+      center: props.drawingCircleCenter,
+      radius: props.drawingCircleRadius,
+      fillColor: '#0D6EFD',
+      fillOpacity: 0.18,
+      strokeColor: '#0D6EFD',
+      strokeOpacity: 0.9,
+      strokeWeight: 2,
+    })
+  }
+}
+
+watch(
+  () => [props.drawingMode, props.drawingPoints, props.drawingCircleCenter, props.drawingCircleRadius] as const,
+  () => {
+    mapInstance?.setOptions({
+      draggableCursor: props.drawingMode ? 'crosshair' : undefined,
+      gestureHandling: props.drawingMode ? 'none' : 'auto',
+      disableDoubleClickZoom: !!props.drawingMode,
+    })
+    renderDrawingPreview()
+  },
+  { deep: true },
+)
+
+onUnmounted(() => {
+  clearDrawingPreview()
+  if (mapInstance) google.maps.event.clearInstanceListeners(mapInstance)
+  mapInstance = null
+})
 
 const statusColor: Record<string, string> = {
   active:     '#22c55e', // Green
@@ -147,7 +243,23 @@ onMounted(async () => {
       zoomControl: false,
       styles: darkMapStyles,
       mapId: 'live-tracking-map',
+      gestureHandling: props.drawingMode ? 'none' : 'auto',
+      disableDoubleClickZoom: !!props.drawingMode,
+      draggableCursor: props.drawingMode ? 'crosshair' : undefined,
     })
+    mapInstance = map
+    const emitPoint = (eventName: 'draw-click' | 'draw-mousedown' | 'draw-mousemove' | 'draw-mouseup', event: google.maps.MapMouseEvent) => {
+      if (!props.drawingMode || !event.latLng) return
+      emit(eventName, { lat: event.latLng.lat(), lng: event.latLng.lng() })
+    }
+    map.addListener('click', (event: google.maps.MapMouseEvent) => emitPoint('draw-click', event))
+    map.addListener('dblclick', () => {
+      if (props.drawingMode) emit('draw-double-click')
+    })
+    map.addListener('mousedown', (event: google.maps.MapMouseEvent) => emitPoint('draw-mousedown', event))
+    map.addListener('mousemove', (event: google.maps.MapMouseEvent) => emitPoint('draw-mousemove', event))
+    map.addListener('mouseup', (event: google.maps.MapMouseEvent) => emitPoint('draw-mouseup', event))
+    renderDrawingPreview()
 
     const { AdvancedMarkerElement } = await importLibrary('marker') as google.maps.MarkerLibrary
 
