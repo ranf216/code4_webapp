@@ -21,6 +21,7 @@ const selectedCommunityName = computed(() => {
 // Map state
 const hasMap = ref(true)
 const activeShape = ref<'place' | 'circle' | 'line' | 'polygon' | null>(null)
+const drawEntityType = ref<'asset' | 'post' | 'zone' | null>(null)
 const isBatchMode = ref(false)
 const pendingLocation = ref<MapPoint | null>(null)
 const pendingPoints = ref<MapPoint[]>([])
@@ -70,6 +71,17 @@ function closeAssetTypeFilter(event: MouseEvent) {
 }
 
 const selectedZoneType = ref<'all' | 'entry_exit' | 'high_priority'>('all')
+const drawEntityTypeModel = computed({
+  get: () => drawEntityType.value ?? '',
+  set: (value: string) => {
+    if (value === 'asset' || value === 'post' || value === 'zone') selectDrawEntityType(value)
+  },
+})
+const drawEntityOptions = computed(() => [
+  { label: t('map.asset'), value: 'asset' },
+  { label: t('map.post'), value: 'post' },
+  { label: t('map.zone'), value: 'zone' },
+])
 const ASSET_TYPES = ['Camera', 'Door', 'Window', 'Gate', 'Sensor', 'Light', 'Other']
 const PRIORITIES = ['Urgent', 'Important', 'Normal', 'Low']
 
@@ -128,8 +140,21 @@ const mapItems = ref<MapItem[]>([
   { id: 'PST-1001', type: 'post', name: 'Main Gate', description: 'Primary entry point', priority: 'Urgent', equipment: 'Radio, Flashlight', active: true, location: { x: 20, y: 70, lat: 34.0506, lng: -118.2462 }, shape: 'place' },
   { id: 'PST-1002', type: 'post', name: 'North Patrol', description: 'Northern perimeter', priority: 'Normal', equipment: 'Radio', active: true, location: { x: 65, y: 15, lat: 34.055, lng: -118.2418 }, shape: 'circle' },
   { id: 'PST-1003', type: 'post', name: 'Parking Lot B', description: 'Secondary parking area', priority: 'Low', equipment: '', active: false, location: { x: 80, y: 75, lat: 34.0498, lng: -118.2405 }, shape: 'place' },
-  { id: 'ZN-1001', type: 'zone', zoneType: 'entry_exit', name: 'Main Entrance', location: { x: 45, y: 85 }, shape: 'place' },
-  { id: 'ZN-1002', type: 'zone', zoneType: 'high_priority', name: 'Server Room', location: { x: 25, y: 30 }, shape: 'polygon' },
+  { id: 'ZN-1001', type: 'zone', zoneType: 'entry_exit', name: 'Main Entrance', location: { x: 45, y: 85, lat: 34.0492, lng: -118.2434 }, shape: 'place' },
+  {
+    id: 'ZN-1002',
+    type: 'zone',
+    zoneType: 'high_priority',
+    name: 'Server Room',
+    location: { x: 25, y: 30, lat: 34.0542, lng: -118.2463 },
+    shape: 'polygon',
+    points: [
+      { x: 20, y: 24, lat: 34.0548, lng: -118.2469 },
+      { x: 31, y: 24, lat: 34.0548, lng: -118.2456 },
+      { x: 31, y: 37, lat: 34.0537, lng: -118.2456 },
+      { x: 20, y: 37, lat: 34.0537, lng: -118.2469 },
+    ],
+  },
 ])
 
 const ITEM_LIMIT = 1000
@@ -165,17 +190,51 @@ const isLimitReached = computed(() => liveItemCount.value >= ITEM_LIMIT)
 const assetCount = computed(() => visibleItems.value.filter((i: MapItem) => i.type === 'asset').length)
 const postCount = computed(() => visibleItems.value.filter((i: MapItem) => i.type === 'post').length)
 const zoneCount = computed(() => visibleItems.value.filter((i: MapItem) => i.type === 'zone').length)
-const workspaceMarkers = computed(() => visibleItems.value
-  .filter((item): item is MapAsset | MapPost => item.type !== 'zone')
-  .map(item => ({
-    id: item.id,
-    lat: item.location.lat ?? MAP_CENTER.lat + (50 - item.location.y) * 0.0001,
-    lng: item.location.lng ?? MAP_CENTER.lng + (item.location.x - 50) * 0.0001,
-    type: item.type,
-    label: getItemName(item),
-    color: item.type === 'post' ? ({ Urgent: '#ef4444', Important: '#f59e0b', Normal: '#3b82f6', Low: '#6b7280' }[item.priority] ?? '#3b82f6') : '#4f6ef7',
-    active: item.type === 'asset' || item.active,
-  })))
+
+const ASSET_TYPE_COLORS: Record<string, string> = {
+  Camera: '#0D6EFD',
+  Gate: '#198754',
+  Door: '#0DCAF0',
+  Alarm: '#DC3545',
+  Fence: '#6C757D',
+  Other: '#6610F2',
+}
+const POST_PRIORITY_COLORS: Record<string, string> = {
+  urgent: '#DC3545',
+  important: '#FD7E14',
+  normal: '#0D6EFD',
+  low: '#6C757D',
+}
+const ZONE_TYPE_COLORS: Record<MapZone['zoneType'], string> = {
+  entry_exit: '#198754',
+  high_priority: '#DC3545',
+}
+
+function toGeoPoint(point: MapPoint) {
+  return {
+    lat: point.lat ?? MAP_CENTER.lat + (50 - point.y) * 0.0001,
+    lng: point.lng ?? MAP_CENTER.lng + (point.x - 50) * 0.0001,
+  }
+}
+
+function getWorkspaceMarkerColor(item: MapItem): string {
+  if (item.type === 'asset') return ASSET_TYPE_COLORS[item.assetType] ?? ASSET_TYPE_COLORS.Other!
+  if (item.type === 'post') return POST_PRIORITY_COLORS[item.priority.toLowerCase()] ?? POST_PRIORITY_COLORS.normal!
+  return ZONE_TYPE_COLORS[item.zoneType]
+}
+
+const workspaceMarkers = computed(() => visibleItems.value.map(item => ({
+  id: item.id,
+  ...toGeoPoint(item.location),
+  type: item.type,
+  label: getItemName(item),
+  color: getWorkspaceMarkerColor(item),
+  active: item.type !== 'post' || item.active,
+  shape: item.shape,
+  radius: item.radius,
+  points: item.points?.map(toGeoPoint),
+  zoneType: item.type === 'zone' ? item.zoneType : undefined,
+})))
 const googleMapKey = computed(() => workspaceMarkers.value.map(item => item.id).join('|'))
 
 function handleWorkspaceMarkerClick(marker: { id: string }) {
@@ -190,21 +249,31 @@ function percentFromEvent(event: MouseEvent, target: HTMLElement): MapPoint {
   return { x, y }
 }
 
+function resetPendingShape() {
+  pendingPoints.value = []
+  pendingLocation.value = null
+  circleCenter.value = null
+  circleRadiusPx.value = 0
+  pendingCircleRadius.value = null
+  isDrawingCircle.value = false
+}
+
+function selectDrawEntityType(type: 'asset' | 'post' | 'zone') {
+  if (drawEntityType.value === type) return
+  drawEntityType.value = type
+  if (type !== 'zone' && activeShape.value === 'polygon') activeShape.value = null
+  resetPendingShape()
+}
+
 function selectShape(shape: 'place' | 'circle' | 'line' | 'polygon') {
-  if (isLimitReached.value) return
-  if (activeShape.value === shape) {
-    activeShape.value = null
-  } else {
-    activeShape.value = shape
-    pendingPoints.value = []
-    circleCenter.value = null
-    pendingCircleRadius.value = null
-    isDrawingCircle.value = false
-  }
+  if (isLimitReached.value || !drawEntityType.value) return
+  if (shape === 'polygon' && drawEntityType.value !== 'zone') return
+  activeShape.value = activeShape.value === shape ? null : shape
+  resetPendingShape()
 }
 
 function handleCanvasMousedown(event: MouseEvent) {
-  if (!activeShape.value || activeShape.value !== 'circle' || isLimitReached.value || isDrawingCircle.value) return
+  if (!activeShape.value || !drawEntityType.value || activeShape.value !== 'circle' || isLimitReached.value || isDrawingCircle.value) return
   const point = percentFromEvent(event, event.currentTarget as HTMLElement)
   circleCenter.value = point
   pendingLocation.value = point
@@ -236,19 +305,30 @@ function handleCanvasMouseup() {
     pendingCircleRadius.value = null
     return
   }
-  showTypeSelect.value = true
+  finishDrawing()
 }
 
 function handleCanvasClick(event: MouseEvent) {
-  if (!activeShape.value || isLimitReached.value || isDrawingCircle.value) return
+  if (!activeShape.value || !drawEntityType.value || isLimitReached.value || isDrawingCircle.value) return
   if (activeShape.value === 'circle') return
   const point = percentFromEvent(event, event.currentTarget as HTMLElement)
   if (activeShape.value === 'place') {
     pendingLocation.value = point
-    showTypeSelect.value = true
+    finishDrawing()
     return
   }
-  // line or polygon
+
+  const firstPoint = pendingPoints.value[0]
+  if (
+    activeShape.value === 'polygon' &&
+    firstPoint &&
+    pendingPoints.value.length >= 3 &&
+    Math.hypot(point.x - firstPoint.x, point.y - firstPoint.y) <= 2
+  ) {
+    finishDrawing()
+    return
+  }
+
   pendingPoints.value.push(point)
   if (pendingPoints.value.length === 1) {
     pendingLocation.value = point
@@ -256,15 +336,27 @@ function handleCanvasClick(event: MouseEvent) {
 }
 
 function handleCanvasDblclick() {
-  if (!activeShape.value || isLimitReached.value) return
-  if ((activeShape.value === 'line' || activeShape.value === 'polygon') && pendingPoints.value.length >= 2) {
-    if (activeShape.value === 'polygon') {
-      // Close the polygon by appending the first point
-      const first: MapPoint = pendingPoints.value[0]!
-      pendingPoints.value.push({ ...first })
-    }
-    showTypeSelect.value = true
-  }
+  if (!activeShape.value || !drawEntityType.value || isLimitReached.value) return
+  if (activeShape.value === 'line' || activeShape.value === 'polygon') finishDrawing()
+}
+
+function canFinishDrawing() {
+  if (!drawEntityType.value) return false
+  if (activeShape.value === 'place') return !!pendingLocation.value
+  if (activeShape.value === 'circle') return (pendingCircleRadius.value ?? 0) >= 1
+  if (activeShape.value === 'line') return pendingPoints.value.length >= 2
+  if (activeShape.value === 'polygon') return pendingPoints.value.length >= 3
+  return false
+}
+
+function finishDrawing() {
+  if (!canFinishDrawing()) return
+  openDrawnEntityModal()
+}
+
+function cancelDrawing() {
+  resetPendingShape()
+  activeShape.value = null
 }
 
 function undoLastDraw() {
@@ -285,6 +377,11 @@ function undoLastDraw() {
 }
 
 function handleKeydown(event: KeyboardEvent) {
+  if (event.key === 'Escape' && (activeShape.value || pendingPoints.value.length || circleCenter.value)) {
+    event.preventDefault()
+    cancelDrawing()
+    return
+  }
   if ((event.ctrlKey || event.metaKey) && event.key === 'z') {
     event.preventDefault()
     undoLastDraw()
@@ -334,6 +431,17 @@ function selectItemType(type: 'asset' | 'post' | 'zone') {
   if (type === 'asset') showAddAssetModal.value = true
   else if (type === 'post') showAddPostModal.value = true
   else { addZoneForm.name = ''; addZoneForm.zoneType = 'entry_exit'; addZoneError.value = ''; showAddZoneModal.value = true }
+}
+
+function openDrawnEntityModal() {
+  if (drawEntityType.value === 'asset') showAddAssetModal.value = true
+  else if (drawEntityType.value === 'post') showAddPostModal.value = true
+  else if (drawEntityType.value === 'zone') {
+    addZoneForm.name = ''
+    addZoneForm.zoneType = 'entry_exit'
+    addZoneError.value = ''
+    showAddZoneModal.value = true
+  }
 }
 
 function handleAddAsset(data: AssetFormData) {
@@ -412,6 +520,7 @@ function resetDraw() {
   circleRadiusPx.value = 0
   isDrawingCircle.value = false
   activeShape.value = null
+  drawEntityType.value = null
   isBatchMode.value = false
 }
 
@@ -580,41 +689,59 @@ function handleMapImageChange(event: Event) {
       <div class="map-area">
         <!-- Shape toolbar -->
         <div class="shape-toolbar">
+          <span class="toolbar-label">{{ t('map.entity_type') }}:</span>
+          <AppSegmentedControl
+            v-model="drawEntityTypeModel"
+            class="entity-type-selector"
+            :options="drawEntityOptions"
+            :aria-label="t('map.entity_type')"
+          />
+
+          <div class="toolbar-divider" />
+
           <span class="toolbar-label">{{ t('map.shape') }}:</span>
           <button
-            :class="['tool-btn', { active: activeShape === 'place', disabled: isLimitReached }]"
-            :disabled="isLimitReached"
+            :class="['tool-btn', { active: activeShape === 'place', disabled: isLimitReached || !drawEntityType }]"
+            :disabled="isLimitReached || !drawEntityType"
             @click="selectShape('place')"
           >
             <Icon name="lucide:map-pin" :size="16" />
             <span>{{ t('map.shape_dot') }}</span>
           </button>
           <button
-            :class="['tool-btn', { active: activeShape === 'circle', disabled: isLimitReached }]"
-            :disabled="isLimitReached"
+            :class="['tool-btn', { active: activeShape === 'circle', disabled: isLimitReached || !drawEntityType }]"
+            :disabled="isLimitReached || !drawEntityType"
             @click="selectShape('circle')"
           >
             <Icon name="lucide:circle" :size="16" />
             <span>{{ t('map.shape_circle') }}</span>
           </button>
           <button
-            :class="['tool-btn', { active: activeShape === 'line', disabled: isLimitReached }]"
-            :disabled="isLimitReached"
+            :class="['tool-btn', { active: activeShape === 'line', disabled: isLimitReached || !drawEntityType }]"
+            :disabled="isLimitReached || !drawEntityType"
             @click="selectShape('line')"
           >
             <Icon name="lucide:minus" :size="16" />
             <span>{{ t('map.shape_line') }}</span>
           </button>
           <button
-            :class="['tool-btn', { active: activeShape === 'polygon', disabled: isLimitReached }]"
-            :disabled="isLimitReached"
+            :class="['tool-btn', { active: activeShape === 'polygon', disabled: isLimitReached || drawEntityType !== 'zone' }]"
+            :disabled="isLimitReached || drawEntityType !== 'zone'"
             @click="selectShape('polygon')"
           >
             <Icon name="lucide:hexagon" :size="16" />
             <span>{{ t('map.shape_polygon') }}</span>
           </button>
 
-          <div class="toolbar-divider" />
+          <div v-if="activeShape" class="toolbar-divider" />
+          <button v-if="activeShape" class="tool-btn" :disabled="!canFinishDrawing()" @click="finishDrawing">
+            <Icon name="lucide:check" :size="16" />
+            <span>{{ t('map.finish') }}</span>
+          </button>
+          <button v-if="activeShape" class="tool-btn" @click="cancelDrawing">
+            <Icon name="lucide:x" :size="16" />
+            <span>{{ t('common.cancel') }}</span>
+          </button>
 
           <button class="tool-btn" :disabled="!activeShape && !pendingPoints.length && !circleCenter" @click="undoLastDraw">
             <Icon name="lucide:undo-2" :size="16" />
@@ -711,7 +838,7 @@ function handleMapImageChange(event: Event) {
             </div>
 
             <div
-              v-for="item in mapImageUrl ? visibleItems : visibleItems.filter(item => item.type === 'zone')"
+              v-for="item in mapImageUrl ? visibleItems : []"
               :key="item.id"
               class="map-marker"
               :class="getMarkerClass(item)"
@@ -722,9 +849,11 @@ function handleMapImageChange(event: Event) {
               <span class="marker-label">{{ getItemName(item) }}</span>
             </div>
 
-            <div v-if="activeShape" class="map-hint">
+            <div v-if="!drawEntityType || activeShape" class="map-hint">
               <Icon name="lucide:mouse-pointer-click" :size="14" />
-              <span v-if="activeShape === 'place'">{{ isBatchMode ? t('map.hint_batch') : t('map.hint_single') }}</span>
+              <span v-if="!drawEntityType">{{ t('map.hint_select_entity') }}</span>
+              <span v-else-if="!activeShape">{{ t('map.hint_select_shape') }}</span>
+              <span v-else-if="activeShape === 'place'">{{ isBatchMode ? t('map.hint_batch') : t('map.hint_single') }}</span>
               <span v-else-if="activeShape === 'circle'">{{ t('map.hint_circle') }}</span>
               <span v-else-if="activeShape === 'line'">{{ t('map.hint_line') }}</span>
               <span v-else-if="activeShape === 'polygon'">{{ t('map.hint_polygon') }}</span>
@@ -1121,6 +1250,10 @@ function handleMapImageChange(event: Event) {
 .tool-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.entity-type-selector {
+  min-width: 220px;
 }
 
 .add-btn {

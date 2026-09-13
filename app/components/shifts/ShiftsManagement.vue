@@ -16,7 +16,12 @@ const viewModeOptions = computed(() => [
   { label: t('shifts.week_view'), value: 'week' },
   { label: t('shifts.month_view'), value: 'month' },
 ])
-const currentDate = ref(new Date('2026-06-21'))
+const getToday = () => {
+  const date = new Date()
+  date.setHours(0, 0, 0, 0)
+  return date
+}
+const currentDate = ref(getToday())
 const selectedShift = ref<Shift | null>(null)
 const showDetailsPanel = ref(false)
 const showAllocationBoard = ref(false)
@@ -328,7 +333,7 @@ function next() {
 }
 
 function today() {
-  currentDate.value = new Date()
+  currentDate.value = getToday()
 }
 
 function toggleStatus(status: string) {

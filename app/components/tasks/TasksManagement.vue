@@ -708,15 +708,15 @@ async function handleAddTask() {
           <span class="date-label">To</span>
           <input v-model="dateTo" type="date" class="date-input" />
         </div>
-      </div>
-      <div class="filter-actions">
-        <button class="btn btn--ghost" @click="clearFilters">
-          <Icon name="lucide:x" :size="14" /> {{ t('tasks.clear_filters') }}
-        </button>
-        <button class="btn btn--ghost" @click="toggleSort">
-          <Icon :name="sortOrder === 'desc' ? 'lucide:arrow-down' : 'lucide:arrow-up'" :size="14" />
-          {{ sortOrder === 'desc' ? t('tasks.newest_first') : t('tasks.oldest_first') }}
-        </button>
+        <div class="filter-actions">
+          <button class="btn btn--ghost" @click="clearFilters">
+            <Icon name="lucide:x" :size="14" /> {{ t('tasks.clear_filters') }}
+          </button>
+          <button class="btn btn--ghost" @click="toggleSort">
+            <Icon :name="sortOrder === 'desc' ? 'lucide:arrow-down' : 'lucide:arrow-up'" :size="14" />
+            {{ sortOrder === 'desc' ? t('tasks.newest_first') : t('tasks.oldest_first') }}
+          </button>
+        </div>
       </div>
     </div>
 
@@ -1131,7 +1131,7 @@ async function handleAddTask() {
   gap: var(--space-3);
   flex-wrap: wrap;
   align-items: center;
-  margin-bottom: var(--space-3);
+  /* justify-content: center; */
 }
 
 .search-box {
@@ -1209,27 +1209,28 @@ async function handleAddTask() {
 }
 
 .filter-actions {
-  display: flex;
+  display: flex;  
   gap: var(--space-2);
-  justify-content: flex-end;
+  margin-bottom: var(--space-2);
 }
 
 .tasks-list-container {
   background: var(--color-bg-elevated);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
-  overflow: hidden;
+  overflow-x: auto;
 }
 
 .tasks-table {
   width: 100%;
+  min-width: 1280px;
   border-collapse: collapse;
   table-layout: fixed;
 }
 
 .tasks-table th {
   text-align: left;
-  padding: var(--space-3);
+  padding: var(--space-3) var(--space-4);
   font-size: var(--font-size-sm);
   font-weight: 500;
   color: var(--color-text-secondary);
@@ -1238,9 +1239,15 @@ async function handleAddTask() {
 }
 
 .tasks-table td {
-  padding: var(--space-3);
+  padding: var(--space-3) var(--space-4);
   border-bottom: 1px solid var(--color-border);
   font-size: var(--font-size-sm);
+  vertical-align: top;
+}
+
+.tasks-table th:not(:last-child),
+.tasks-table td:not(:last-child) {
+  border-right: 1px solid var(--color-border);
 }
 
 .task-row:hover {
@@ -1248,23 +1255,38 @@ async function handleAddTask() {
 }
 
 .col-id {
+  width: 7%;
   font-family: monospace;
   color: var(--color-accent);
 }
 
 .col-desc {
-  width: 15%;
+  width: 14%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .col-type {
-  width: 15%;
+  width: 9%;
+}
+
+.col-priority,
+.col-status {
+  width: 7%;
+}
+
+.col-assignee {
+  width: 11%;
 }
 
 .col-community {
-  width: 15%;
+  width: 12%;
+}
+
+.col-date {
+  width: 9%;
+  white-space: nowrap;
 }
 
 .col-type__text {
@@ -1276,6 +1298,7 @@ async function handleAddTask() {
 }
 
 .col-actions {
+  width: 15%;
   text-align: center;
 }
 
@@ -1283,7 +1306,7 @@ async function handleAddTask() {
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
-  align-items: flex-start;
+  align-items: center;
 }
 
 .action-row {

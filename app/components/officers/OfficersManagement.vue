@@ -13,6 +13,8 @@ const props = defineProps<{
 
 const { t } = useTranslation()
 const toastStore = useToastStore()
+const route = useRoute()
+const router = useRouter()
 
 // Types
 interface OfficerEvaluation {
@@ -265,9 +267,43 @@ watch([searchQuery, filterCommunity, filterActive, sortBy, sortDir], () => {
   }, 400)
 })
 
-onMounted(() => {
-  loadCommunities()
-  fetchOfficers()
+async function openOfficerFromQuery(officerId: string | null) {
+  if (!officerId) return
+  try {
+    const response = await officerApi.getOfficer(officerId)
+    if (response.rc === 0 && response.officer) {
+      const officer = mapApiOfficer(response.officer)
+      officer.evaluations = (response.officer.evaluations || []).map((evaluation: OfficerEvaluation) => ({
+        evaluation_id: evaluation.evaluation_id,
+        text: evaluation.text,
+        date: evaluation.date,
+        evaluator_name: evaluation.evaluator_name || '',
+      }))
+      detailOfficer.value = officer
+      showDetailModal.value = true
+    }
+  } catch (err) {
+    console.error('Error loading officer from search:', err)
+  }
+}
+
+function closeDetail() {
+  showDetailModal.value = false
+  detailOfficer.value = null
+  if (route.query.officer_id) {
+    const query = { ...route.query }
+    delete query.officer_id
+    router.replace({ query })
+  }
+}
+
+onMounted(async () => {
+  await Promise.all([loadCommunities(), fetchOfficers()])
+  await openOfficerFromQuery(typeof route.query.officer_id === 'string' ? route.query.officer_id : null)
+})
+
+watch(() => route.query.officer_id, (officerId: typeof route.query.officer_id) => {
+  openOfficerFromQuery(typeof officerId === 'string' ? officerId : null)
 })
 
 function openAdd() {
@@ -1048,8 +1084,8 @@ function toggleSort(col: 'first_name' | 'last_name' | 'community' | 'created_on'
       :title="detailOfficer.fullName"
       :cancel-text="t('common.close')"
       :ok-text="''"
-      @close="showDetailModal = false"
-      @cancel="showDetailModal = false"
+      @close="closeDetail"
+      @cancel="closeDetail"
     >
       <template #default>
         <div class="detail-view">

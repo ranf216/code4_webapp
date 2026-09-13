@@ -16,6 +16,8 @@ const props = defineProps<{
 
 const { t } = useTranslation()
 const toastStore = useToastStore()
+const route = useRoute()
+const router = useRouter()
 
 // Sample data
 const residents = ref<Resident[]>([])
@@ -122,9 +124,29 @@ function openEditModal(resident: Resident) {
   showEditModal.value = true
 }
 
-function handleResidentUpdated() {
+function closeEditModal() {
   showEditModal.value = false
   selectedResident.value = null
+  if (route.query.resident_id) {
+    const query = { ...route.query }
+    delete query.resident_id
+    router.replace({ query })
+  }
+}
+
+async function openResidentFromQuery(residentId: string | null) {
+  if (!residentId) return
+  try {
+    const response = await residentApi.getResident(residentId, { showLoading: false })
+    if (response.resident) openEditModal(mapApiResident(response.resident))
+  } catch (error) {
+    console.error('Failed to load resident from search:', error)
+    loadError.value = t('residents.load_failed')
+  }
+}
+
+function handleResidentUpdated() {
+  closeEditModal()
   loadResidents()
 }
 
@@ -188,9 +210,13 @@ function toggleCommunicationTest(resident: Resident) {
   resident.communicationTest = !resident.communicationTest
 }
 
-onMounted(() => {
-  loadResidents()
-  loadCommunities()
+onMounted(async () => {
+  await Promise.all([loadResidents(), loadCommunities()])
+  await openResidentFromQuery(typeof route.query.resident_id === 'string' ? route.query.resident_id : null)
+})
+
+watch(() => route.query.resident_id, (residentId: typeof route.query.resident_id) => {
+  openResidentFromQuery(typeof residentId === 'string' ? residentId : null)
 })
 </script>
 
@@ -333,7 +359,7 @@ onMounted(() => {
       :resident-id="selectedResident?.id || ''"
       :community-id="communityId"
       :community-name="communityName"
-      @close="showEditModal = false"
+      @close="closeEditModal"
       @submitted="handleResidentUpdated"
     />
 

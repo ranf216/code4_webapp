@@ -1,5 +1,13 @@
 <script setup lang="ts">
 import { useNotificationBadge } from '~/composables/useNotificationBadge'
+import { callApi } from '~/api/call'
+import { residentApi } from '~/api/resident'
+import { officerApi } from '~/api/officer'
+import { assetApi } from '~/api/asset'
+import type { Call } from '~/api/types/call'
+import type { Resident } from '~/api/types/resident'
+import type { Officer } from '~/api/types/officer'
+import type { Post } from '~/api/types/asset'
 
 interface BreadcrumbItem {
   label: string
@@ -18,16 +26,121 @@ const emit = defineEmits<{
   'update:searchModelValue': [value: string]
 }>()
 
+interface GlobalSearchResult {
+  id: string
+  type: 'call' | 'resident' | 'officer' | 'post'
+  title: string
+  subtitle: string
+  to: string
+}
+
 const { badgeText, showBadge } = useNotificationBadge()
+const router = useRouter()
+const searchRef = ref<HTMLElement | null>(null)
+const searchValue = ref(props.searchModelValue || '')
+const searchResults = ref<GlobalSearchResult[]>([])
+const isSearching = ref(false)
+const searchOpen = ref(false)
+let searchTimer: ReturnType<typeof setTimeout> | null = null
+let searchRequestId = 0
 
 const breadcrumbItems = computed(() => props.breadcrumb || [])
 const showSearchBox = computed(() => props.showSearch !== false)
-const placeholder = computed(() => props.searchPlaceholder || 'Search…')
-
-const searchValue = computed({
-  get: () => props.searchModelValue || '',
-  set: (val: string) => emit('update:searchModelValue', val),
+const placeholder = computed(() => props.searchPlaceholder || 'Search calls, residents, officers and posts...')
+const groupedSearchResults = computed(() => {
+  const groups = [
+    { type: 'call', label: 'Calls' },
+    { type: 'resident', label: 'Residents' },
+    { type: 'officer', label: 'Officers' },
+    { type: 'post', label: 'Posts' },
+  ] as const
+  return groups.map(group => ({
+    ...group,
+    results: searchResults.value.filter((result: GlobalSearchResult) => result.type === group.type),
+  })).filter(group => group.results.length)
 })
+
+watch(() => props.searchModelValue, (value: string | undefined) => {
+  if (value !== undefined && value !== searchValue.value) searchValue.value = value
+})
+
+watch(searchValue, (value: string) => {
+  emit('update:searchModelValue', value)
+  if (searchTimer) clearTimeout(searchTimer)
+  const query = value.trim()
+  if (!query) {
+    searchRequestId++
+    searchResults.value = []
+    isSearching.value = false
+    searchOpen.value = false
+    return
+  }
+  searchOpen.value = true
+  isSearching.value = true
+  const requestId = ++searchRequestId
+  searchTimer = setTimeout(() => performGlobalSearch(query, requestId), 2000)
+})
+
+async function performGlobalSearch(query: string, requestId: number) {
+  const responses = await Promise.allSettled([
+    callApi.getCalls({ search_text: query, offset: 0, limit: 5 }, { showLoading: false }),
+    residentApi.getResidents({ search_text: query, include_inactive: true }, { showLoading: false }),
+    officerApi.getOfficers({ search_text: query, include_inactive: true }, { showLoading: false }),
+    assetApi.getPostsList({ community_id: 0, search_text: query, include_inactive: true, page: 0 }, { showLoading: false }),
+  ])
+  if (requestId !== searchRequestId) return
+
+  const [callsResponse, residentsResponse, officersResponse, postsResponse] = responses
+  const calls: Call[] = callsResponse.status === 'fulfilled' ? callsResponse.value.calls || [] : []
+  const residents: Resident[] = residentsResponse.status === 'fulfilled' ? residentsResponse.value.residents || [] : []
+  const officers: Officer[] = officersResponse.status === 'fulfilled' ? officersResponse.value.officers || [] : []
+  const posts: Post[] = postsResponse.status === 'fulfilled' ? postsResponse.value.posts || [] : []
+
+  searchResults.value = [
+    ...calls.slice(0, 5).map(call => ({
+      id: String(call.call_id),
+      type: 'call' as const,
+      title: `Call #${call.call_id} — ${call.description || call.service_type || call.category}`,
+      subtitle: [call.community_name, call.status].filter(Boolean).join(' · '),
+      to: `/calls?search=${encodeURIComponent(query)}&call_id=${call.call_id}`,
+    })),
+    ...residents.slice(0, 5).map(resident => ({
+      id: resident.user_id,
+      type: 'resident' as const,
+      title: `${resident.first_name} ${resident.last_name}`.trim(),
+      subtitle: [resident.community_name, resident.email || resident.phone_num].filter(Boolean).join(' · '),
+      to: `/communities/${resident.community_id}/residents?search=${encodeURIComponent(query)}&resident_id=${resident.user_id}`,
+    })),
+    ...officers.slice(0, 5).map(officer => ({
+      id: officer.user_id,
+      type: 'officer' as const,
+      title: `${officer.first_name} ${officer.last_name}`.trim(),
+      subtitle: [officer.community_name, officer.title].filter(Boolean).join(' · '),
+      to: `/officers?search=${encodeURIComponent(query)}&officer_id=${officer.user_id}`,
+    })),
+    ...posts.slice(0, 5).map(post => ({
+      id: String(post.post_id),
+      type: 'post' as const,
+      title: post.name,
+      subtitle: [post.community_name, post.priority].filter(Boolean).join(' · '),
+      to: `/map?search=${encodeURIComponent(query)}&community_id=${post.community_id}&post_id=${post.post_id}`,
+    })),
+  ]
+  isSearching.value = false
+}
+
+function clearSearch() {
+  searchValue.value = ''
+}
+
+async function selectSearchResult(result: GlobalSearchResult) {
+  searchOpen.value = false
+  await router.push(result.to)
+}
+
+function handleSearchOutside(event: MouseEvent) {
+  if (searchRef.value && !searchRef.value.contains(event.target as Node)) searchOpen.value = false
+}
 
 const now = ref('')
 
@@ -40,10 +153,18 @@ function formatDateTime(d: Date) {
   return `${yyyy}-${mm}-${dd} ${hh}:${min}`
 }
 
+let clockTimer: ReturnType<typeof setInterval> | null = null
+
 onMounted(() => {
   now.value = formatDateTime(new Date())
-  const timer = setInterval(() => { now.value = formatDateTime(new Date()) }, 30000)
-  onUnmounted(() => clearInterval(timer))
+  clockTimer = setInterval(() => { now.value = formatDateTime(new Date()) }, 30000)
+  document.addEventListener('click', handleSearchOutside)
+})
+
+onUnmounted(() => {
+  if (clockTimer) clearInterval(clockTimer)
+  if (searchTimer) clearTimeout(searchTimer)
+  document.removeEventListener('click', handleSearchOutside)
 })
 </script>
 
@@ -63,15 +184,43 @@ onMounted(() => {
     </div>
 
     <div class="app-header__right">
-      <div v-if="showSearchBox" class="app-header__search">
-        <Icon name="lucide:search" :size="14" class="app-header__search-icon" />
-        <input
-          v-model="searchValue"
-          class="app-header__search-input"
-          type="text"
-          :placeholder="placeholder"
-        />
-        <span class="app-header__search-kbd">⌘K</span>
+      <div v-if="showSearchBox" ref="searchRef" class="app-header__search-wrap">
+        <div class="app-header__search">
+          <Icon name="lucide:search" :size="14" class="app-header__search-icon" />
+          <input
+            v-model="searchValue"
+            class="app-header__search-input"
+            type="text"
+            :placeholder="placeholder"
+            @focus="searchOpen = !!searchValue.trim()"
+          />
+          <button v-if="searchValue" class="app-header__search-clear" aria-label="Clear search" @click="clearSearch">
+            <Icon name="lucide:x" :size="14" />
+          </button>
+          <span v-else class="app-header__search-kbd">⌘K</span>
+        </div>
+
+        <div v-if="searchOpen" class="app-header__search-results">
+          <div v-if="isSearching" class="app-header__search-state">
+            <Icon name="lucide:loader-circle" :size="16" class="app-header__search-spinner" />
+            Searching after you finish typing...
+          </div>
+          <template v-else-if="groupedSearchResults.length">
+            <section v-for="group in groupedSearchResults" :key="group.type" class="app-header__search-group">
+              <div class="app-header__search-group-title">{{ group.label }}</div>
+              <button
+                v-for="result in group.results"
+                :key="`${result.type}-${result.id}`"
+                class="app-header__search-result"
+                @click="selectSearchResult(result)"
+              >
+                <span class="app-header__search-result-title">{{ result.title }}</span>
+                <span class="app-header__search-result-subtitle">{{ result.subtitle }}</span>
+              </button>
+            </section>
+          </template>
+          <div v-else class="app-header__search-state">No results found for “{{ searchValue.trim() }}”.</div>
+        </div>
       </div>
 
       <NotificationDropdown v-slot="{ toggle }">
@@ -140,6 +289,10 @@ onMounted(() => {
   gap: var(--space-3);
 }
 
+.app-header__search-wrap {
+  position: relative;
+}
+
 .app-header__search {
   background: var(--color-bg-elevated);
   border: 1px solid var(--color-border);
@@ -181,6 +334,98 @@ onMounted(() => {
   border: 1px solid var(--color-border);
   border-radius: 3px;
   padding: 1px 4px;
+}
+
+.app-header__search-clear {
+  display: flex;
+  padding: 2px;
+  color: var(--color-text-muted);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+
+.app-header__search-results {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 1100;
+  width: 420px;
+  max-height: min(560px, calc(100vh - 80px));
+  overflow-y: auto;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
+}
+
+.app-header__search-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  min-height: 72px;
+  padding: var(--space-4);
+  color: #fff;
+  font-size: var(--font-size-sm);
+  text-align: center;
+}
+
+.app-header__search-spinner {
+  animation: search-spin 0.8s linear infinite;
+}
+
+@keyframes search-spin {
+  to { transform: rotate(360deg); }
+}
+
+.app-header__search-group + .app-header__search-group {
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--color-border);
+}
+
+.app-header__search-group-title {
+  padding: var(--space-2) var(--space-3) var(--space-1);
+  color: #fff;
+  font-size: var(--font-size-base);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.app-header__search-result {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  width: 100%;
+  padding: var(--space-1) var(--space-3) var(--space-2) calc(var(--space-3) + 12px);
+  color: #fff;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+
+.app-header__search-result:hover {
+  background: var(--color-bg-overlay);
+}
+
+.app-header__search-result-title,
+.app-header__search-result-subtitle {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-header__search-result-title {
+  font-size: var(--font-size-base);
+  font-weight: 600;
+}
+
+.app-header__search-result-subtitle {
+  color: #fff;
+  font-size: var(--font-size-sm);
 }
 
 .app-header__icon-btn {
