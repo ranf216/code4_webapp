@@ -1305,17 +1305,18 @@ async function handleAddTask() {
 .action-badges {
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
+  /* gap: var(--space-1); */
   align-items: center;
 }
 
 .action-row {
   display: flex;
-  gap: var(--space-2);
+  /* gap: var(--space-1); */
   justify-content: center;
 }
 
 .action-badge {
+  margin-top: var(--space-1);
   display: inline-flex;
   align-items: center;
   padding: 4px 10px;

@@ -671,16 +671,25 @@ function handleDeleteConfirm() {
 /* Actions */
 .action-group {
   display: flex;
-  gap: var(--space-1);
+  align-items: center;
   justify-content: center;
+  gap: var(--space-1);
+  flex-wrap: nowrap;
 }
 
 .action-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  flex: 0 0 28px;
   width: 28px;
+  min-width: 28px;
   height: 28px;
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  align-self: center;
+  appearance: none;
   background: var(--color-bg-elevated);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);

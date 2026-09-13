@@ -808,8 +808,15 @@ const statusOptions = [
 }
 
 .action-btn--icon {
+  flex: 0 0 28px;
   width: 28px;
+  min-width: 28px;
+  height: 28px;
+  margin: 0;
   padding: 0;
+  box-sizing: border-box;
+  align-self: center;
+  appearance: none;
 }
 
 .text-muted {

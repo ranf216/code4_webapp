@@ -832,6 +832,7 @@ const translations: Record<string, Record<string, string>> = {
     'tasks.address_placeholder': 'Enter location address',
     'tasks.eta': 'ETA',
     'tasks.media': 'Images',
+    'tasks.documents': 'Documents',
     'tasks.add_image': 'Add Image',
     'tasks.video': 'Video',
     'tasks.add_video': 'Add Video',
