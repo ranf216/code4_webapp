@@ -109,6 +109,7 @@ interface MapAsset {
   shape: 'place' | 'circle' | 'line'
   radius?: number
   points?: MapPoint[]
+  acres?: number
   createdBy?: string
   createdOn?: string
   lastUpdated?: string
@@ -182,6 +183,7 @@ function mapApiAsset(asset: ApiAsset): MapAsset {
     shape: asset.shape,
     radius: 'radius' in asset.location ? Number(asset.location.radius) : undefined,
     points: locationPoints(asset.location).map(point => ({ x: 50, y: 50, lat: Number(point.lat), lng: Number(point.lng) })),
+    acres: asset.acres,
     createdBy: String(asset.created_by),
     createdOn: asset.created_on,
     lastUpdated: asset.last_update || '',
@@ -221,6 +223,34 @@ function mapApiZone(zone: ApiMapZone): MapZone {
   }
 }
 
+async function fetchAllAssetPages(params: { community_id: number; asset_type?: string; search_text?: string }): Promise<ApiAsset[]> {
+  const firstPage = await assetApi.getAssetsList({ ...params, page: 0 }, { showLoading: false })
+  const assets = [...(firstPage.assets || [])]
+  const numOfPages = firstPage.num_of_pages || 1
+  if (numOfPages > 1) {
+    const remainingPages = await Promise.all(
+      Array.from({ length: numOfPages - 1 }, (_, index) =>
+        assetApi.getAssetsList({ ...params, page: index + 1 }, { showLoading: false })),
+    )
+    for (const response of remainingPages) assets.push(...(response.assets || []))
+  }
+  return assets
+}
+
+async function fetchAllPostPages(params: { community_id: number; include_inactive: boolean; search_text?: string }): Promise<ApiPost[]> {
+  const firstPage = await assetApi.getPostsList({ ...params, page: 0 }, { showLoading: false })
+  const posts = [...(firstPage.posts || [])]
+  const numOfPages = firstPage.num_of_pages || 1
+  if (numOfPages > 1) {
+    const remainingPages = await Promise.all(
+      Array.from({ length: numOfPages - 1 }, (_, index) =>
+        assetApi.getPostsList({ ...params, page: index + 1 }, { showLoading: false })),
+    )
+    for (const response of remainingPages) posts.push(...(response.posts || []))
+  }
+  return posts
+}
+
 async function loadMapData() {
   const communityId = Number(selectedCommunityId.value)
   if (!communityId) return
@@ -229,20 +259,19 @@ async function loadMapData() {
   selectedItem.value = null
   try {
     const searchText = debouncedSearchQuery.value.trim() || undefined
-    const [assetsResponse, postsResponse, zonesResponse] = await Promise.all([
-      assetApi.getAssetsList({
+    const [assets, posts, zonesResponse] = await Promise.all([
+      fetchAllAssetPages({
         community_id: communityId,
         asset_type: selectedAssetTypes.value.length === 1 ? getAssetTypeKey(selectedAssetTypes.value[0]!) : undefined,
         search_text: searchText,
-        page: 0,
-      }, { showLoading: false }),
-      assetApi.getPostsList({ community_id: communityId, include_inactive: true, search_text: searchText, page: 0 }, { showLoading: false }),
+      }),
+      fetchAllPostPages({ community_id: communityId, include_inactive: true, search_text: searchText }),
       assetApi.getMapZones({ community_id: communityId, zone_type: selectedZoneType.value === 'all' ? undefined : selectedZoneType.value }, { showLoading: false }),
     ])
     if (requestId !== mapDataRequestId) return
     mapItems.value = [
-      ...(assetsResponse.assets || []).map(mapApiAsset),
-      ...(postsResponse.posts || []).map(mapApiPost),
+      ...assets.map(mapApiAsset),
+      ...posts.map(mapApiPost),
       ...(zonesResponse.zones || []).map(mapApiZone),
     ]
     const requestedPostId = typeof route.query.post_id === 'string' ? `PST-${route.query.post_id}` : ''
@@ -258,6 +287,7 @@ async function loadMapData() {
 }
 
 const ITEM_LIMIT = 1000
+const BATCH_LIMIT = 100
 
 const visibleItems = computed((): MapItem[] => {
   const q = debouncedSearchQuery.value.trim().toLowerCase()
@@ -434,7 +464,17 @@ function handleCanvasClick(event: MouseEvent) {
   const point = percentFromEvent(event, event.currentTarget as HTMLElement)
   if (activeShape.value === 'place') {
     pendingLocation.value = point
-    if (isBatchMode.value) pendingPoints.value.push(point)
+    if (isBatchMode.value) {
+      if (pendingPoints.value.length >= BATCH_LIMIT) {
+        toastStore.error(t('map.batch_limit_toast', { max: String(BATCH_LIMIT) }))
+        return
+      }
+      if (liveItemCount.value + pendingPoints.value.length >= ITEM_LIMIT) {
+        toastStore.error(t('map.items_limit_tooltip'))
+        return
+      }
+      pendingPoints.value.push(point)
+    }
     else finishDrawing()
     return
   }
@@ -469,9 +509,20 @@ function handleGoogleMapClick(point: GeoPoint) {
   if (!activeShape.value || !drawEntityType.value || isLimitReached.value || activeShape.value === 'circle') return
   const mappedPoint = mapGeoPoint(point)
   if (activeShape.value === 'place') {
+    if (isBatchMode.value) {
+      if (pendingPoints.value.length >= BATCH_LIMIT) {
+        toastStore.error(t('map.batch_limit_toast', { max: String(BATCH_LIMIT) }))
+        return
+      }
+      if (liveItemCount.value + pendingPoints.value.length >= ITEM_LIMIT) {
+        toastStore.error(t('map.items_limit_tooltip'))
+        return
+      }
+      pendingPoints.value.push(mappedPoint)
+      return
+    }
     pendingLocation.value = mappedPoint
-    if (isBatchMode.value) pendingPoints.value.push(mappedPoint)
-    else finishDrawing()
+    finishDrawing()
     return
   }
   const firstPoint = pendingPoints.value[0]
@@ -517,6 +568,11 @@ function handleGoogleMapMousemove(point: GeoPoint) {
   )))
 }
 
+function removePendingPoint(index: number) {
+  pendingPoints.value.splice(index, 1)
+  pendingLocation.value = pendingPoints.value[pendingPoints.value.length - 1] ?? null
+}
+
 function handleGoogleMapMouseup(point: GeoPoint) {
   if (!isDrawingCircle.value || circleCenter.value?.lat == null || circleCenter.value.lng == null) return
   handleGoogleMapMousemove(point)
@@ -533,8 +589,31 @@ function canFinishDrawing() {
   return false
 }
 
+const showLimitWarning = ref(false)
+const limitWarningKind = ref<'item' | 'batch'>('item')
+const projectedTotal = computed(() => liveItemCount.value + pendingPoints.value.length)
+
+function batchWouldExceedItemLimit() {
+  return liveItemCount.value + pendingPoints.value.length > ITEM_LIMIT
+}
+
+function checkBatchLimits(): boolean {
+  if (pendingPoints.value.length > BATCH_LIMIT) {
+    limitWarningKind.value = 'batch'
+    showLimitWarning.value = true
+    return false
+  }
+  if (batchWouldExceedItemLimit()) {
+    limitWarningKind.value = 'item'
+    showLimitWarning.value = true
+    return false
+  }
+  return true
+}
+
 function finishDrawing() {
   if (!canFinishDrawing()) return
+  if (isBatchMode.value && !checkBatchLimits()) return
   openDrawnEntityModal()
 }
 
@@ -700,6 +779,7 @@ async function handleAddAsset(data: AssetFormData) {
     return
   }
   if (isBatchMode.value && communityId && pendingPoints.value.length) {
+    if (!checkBatchLimits()) return
     try {
       await assetApi.createAssetsBatch({
         community_id: communityId,
@@ -751,6 +831,7 @@ async function handleAddPost(data: PostFormData) {
         description: data.description || undefined,
         priority: data.priority.toLowerCase() as 'urgent' | 'important' | 'normal' | 'low',
         equipment: data.equipment || undefined,
+        permissions: data.permissions,
         is_active: data.active,
       })
       editingItem.value = null
@@ -773,6 +854,7 @@ async function handleAddPost(data: PostFormData) {
       shape,
       location,
       equipment: data.equipment || undefined,
+      permissions: data.permissions,
       is_active: data.active,
     })
     toastStore.success('Post created successfully')
@@ -873,6 +955,8 @@ const editingAssetData = computed<AssetFormData | null>(() => editingItem.value?
   replacementDate: editingItem.value.replacementDate,
   description: editingItem.value.description,
   location: editingItem.value.location,
+  shape: editingItem.value.shape,
+  acres: editingItem.value.acres,
 } : null)
 
 const editingPostData = computed<PostFormData | null>(() => editingItem.value?.type === 'post' ? {
@@ -883,6 +967,11 @@ const editingPostData = computed<PostFormData | null>(() => editingItem.value?.t
   equipment: editingItem.value.equipment,
   active: editingItem.value.active,
   location: editingItem.value.location,
+  permissions: editingItem.value.permissions ? {
+    required_roles: editingItem.value.permissions.required_roles,
+    required_badges: editingItem.value.permissions.required_badges,
+    required_equipment: editingItem.value.permissions.required_equipment,
+  } : undefined,
 } : null)
 
 function closeEditor() {
@@ -1203,6 +1292,7 @@ async function handleMapImageChange(event: Event) {
                 @draw-mousedown="handleGoogleMapMousedown"
                 @draw-mousemove="handleGoogleMapMousemove"
                 @draw-mouseup="handleGoogleMapMouseup"
+                @draw-point-remove="removePendingPoint"
               />
             </div>
 
@@ -1239,6 +1329,8 @@ async function handleMapImageChange(event: Event) {
               :key="`batch-${index}`"
               class="pending-place-marker"
               :style="{ left: point.x + '%', top: point.y + '%' }"
+              title="Click to remove"
+              @click.stop="removePendingPoint(index)"
             >{{ index + 1 }}</span>
 
             <div
@@ -1264,6 +1356,11 @@ async function handleMapImageChange(event: Event) {
             >
               <Icon :name="getMarkerIcon(item)" :size="16" />
               <span class="marker-label">{{ getItemName(item) }}</span>
+            </div>
+
+            <div v-if="isBatchMode" class="batch-count-chip">
+              <Icon name="lucide:map-pin" :size="12" />
+              {{ pendingPoints.length }} / {{ BATCH_LIMIT }}
             </div>
 
             <div v-if="!drawEntityType || activeShape" class="map-hint">
@@ -1321,7 +1418,7 @@ async function handleMapImageChange(event: Event) {
           </div>
           <div class="detail-row">
             <span class="detail-label">{{ t('map.location') }}</span>
-            <span class="detail-value mono">x: {{ selectedItem.location.x }}, y: {{ selectedItem.location.y }}</span>
+            <span class="detail-value mono">{{ selectedItem.location.lat != null && selectedItem.location.lng != null ? `${selectedItem.location.lat.toFixed(6)}, ${selectedItem.location.lng.toFixed(6)}` : '—' }}</span>
           </div>
           <template v-if="isZone(selectedItem)">
             <div class="detail-row">
@@ -1422,6 +1519,25 @@ async function handleMapImageChange(event: Event) {
       @cancel="showDeleteModal = false"
       @ok="handleDeleteItem"
     />
+
+    <!-- Batch / map item limit warning -->
+    <AppModal
+      :show="showLimitWarning"
+      :title="limitWarningKind === 'batch' ? t('map.batch_limit_title') : t('map.limit_exceeded_title')"
+      cancel-text=""
+      :ok-text="t('common.ok')"
+      @close="showLimitWarning = false"
+      @ok="showLimitWarning = false"
+    >
+      <div class="limit-warning">
+        <p class="limit-warning__message">
+          {{ limitWarningKind === 'batch'
+            ? t('map.batch_limit_message', { max: String(BATCH_LIMIT) })
+            : t('map.limit_exceeded_message', { total: String(projectedTotal), limit: String(ITEM_LIMIT) }) }}
+        </p>
+        <p class="limit-warning__hint">{{ t('map.limit_exceeded_hint') }}</p>
+      </div>
+    </AppModal>
   </div>
 </template>
 
@@ -1767,6 +1883,7 @@ async function handleMapImageChange(event: Event) {
   border: 2px solid #fff;
   border-radius: 50%;
   transform: translate(-50%, -50%);
+  cursor: pointer;
   pointer-events: none;
 }
 
@@ -1857,6 +1974,26 @@ async function handleMapImageChange(event: Event) {
   width: 40px;
   height: 40px;
   justify-content: center;
+}
+
+/* Batch count chip */
+.batch-count-chip {
+  position: absolute;
+  top: var(--space-3);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 12;
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-3);
+  background: rgba(0, 0, 0, 0.75);
+  border: 1px solid var(--color-accent);
+  border-radius: var(--radius-full);
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+  color: var(--color-accent);
+  pointer-events: none;
 }
 
 /* Map hint */
@@ -2091,6 +2228,19 @@ async function handleMapImageChange(event: Event) {
 .priority-badge--warn { background: rgba(245,158,11,0.15); color: #f59e0b; }
 .priority-badge--accent { background: rgba(110,231,183,0.15); color: var(--color-accent); }
 .priority-badge--muted { background: var(--color-bg-elevated); color: var(--color-text-muted); }
+
+.limit-warning__message {
+  margin: 0 0 var(--space-2);
+  font-size: var(--font-size-md);
+  color: var(--color-text-secondary);
+  line-height: 1.6;
+}
+
+.limit-warning__hint {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}
 
 @media (max-width: 1024px) {
   .workspace-body {

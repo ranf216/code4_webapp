@@ -1,9 +1,16 @@
 <script setup lang="ts">
 import { reactive, computed } from 'vue'
 
+interface FormLocation {
+  x: number
+  y: number
+  lat?: number
+  lng?: number
+}
+
 const props = defineProps<{
   show: boolean
-  location?: { x: number; y: number } | null
+  location?: FormLocation | null
   assetTypes?: string[]
   initialData?: AssetFormData | null
 }>()
@@ -19,7 +26,9 @@ export interface AssetFormData {
   installationDate: string
   replacementDate: string
   description: string
-  location: { x: number; y: number } | null
+  location: FormLocation | null
+  shape?: 'place' | 'circle' | 'line'
+  acres?: number
 }
 
 const { t } = useTranslation()
@@ -44,6 +53,17 @@ watch(() => props.show, (show: boolean) => {
   form.replacementDate = initial?.replacementDate || ''
   form.description = initial?.description || ''
   form.location = props.location ?? initial?.location ?? null
+  form.shape = initial?.shape
+  form.acres = initial?.acres
+})
+
+const isEditing = computed(() => !!props.initialData?.id)
+const showAcreage = computed(() => isEditing.value && form.shape === 'circle' && form.acres != null && form.acres > 0)
+const locationLabel = computed(() => {
+  const location = form.location
+  if (!location) return ''
+  if (location.lat != null && location.lng != null) return `${location.lat.toFixed(6)}, ${location.lng.toFixed(6)}`
+  return `x: ${location.x}, y: ${location.y}`
 })
 
 const errors = reactive<Record<string, string>>({})
@@ -63,7 +83,7 @@ function handleSave() {
 <template>
   <AppModal
     :show="show"
-    :title="t('map.add_asset_title')"
+    :title="props.initialData?.id ? t('map.edit_asset_title') : t('map.add_asset_title')"
     :cancel-text="t('common.cancel')"
     :ok-text="t('common.save')"
     @close="emit('close')"
@@ -102,11 +122,16 @@ function handleSave() {
           <textarea v-model="form.description" class="field-textarea" rows="3" :placeholder="t('map.asset_description_placeholder')" />
         </div>
 
+        <div v-if="showAcreage" class="form-field form-field--readonly">
+          <label class="field-label">Acreage</label>
+          <div class="readonly-value">Area: {{ form.acres!.toFixed(4) }} Acres</div>
+        </div>
+
         <div class="form-field form-field--readonly">
           <label class="field-label">{{ t('map.location') }}</label>
           <div class="readonly-value location-value">
             <Icon name="lucide:map-pin" :size="14" />
-            <span v-if="form.location">x: {{ form.location.x }}, y: {{ form.location.y }}</span>
+            <span v-if="form.location">{{ locationLabel }}</span>
             <span v-else class="muted">{{ t('map.location_auto') }}</span>
           </div>
         </div>

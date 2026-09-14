@@ -30,12 +30,27 @@ const emit = defineEmits<{
   toggle: [post: PostDetail]
 }>()
 
-const priorityColor = computed(() => ({
-  Urgent: '#DC3545',
-  Important: '#FD7E14',
-  Normal: '#0D6EFD',
-  Low: '#6C757D',
-}[props.post.priority] || '#6C757D'))
+const priorityKey = computed(() => props.post.priority.toLowerCase())
+
+const priorityMeta = computed(() => {
+  const map: Record<string, { color: string; icon: string }> = {
+    urgent: { color: '#DC3545', icon: 'lucide:alert-circle' },
+    important: { color: '#FD7E14', icon: 'lucide:arrow-up' },
+    normal: { color: '#0D6EFD', icon: 'lucide:minus' },
+    low: { color: '#6C757D', icon: 'lucide:arrow-down' },
+  }
+  return map[priorityKey.value] || { color: '#6C757D', icon: 'lucide:shield' }
+})
+
+const priorityColor = computed(() => priorityMeta.value.color)
+const priorityIcon = computed(() => priorityMeta.value.icon)
+
+function formatDate(value?: string): string {
+  if (!value) return '—'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return date.toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })
+}
 
 const coordinates = computed(() => props.post.location.lat != null && props.post.location.lng != null
   ? `${props.post.location.lat.toFixed(6)}, ${props.post.location.lng.toFixed(6)}`
@@ -63,12 +78,15 @@ const miniMapMarkers = computed(() => props.post.location.lat != null && props.p
     <div class="drawer-header">
       <div class="drawer-title-group">
         <div class="drawer-icon" :style="{ color: priorityColor, backgroundColor: `${priorityColor}22` }">
-          <Icon name="lucide:shield" :size="20" />
+          <Icon :name="priorityIcon" :size="20" />
         </div>
         <div class="drawer-heading">
           <h3 class="drawer-title">{{ post.name }}</h3>
           <div class="drawer-badges">
-            <span class="priority-badge" :style="{ color: priorityColor, borderColor: `${priorityColor}66`, backgroundColor: `${priorityColor}22` }">{{ post.priority }}</span>
+            <span class="priority-badge" :style="{ color: priorityColor, borderColor: `${priorityColor}66`, backgroundColor: `${priorityColor}22` }">
+              <Icon :name="priorityIcon" :size="12" />
+              {{ post.priority }}
+            </span>
             <Badge type="status" :value="post.active ? 'active' : 'inactive'" />
           </div>
         </div>
@@ -119,8 +137,8 @@ const miniMapMarkers = computed(() => props.post.location.lat != null && props.p
       <h4 class="section-title">Lifecycle</h4>
       <div class="detail-rows">
         <div class="detail-row"><span class="detail-label">Created by</span><span class="detail-value">{{ post.createdBy || '—' }}</span></div>
-        <div class="detail-row"><span class="detail-label">Created on</span><span class="detail-value">{{ post.createdOn || '—' }}</span></div>
-        <div class="detail-row"><span class="detail-label">Last update</span><span class="detail-value">{{ post.lastUpdated || '—' }}</span></div>
+        <div class="detail-row"><span class="detail-label">Created on</span><span class="detail-value">{{ formatDate(post.createdOn) }}</span></div>
+        <div class="detail-row"><span class="detail-label">Last update</span><span class="detail-value">{{ post.lastUpdated ? formatDate(post.lastUpdated) : '—' }}</span></div>
       </div>
     </div>
 
@@ -152,11 +170,11 @@ const miniMapMarkers = computed(() => props.post.location.lat != null && props.p
 .drawer-icon { width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; border-radius: var(--radius-md); flex-shrink: 0; }
 .drawer-title { margin: 0 0 var(--space-1); overflow: hidden; color: var(--color-text-primary); font-size: var(--font-size-lg); text-overflow: ellipsis; white-space: nowrap; }
 .drawer-badges { gap: var(--space-2); }
-.priority-badge { padding: 2px var(--space-2); border: 1px solid; border-radius: var(--radius-full); font-size: var(--font-size-xs); font-weight: 700; text-transform: uppercase; }
+.priority-badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px var(--space-2); border: 1px solid; border-radius: var(--radius-full); font-size: var(--font-size-xs); font-weight: 700; text-transform: uppercase; }
 .drawer-close { display: flex; padding: var(--space-1); color: var(--color-text-muted); background: none; border: 0; cursor: pointer; }
 .drawer-section { display: flex; flex-direction: column; gap: var(--space-2); }
 .section-title { margin: 0; color: var(--color-text-muted); font-size: var(--font-size-xs); font-weight: 600; letter-spacing: .05em; text-transform: uppercase; }
-.mini-map { height: 120px; overflow: hidden; border: 1px solid var(--color-border); border-radius: var(--radius-md); }
+.mini-map { position: relative; height: 120px; overflow: hidden; border: 1px solid var(--color-border); border-radius: var(--radius-md); }
 .location-coords, .empty-requirements { margin: 0; color: var(--color-text-muted); font-size: var(--font-size-xs); }
 .detail-rows, .requirements { display: flex; flex-direction: column; }
 .detail-row, .requirement-group { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-3); padding: var(--space-2) 0; border-bottom: 1px solid var(--color-border); }

@@ -1,6 +1,13 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 
+interface MapPoint {
+  x: number
+  y: number
+  lat?: number
+  lng?: number
+}
+
 interface MapAsset {
   id: string
   type: 'asset'
@@ -8,9 +15,11 @@ interface MapAsset {
   installationDate: string
   replacementDate: string
   description: string
-  location: { x: number; y: number }
+  location: MapPoint
   shape: 'place' | 'circle' | 'line'
   radius?: number
+  points?: MapPoint[]
+  acres?: number
   createdBy?: string
   createdOn?: string
   lastUpdated?: string
@@ -28,6 +37,16 @@ const emit = defineEmits<{
 
 const { t } = useTranslation()
 
+const ASSET_TYPE_COLORS: Record<string, string> = {
+  Camera: '#0D6EFD',
+  Gate: '#198754',
+  Door: '#0DCAF0',
+  Alarm: '#DC3545',
+  Fence: '#6C757D',
+  Other: '#6610F2',
+}
+const assetColor = computed(() => ASSET_TYPE_COLORS[props.asset.assetType] ?? ASSET_TYPE_COLORS.Other)
+
 function getAssetIcon(assetType: string): string {
   const map: Record<string, string> = {
     Camera: 'lucide:camera',
@@ -41,11 +60,52 @@ function getAssetIcon(assetType: string): string {
   return map[assetType] ?? 'lucide:box'
 }
 
+const hasGeoLocation = computed(() => props.asset.location.lat != null && props.asset.location.lng != null)
+
+const coordinates = computed(() => hasGeoLocation.value
+  ? `${props.asset.location.lat!.toFixed(6)}, ${props.asset.location.lng!.toFixed(6)}`
+  : '—')
+
+const miniMapMarkers = computed(() => hasGeoLocation.value ? [{
+  id: props.asset.id,
+  lat: props.asset.location.lat!,
+  lng: props.asset.location.lng!,
+  type: 'asset' as const,
+  label: props.asset.assetType,
+  color: assetColor.value,
+  shape: props.asset.shape,
+  radius: props.asset.radius,
+  points: props.asset.points
+    ?.filter((point): point is MapPoint & { lat: number; lng: number } => point.lat != null && point.lng != null)
+    .map(point => ({ lat: point.lat, lng: point.lng })),
+}] : [])
+
+const miniMapZoom = computed(() => {
+  if (props.asset.shape === 'circle' && props.asset.radius) {
+    const lat = Math.abs(props.asset.location.lat ?? 0)
+    const metersPerPixel = (props.asset.radius * 2.6) / 120
+    const zoom = Math.log2((156543.03392 * Math.cos(lat * Math.PI / 180)) / metersPerPixel)
+    return Math.min(19, Math.max(11, Math.round(zoom)))
+  }
+  return props.asset.shape === 'line' ? 16 : 17
+})
+
 const acreage = computed(() => {
-  if (props.asset.shape !== 'circle' || !props.asset.radius) return null
+  if (props.asset.shape !== 'circle') return null
+  if (props.asset.acres != null && props.asset.acres > 0) return props.asset.acres.toFixed(4)
+  if (!props.asset.radius) return null
   const sqMeters = Math.PI * props.asset.radius * props.asset.radius
-  const acres = sqMeters * 0.000247105
-  return acres.toFixed(4)
+  return (sqMeters * 0.000247105).toFixed(4)
+})
+
+const replacementStatus = computed<'overdue' | 'due_soon' | null>(() => {
+  if (!props.asset.replacementDate) return null
+  const replacement = new Date(props.asset.replacementDate)
+  if (Number.isNaN(replacement.getTime())) return null
+  const diffDays = (replacement.getTime() - Date.now()) / 86400000
+  if (diffDays < 0) return 'overdue'
+  if (diffDays <= 30) return 'due_soon'
+  return null
 })
 
 const lifecycleFields = computed(() => [
@@ -59,7 +119,7 @@ const lifecycleFields = computed(() => [
   <aside class="asset-detail-drawer">
     <div class="drawer-header">
       <div class="drawer-title-group">
-        <div class="drawer-icon">
+        <div class="drawer-icon" :style="{ color: assetColor, backgroundColor: `${assetColor}22` }">
           <Icon :name="getAssetIcon(asset.assetType)" :size="20" />
         </div>
         <div>
@@ -75,21 +135,18 @@ const lifecycleFields = computed(() => [
     <!-- Location mini-view -->
     <div class="drawer-section">
       <h4 class="section-title">{{ t('map.location') }}</h4>
-      <div class="mini-map">
-        <div class="mini-map-grid" />
-        <div
-          class="mini-map-marker"
-          :style="{ left: asset.location.x + '%', top: asset.location.y + '%' }"
-        >
-          <Icon :name="getAssetIcon(asset.assetType)" :size="14" />
-        </div>
+      <div v-if="miniMapMarkers.length" class="mini-map">
+        <GoogleMap
+          :center="{ lat: asset.location.lat!, lng: asset.location.lng! }"
+          :zoom="miniMapZoom"
+          :workspace-markers="miniMapMarkers"
+          height="120px"
+        />
       </div>
-      <div class="location-coords mono">
-        x: {{ asset.location.x }}, y: {{ asset.location.y }}
-      </div>
+      <div class="location-coords mono">{{ coordinates }}</div>
     </div>
 
-    <!-- Acreage -->
+    <!-- Acreage (circle shapes only) -->
     <div v-if="acreage" class="drawer-section acreage-section">
       <h4 class="section-title">Acreage</h4>
       <div class="acreage-value">Area: {{ acreage }} Acres</div>
@@ -113,7 +170,17 @@ const lifecycleFields = computed(() => [
         </div>
         <div class="detail-row">
           <span class="detail-label">{{ t('map.replacement_date') }}</span>
-          <span class="detail-value">{{ asset.replacementDate || '—' }}</span>
+          <span class="detail-value detail-value--with-tag">
+            {{ asset.replacementDate || '—' }}
+            <span
+              v-if="replacementStatus"
+              class="replacement-tag"
+              :class="`replacement-tag--${replacementStatus}`"
+            >
+              <Icon :name="replacementStatus === 'overdue' ? 'lucide:alert-circle' : 'lucide:clock-alert'" :size="12" />
+              {{ replacementStatus === 'overdue' ? 'Overdue' : 'Due soon' }}
+            </span>
+          </span>
         </div>
       </div>
     </div>
@@ -171,9 +238,7 @@ const lifecycleFields = computed(() => [
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(110, 231, 183, 0.12);
   border-radius: var(--radius-md);
-  color: var(--color-accent);
   flex-shrink: 0;
 }
 
@@ -223,33 +288,9 @@ const lifecycleFields = computed(() => [
 .mini-map {
   position: relative;
   height: 120px;
-  background: var(--color-bg-elevated);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   overflow: hidden;
-}
-
-.mini-map-grid {
-  position: absolute;
-  inset: 0;
-  background-image:
-    linear-gradient(rgba(255,255,255,0.04) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255,255,255,0.04) 1px, transparent 1px);
-  background-size: 20px 20px;
-}
-
-.mini-map-marker {
-  position: absolute;
-  transform: translate(-50%, -50%);
-  width: 28px;
-  height: 28px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(110, 231, 183, 0.2);
-  border: 2px solid var(--color-accent);
-  border-radius: 50%;
-  color: var(--color-accent);
 }
 
 .location-coords {
@@ -304,6 +345,37 @@ const lifecycleFields = computed(() => [
   color: var(--color-text-primary);
   text-align: right;
   word-break: break-word;
+}
+
+.detail-value--with-tag {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.replacement-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px var(--space-2);
+  border: 1px solid;
+  border-radius: var(--radius-full);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+}
+
+.replacement-tag--overdue {
+  color: #DC3545;
+  border-color: rgba(220, 53, 69, 0.4);
+  background: rgba(220, 53, 69, 0.12);
+}
+
+.replacement-tag--due_soon {
+  color: #FD7E14;
+  border-color: rgba(253, 126, 20, 0.4);
+  background: rgba(253, 126, 20, 0.12);
 }
 
 .mono {

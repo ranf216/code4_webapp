@@ -64,6 +64,7 @@ const emit = defineEmits<{
   (e: 'workspace-marker-click', marker: WorkspaceMarker): void
   (e: 'draw-click' | 'draw-mousedown' | 'draw-mousemove' | 'draw-mouseup', point: GeoPoint): void
   (e: 'draw-double-click'): void
+  (e: 'draw-point-remove', index: number): void
 }>()
 
 const props = withDefaults(defineProps<{
@@ -103,33 +104,49 @@ const mapEl = ref<HTMLElement | null>(null)
 const error = ref<string | null>(null)
 const loading = ref(true)
 let mapInstance: google.maps.Map | null = null
+let advancedMarkerCtor: typeof google.maps.marker.AdvancedMarkerElement | null = null
 let drawingPathPreview: google.maps.Polyline | google.maps.Polygon | null = null
 let drawingCirclePreview: google.maps.Circle | null = null
-let drawingPointPreviews: google.maps.Circle[] = []
+let drawingPointMarkers: google.maps.marker.AdvancedMarkerElement[] = []
 
 function clearDrawingPreview() {
   drawingPathPreview?.setMap(null)
   drawingCirclePreview?.setMap(null)
-  drawingPointPreviews.forEach(preview => preview.setMap(null))
+  drawingPointMarkers.forEach(marker => { marker.map = null })
   drawingPathPreview = null
   drawingCirclePreview = null
-  drawingPointPreviews = []
+  drawingPointMarkers = []
 }
 
 function renderDrawingPreview() {
   if (!mapInstance) return
   clearDrawingPreview()
-  if (props.drawingMode === 'place' && props.drawingPoints.length) {
-    drawingPointPreviews = props.drawingPoints.map(point => new google.maps.Circle({
-      map: mapInstance,
-      center: point,
-      radius: 4,
-      fillColor: '#0D6EFD',
-      fillOpacity: 1,
-      strokeColor: '#FFFFFF',
-      strokeOpacity: 1,
-      strokeWeight: 2,
-    }))
+  if (props.drawingMode === 'place' && props.drawingPoints.length && advancedMarkerCtor) {
+    drawingPointMarkers = props.drawingPoints.map((point, index) => {
+      const pin = document.createElement('button')
+      pin.type = 'button'
+      pin.style.cssText = `
+        display:flex;align-items:center;justify-content:center;
+        width:26px;height:26px;border-radius:50% 50% 50% 0;
+        transform:rotate(-45deg);background:#0D6EFD;border:2px solid #fff;
+        box-shadow:0 2px 8px rgba(0,0,0,.45);cursor:pointer;padding:0;
+      `
+      const num = document.createElement('span')
+      num.style.cssText = 'transform:rotate(45deg);color:#fff;font:700 11px sans-serif;'
+      num.textContent = String(index + 1)
+      pin.append(num)
+      const marker = new advancedMarkerCtor!({
+        map: mapInstance,
+        position: point,
+        content: pin,
+        title: `Point ${index + 1} — click to remove`,
+      })
+      pin.addEventListener('click', (event) => {
+        event.stopPropagation()
+        emit('draw-point-remove', index)
+      })
+      return marker
+    })
   }
   if ((props.drawingMode === 'line' || props.drawingMode === 'polygon') && props.drawingPoints.length) {
     drawingPathPreview = props.drawingMode === 'polygon'
@@ -259,9 +276,10 @@ onMounted(async () => {
     map.addListener('mousedown', (event: google.maps.MapMouseEvent) => emitPoint('draw-mousedown', event))
     map.addListener('mousemove', (event: google.maps.MapMouseEvent) => emitPoint('draw-mousemove', event))
     map.addListener('mouseup', (event: google.maps.MapMouseEvent) => emitPoint('draw-mouseup', event))
-    renderDrawingPreview()
 
     const { AdvancedMarkerElement } = await importLibrary('marker') as google.maps.MarkerLibrary
+    advancedMarkerCtor = AdvancedMarkerElement
+    renderDrawingPreview()
 
     console.log('[GoogleMap] layers:', {
       boundaries: props.boundaries.length,
