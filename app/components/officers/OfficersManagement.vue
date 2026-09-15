@@ -13,6 +13,8 @@ const props = defineProps<{
 
 const { t } = useTranslation()
 const toastStore = useToastStore()
+const route = useRoute()
+const router = useRouter()
 
 // Types
 interface OfficerEvaluation {
@@ -97,6 +99,11 @@ const isLoadingCommunities = ref(false)
 const searchQuery = ref('')
 const filterCommunity = ref<number | 'all'>('all')
 const filterActive = ref<'all' | 'active' | 'inactive'>('active')
+const activeFilterOptions = computed(() => [
+  { label: t('common.active'), value: 'active' },
+  { label: t('common.inactive'), value: 'inactive' },
+  { label: t('officers.all'), value: 'all' },
+])
 const sortBy = ref<'first_name' | 'last_name' | 'community' | 'created_on' | ''>('')
 const sortDir = ref<'asc' | 'desc' | ''>('')
 
@@ -260,9 +267,43 @@ watch([searchQuery, filterCommunity, filterActive, sortBy, sortDir], () => {
   }, 400)
 })
 
-onMounted(() => {
-  loadCommunities()
-  fetchOfficers()
+async function openOfficerFromQuery(officerId: string | null) {
+  if (!officerId) return
+  try {
+    const response = await officerApi.getOfficer(officerId)
+    if (response.rc === 0 && response.officer) {
+      const officer = mapApiOfficer(response.officer)
+      officer.evaluations = (response.officer.evaluations || []).map((evaluation: OfficerEvaluation) => ({
+        evaluation_id: evaluation.evaluation_id,
+        text: evaluation.text,
+        date: evaluation.date,
+        evaluator_name: evaluation.evaluator_name || '',
+      }))
+      detailOfficer.value = officer
+      showDetailModal.value = true
+    }
+  } catch (err) {
+    console.error('Error loading officer from search:', err)
+  }
+}
+
+function closeDetail() {
+  showDetailModal.value = false
+  detailOfficer.value = null
+  if (route.query.officer_id) {
+    const query = { ...route.query }
+    delete query.officer_id
+    router.replace({ query })
+  }
+}
+
+onMounted(async () => {
+  await Promise.all([loadCommunities(), fetchOfficers()])
+  await openOfficerFromQuery(typeof route.query.officer_id === 'string' ? route.query.officer_id : null)
+})
+
+watch(() => route.query.officer_id, (officerId: typeof route.query.officer_id) => {
+  openOfficerFromQuery(typeof officerId === 'string' ? officerId : null)
 })
 
 function openAdd() {
@@ -730,11 +771,11 @@ function toggleSort(col: 'first_name' | 'last_name' | 'community' | 'created_on'
         <option v-for="c in communities" :key="c.community_id" :value="c.community_id">{{ c.name }}</option>
       </select>
 
-      <div class="filter-toggle">
-        <button :class="['ftoggle-btn', { active: filterActive === 'active' }]" @click="filterActive = 'active'">{{ t('common.active') }}</button>
-        <button :class="['ftoggle-btn', { active: filterActive === 'inactive' }]" @click="filterActive = 'inactive'">{{ t('common.inactive') }}</button>
-        <button :class="['ftoggle-btn', { active: filterActive === 'all' }]" @click="filterActive = 'all'">{{ t('officers.all') }}</button>
-      </div>
+      <AppSegmentedControl
+        v-model="filterActive"
+        :options="activeFilterOptions"
+        :aria-label="t('common.status')"
+      />
     </div>
 
     <!-- Table -->
@@ -1043,8 +1084,8 @@ function toggleSort(col: 'first_name' | 'last_name' | 'community' | 'created_on'
       :title="detailOfficer.fullName"
       :cancel-text="t('common.close')"
       :ok-text="''"
-      @close="showDetailModal = false"
-      @cancel="showDetailModal = false"
+      @close="closeDetail"
+      @cancel="closeDetail"
     >
       <template #default>
         <div class="detail-view">
@@ -1280,30 +1321,6 @@ function toggleSort(col: 'first_name' | 'last_name' | 'community' | 'created_on'
   cursor: pointer;
   margin-left: 10px;
   margin-right: 10px;
-}
-
-.filter-toggle {
-  display: flex;
-  background: var(--color-bg-elevated);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  overflow: hidden;
-}
-
-.ftoggle-btn {
-  padding: var(--space-2) var(--space-3);
-  background: none;
-  border: none;
-  font-size: var(--font-size-xs);
-  color: var(--color-text-muted);
-  cursor: pointer;
-  transition: all var(--transition-base);
-}
-
-.ftoggle-btn.active {
-  background: var(--color-accent);
-  color: var(--color-bg-base);
-  font-weight: 500;
 }
 
 /* Table */

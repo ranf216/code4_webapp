@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { onMounted, ref, watch } from 'vue'
 import { communityApi } from '~/api/community'
 import { residentApi } from '~/api/resident'
 import LoadingModal from '~/components/LoadingModal.vue'
@@ -17,6 +16,8 @@ const props = defineProps<{
 
 const { t } = useTranslation()
 const toastStore = useToastStore()
+const route = useRoute()
+const router = useRouter()
 
 // Sample data
 const residents = ref<Resident[]>([])
@@ -26,7 +27,11 @@ const isLoadingCommunities = ref(false)
 const loadError = ref('')
 const communities = ref<Array<{ id: number; name: string }>>([])
 const selectedCommunityId = ref(Number(props.communityId))
-const includeInactive = ref(false)
+const activeFilter = ref<'active' | 'all'>('active')
+const activeFilterOptions = computed(() => [
+  { label: t('residents.active_only'), value: 'active' },
+  { label: t('residents.all_statuses'), value: 'all' },
+])
 const searchQuery = ref('')
 let searchDebounceTimer: ReturnType<typeof setTimeout> | undefined
 
@@ -50,7 +55,7 @@ async function loadResidents() {
   try {
     const response = await residentApi.getResidents({
       community_id: selectedCommunityId.value,
-      include_inactive: includeInactive.value,
+      include_inactive: activeFilter.value === 'all',
       search_text: searchQuery.value.trim(),
       sort_by: sortKey.value,
       sort_dir: sortOrder.value,
@@ -92,7 +97,7 @@ async function loadCommunities() {
 
 const sortedResidents = computed(() => residents.value)
 
-watch([selectedCommunityId, includeInactive], loadResidents)
+watch([selectedCommunityId, activeFilter], loadResidents)
 watch(searchQuery, () => {
   if (searchDebounceTimer) clearTimeout(searchDebounceTimer)
   searchDebounceTimer = setTimeout(loadResidents, 400)
@@ -119,9 +124,29 @@ function openEditModal(resident: Resident) {
   showEditModal.value = true
 }
 
-function handleResidentUpdated() {
+function closeEditModal() {
   showEditModal.value = false
   selectedResident.value = null
+  if (route.query.resident_id) {
+    const query = { ...route.query }
+    delete query.resident_id
+    router.replace({ query })
+  }
+}
+
+async function openResidentFromQuery(residentId: string | null) {
+  if (!residentId) return
+  try {
+    const response = await residentApi.getResident(residentId, { showLoading: false })
+    if (response.resident) openEditModal(mapApiResident(response.resident))
+  } catch (error) {
+    console.error('Failed to load resident from search:', error)
+    loadError.value = t('residents.load_failed')
+  }
+}
+
+function handleResidentUpdated() {
+  closeEditModal()
   loadResidents()
 }
 
@@ -185,9 +210,13 @@ function toggleCommunicationTest(resident: Resident) {
   resident.communicationTest = !resident.communicationTest
 }
 
-onMounted(() => {
-  loadResidents()
-  loadCommunities()
+onMounted(async () => {
+  await Promise.all([loadResidents(), loadCommunities()])
+  await openResidentFromQuery(typeof route.query.resident_id === 'string' ? route.query.resident_id : null)
+})
+
+watch(() => route.query.resident_id, (residentId: typeof route.query.resident_id) => {
+  openResidentFromQuery(typeof residentId === 'string' ? residentId : null)
 })
 </script>
 
@@ -224,10 +253,11 @@ onMounted(() => {
         <option :value="0">{{ t('residents.all_communities') }}</option>
         <option v-for="community in communities" :key="community.id" :value="community.id">{{ community.name }}</option>
       </select>
-      <div class="residents-management__active-toggle" role="group" :aria-label="t('residents.active_filter')">
-        <button :class="{ active: !includeInactive }" @click="includeInactive = false">{{ t('residents.active_only') }}</button>
-        <button :class="{ active: includeInactive }" @click="includeInactive = true">{{ t('residents.all_statuses') }}</button>
-      </div>
+      <AppSegmentedControl
+        v-model="activeFilter"
+        :options="activeFilterOptions"
+        :aria-label="t('residents.active_filter')"
+      />
     </div>
 
     <!-- Table -->
@@ -329,7 +359,7 @@ onMounted(() => {
       :resident-id="selectedResident?.id || ''"
       :community-id="communityId"
       :community-name="communityName"
-      @close="showEditModal = false"
+      @close="closeEditModal"
       @submitted="handleResidentUpdated"
     />
 
@@ -446,29 +476,6 @@ onMounted(() => {
   border: 0;
   cursor: pointer;
   transform: translateY(-50%);
-}
-
-.residents-management__active-toggle {
-  display: inline-flex;
-  padding: 3px;
-  background: var(--color-bg-elevated);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-}
-
-.residents-management__active-toggle button {
-  padding: 6px 10px;
-  color: var(--color-text-muted);
-  background: transparent;
-  border: 0;
-  border-radius: calc(var(--radius-md) - 2px);
-  cursor: pointer;
-}
-
-.residents-management__active-toggle button.active {
-  color: var(--color-text-primary);
-  background: var(--color-bg-surface);
-  box-shadow: var(--shadow-sm);
 }
 
 .residents-management__table-container {

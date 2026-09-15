@@ -29,6 +29,20 @@ interface PostMarker {
   type: string
 }
 
+interface WorkspaceMarker {
+  id: string
+  lat: number
+  lng: number
+  type: 'asset' | 'post' | 'zone'
+  label: string
+  color?: string
+  active?: boolean
+  shape?: 'place' | 'circle' | 'line' | 'polygon'
+  radius?: number
+  points?: { lat: number; lng: number }[]
+  zoneType?: 'entry_exit' | 'high_priority'
+}
+
 interface EmergencyCallMarker {
   lat: number
   lng: number
@@ -40,8 +54,17 @@ interface CommunityBoundary {
   paths: { lat: number; lng: number }[]
 }
 
+interface GeoPoint {
+  lat: number
+  lng: number
+}
+
 const emit = defineEmits<{
   (e: 'marker-click', marker: MarkerData): void
+  (e: 'workspace-marker-click', marker: WorkspaceMarker): void
+  (e: 'draw-click' | 'draw-mousedown' | 'draw-mousemove' | 'draw-mouseup', point: GeoPoint): void
+  (e: 'draw-double-click'): void
+  (e: 'draw-point-remove', index: number): void
 }>()
 
 const props = withDefaults(defineProps<{
@@ -51,9 +74,14 @@ const props = withDefaults(defineProps<{
   routes?: RouteOverlay[]
   waypoints?: WaypointMarker[]
   posts?: PostMarker[]
+  workspaceMarkers?: WorkspaceMarker[]
   emergencyCalls?: EmergencyCallMarker[]
   boundaries?: CommunityBoundary[]
   height?: string
+  drawingMode?: 'place' | 'circle' | 'line' | 'polygon' | null
+  drawingPoints?: GeoPoint[]
+  drawingCircleCenter?: GeoPoint | null
+  drawingCircleRadius?: number
 }>(), {
   center: () => ({ lat: 34.0522, lng: -118.2437 }),
   zoom: 15,
@@ -61,15 +89,117 @@ const props = withDefaults(defineProps<{
   routes: () => [],
   waypoints: () => [],
   posts: () => [],
+  workspaceMarkers: () => [],
   emergencyCalls: () => [],
   boundaries: () => [],
   height: '100%',
+  drawingMode: null,
+  drawingPoints: () => [],
+  drawingCircleCenter: null,
+  drawingCircleRadius: 0,
 })
 
 const config = useRuntimeConfig()
 const mapEl = ref<HTMLElement | null>(null)
 const error = ref<string | null>(null)
 const loading = ref(true)
+let mapInstance: google.maps.Map | null = null
+let advancedMarkerCtor: typeof google.maps.marker.AdvancedMarkerElement | null = null
+let drawingPathPreview: google.maps.Polyline | google.maps.Polygon | null = null
+let drawingCirclePreview: google.maps.Circle | null = null
+let drawingPointMarkers: google.maps.marker.AdvancedMarkerElement[] = []
+
+function clearDrawingPreview() {
+  drawingPathPreview?.setMap(null)
+  drawingCirclePreview?.setMap(null)
+  drawingPointMarkers.forEach(marker => { marker.map = null })
+  drawingPathPreview = null
+  drawingCirclePreview = null
+  drawingPointMarkers = []
+}
+
+function renderDrawingPreview() {
+  if (!mapInstance) return
+  clearDrawingPreview()
+  if (props.drawingMode === 'place' && props.drawingPoints.length && advancedMarkerCtor) {
+    drawingPointMarkers = props.drawingPoints.map((point, index) => {
+      const pin = document.createElement('button')
+      pin.type = 'button'
+      pin.style.cssText = `
+        display:flex;align-items:center;justify-content:center;
+        width:26px;height:26px;border-radius:50% 50% 50% 0;
+        transform:rotate(-45deg);background:#0D6EFD;border:2px solid #fff;
+        box-shadow:0 2px 8px rgba(0,0,0,.45);cursor:pointer;padding:0;
+      `
+      const num = document.createElement('span')
+      num.style.cssText = 'transform:rotate(45deg);color:#fff;font:700 11px sans-serif;'
+      num.textContent = String(index + 1)
+      pin.append(num)
+      const marker = new advancedMarkerCtor!({
+        map: mapInstance,
+        position: point,
+        content: pin,
+        title: `Point ${index + 1} — click to remove`,
+      })
+      pin.addEventListener('click', (event) => {
+        event.stopPropagation()
+        emit('draw-point-remove', index)
+      })
+      return marker
+    })
+  }
+  if ((props.drawingMode === 'line' || props.drawingMode === 'polygon') && props.drawingPoints.length) {
+    drawingPathPreview = props.drawingMode === 'polygon'
+      ? new google.maps.Polygon({
+          map: mapInstance,
+          paths: props.drawingPoints,
+          fillColor: '#DC3545',
+          fillOpacity: 0.2,
+          strokeColor: '#DC3545',
+          strokeOpacity: 0.9,
+          strokeWeight: 2,
+        })
+      : new google.maps.Polyline({
+          map: mapInstance,
+          path: props.drawingPoints,
+          geodesic: true,
+          strokeColor: '#0D6EFD',
+          strokeOpacity: 0.9,
+          strokeWeight: 3,
+        })
+  }
+  if (props.drawingMode === 'circle' && props.drawingCircleCenter && props.drawingCircleRadius > 0) {
+    drawingCirclePreview = new google.maps.Circle({
+      map: mapInstance,
+      center: props.drawingCircleCenter,
+      radius: props.drawingCircleRadius,
+      fillColor: '#0D6EFD',
+      fillOpacity: 0.18,
+      strokeColor: '#0D6EFD',
+      strokeOpacity: 0.9,
+      strokeWeight: 2,
+    })
+  }
+}
+
+watch(
+  () => [props.drawingMode, props.drawingPoints, props.drawingCircleCenter, props.drawingCircleRadius] as const,
+  () => {
+    mapInstance?.setOptions({
+      draggableCursor: props.drawingMode ? 'crosshair' : undefined,
+      gestureHandling: props.drawingMode ? 'none' : 'auto',
+      disableDoubleClickZoom: !!props.drawingMode,
+    })
+    renderDrawingPreview()
+  },
+  { deep: true },
+)
+
+onUnmounted(() => {
+  clearDrawingPreview()
+  if (mapInstance) google.maps.event.clearInstanceListeners(mapInstance)
+  mapInstance = null
+})
 
 const statusColor: Record<string, string> = {
   active:     '#22c55e', // Green
@@ -130,9 +260,26 @@ onMounted(async () => {
       zoomControl: false,
       styles: darkMapStyles,
       mapId: 'live-tracking-map',
+      gestureHandling: props.drawingMode ? 'none' : 'auto',
+      disableDoubleClickZoom: !!props.drawingMode,
+      draggableCursor: props.drawingMode ? 'crosshair' : undefined,
     })
+    mapInstance = map
+    const emitPoint = (eventName: 'draw-click' | 'draw-mousedown' | 'draw-mousemove' | 'draw-mouseup', event: google.maps.MapMouseEvent) => {
+      if (!props.drawingMode || !event.latLng) return
+      emit(eventName, { lat: event.latLng.lat(), lng: event.latLng.lng() })
+    }
+    map.addListener('click', (event: google.maps.MapMouseEvent) => emitPoint('draw-click', event))
+    map.addListener('dblclick', () => {
+      if (props.drawingMode) emit('draw-double-click')
+    })
+    map.addListener('mousedown', (event: google.maps.MapMouseEvent) => emitPoint('draw-mousedown', event))
+    map.addListener('mousemove', (event: google.maps.MapMouseEvent) => emitPoint('draw-mousemove', event))
+    map.addListener('mouseup', (event: google.maps.MapMouseEvent) => emitPoint('draw-mouseup', event))
 
     const { AdvancedMarkerElement } = await importLibrary('marker') as google.maps.MarkerLibrary
+    advancedMarkerCtor = AdvancedMarkerElement
+    renderDrawingPreview()
 
     console.log('[GoogleMap] layers:', {
       boundaries: props.boundaries.length,
@@ -212,6 +359,108 @@ onMounted(async () => {
         position: { lat: p.lat, lng: p.lng },
         content: el,
         title: p.type,
+      })
+    }
+
+    for (const item of props.workspaceMarkers) {
+      const color = item.color ?? (item.type === 'asset' ? '#0D6EFD' : item.type === 'post' ? '#0D6EFD' : '#198754')
+      const position = { lat: item.lat, lng: item.lng }
+      const emitItemClick = () => emit('workspace-marker-click', item)
+
+      if (item.shape === 'circle' && item.radius) {
+        const circle = new google.maps.Circle({
+          map,
+          center: position,
+          radius: item.radius,
+          fillColor: color,
+          fillOpacity: 0.16,
+          strokeColor: color,
+          strokeOpacity: 0.8,
+          strokeWeight: 2,
+        })
+        circle.addListener('click', emitItemClick)
+      }
+
+      if (item.shape === 'line' && item.points?.length) {
+        const line = new google.maps.Polyline({
+          map,
+          path: item.points,
+          geodesic: true,
+          strokeColor: color,
+          strokeOpacity: 0.85,
+          strokeWeight: 3,
+        })
+        line.addListener('click', emitItemClick)
+      }
+
+      if (item.shape === 'polygon' && item.points?.length) {
+        const isEntryExit = item.zoneType === 'entry_exit'
+        const polygon = new google.maps.Polygon({
+          map,
+          paths: item.points,
+          fillColor: color,
+          fillOpacity: 0.2,
+          strokeColor: color,
+          strokeOpacity: isEntryExit ? 0 : 0.9,
+          strokeWeight: 2,
+        })
+        polygon.addListener('click', emitItemClick)
+
+        if (isEntryExit) {
+          const firstPoint = item.points[0]
+          if (!firstPoint) continue
+          const closedPath = [...item.points, firstPoint]
+          new google.maps.Polyline({
+            map,
+            path: closedPath,
+            geodesic: true,
+            strokeOpacity: 0,
+            icons: [{
+              icon: {
+                path: 'M 0,-1 0 1',
+                strokeColor: color,
+                strokeOpacity: 0.9,
+                scale: 2,
+              },
+              offset: '0',
+              repeat: '10px',
+            }],
+          })
+        }
+      }
+
+      const el = document.createElement('button')
+      const pin = document.createElement('span')
+      const label = document.createElement('span')
+      el.type = 'button'
+      el.style.cssText = `
+        display:flex;align-items:center;gap:4px;padding:0;background:transparent;
+        border:0;cursor:pointer;opacity:${item.active === false ? '.4' : '1'};
+      `
+      pin.style.cssText = `
+        display:flex;align-items:center;justify-content:center;width:34px;height:34px;
+        border-radius:${item.type === 'asset' ? '8px' : '50%'};background:${color};
+        border:2px solid #fff;color:#fff;box-shadow:0 2px 10px rgba(0,0,0,.45);
+        font:700 12px sans-serif;flex-shrink:0;
+      `
+      pin.textContent = item.type === 'asset' ? 'A' : item.type === 'post' ? 'P' : 'Z'
+      label.style.cssText = `
+        max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+        padding:2px 5px;border-radius:4px;background:rgba(13,17,23,.82);color:#fff;
+        font:500 11px sans-serif;text-decoration:${item.active === false ? 'line-through' : 'none'};
+      `
+      label.textContent = item.label
+      el.append(pin, label)
+      const marker = new AdvancedMarkerElement({
+        map,
+        position,
+        content: el,
+        title: item.label,
+      })
+      marker.addEventListener('gmp-click', emitItemClick)
+      el.addEventListener('click', (event) => {
+        event.stopPropagation()
+        emitItemClick()
       })
     }
 

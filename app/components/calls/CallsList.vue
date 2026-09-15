@@ -8,6 +8,8 @@ import { useNotificationSocket } from '~/composables/useNotificationSocket'
 
 const { t } = useTranslation()
 const { latestNotification } = useNotificationSocket()
+const route = useRoute()
+const router = useRouter()
 
 // Selected call for details modal
 const selectedCall = ref<Call | null>(null)
@@ -25,6 +27,11 @@ function openCallDetails(call: Call) {
 function closeCallDetails() {
   showDetailsModal.value = false
   selectedCall.value = null
+  if (route.query.call_id) {
+    const query = { ...route.query }
+    delete query.call_id
+    router.replace({ query })
+  }
 }
 
 async function handleResolved() {
@@ -130,8 +137,8 @@ function mapCall(apiCall: ApiCall): Call {
     residentName: apiCall.resident_name || '',
     communityName: apiCall.community_name || '',
     communityId: apiCall.community_id,
-    address: apiCall.address || '',
-    currentAddress: apiCall.current_address || undefined,
+    address: apiCall.address || apiCall.current_address || '',
+    currentAddress: apiCall.current_address || apiCall.address || undefined,
     description: apiCall.description || undefined,
     scheduledDateTime: apiCall.scheduled_date
       ? `${apiCall.scheduled_date}${apiCall.scheduled_time_from ? ' ' + apiCall.scheduled_time_from : ''}`
@@ -161,8 +168,8 @@ function buildGetCallsRequest(filters: Record<string, string>): Omit<GetCallsReq
     params.category = filters.serviceType as ApiCall['category']
   }
 
-  if (filters.search) {
-    params.search_text = filters.search
+  if (filters.search || filters.residentName) {
+    params.search_text = filters.search || filters.residentName
   }
 
   if (filters.community) {
@@ -185,22 +192,38 @@ async function fetchCalls() {
   }
 }
 
-onMounted(() => {
-  fetchCalls()
-})
-
-function formatTime(iso: string): string {
-  const d = new Date(iso)
-  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+async function openCallFromQuery(callId: string | null) {
+  if (!callId || !/^\d+$/.test(callId)) return
+  try {
+    const response = await callApi.getCall(Number(callId), { showLoading: false })
+    if (response.call) openCallDetails(mapCall(response.call))
+  } catch (err: any) {
+    error.value = err.message || 'Failed to load call details'
+  }
 }
 
+onMounted(async () => {
+  await fetchCalls()
+  await openCallFromQuery(typeof route.query.call_id === 'string' ? route.query.call_id : null)
+})
+
+watch(() => route.query.call_id, (callId: typeof route.query.call_id) => {
+  openCallFromQuery(typeof callId === 'string' ? callId : null)
+})
+
 function timeSince(iso: string): string {
-  const seconds = Math.floor((Date.now() - new Date(iso).getTime()) / 1000)
-  if (seconds < 60) return `${seconds}s`
+  const seconds = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 1000))
+  if (seconds < 60) return `${seconds} sec ago`
   const minutes = Math.floor(seconds / 60)
-  if (minutes < 60) return `${minutes}m`
+  if (minutes < 60) return `${minutes} min ago`
   const hours = Math.floor(minutes / 60)
-  return `${hours}h`
+  if (hours < 24) return `${hours} ${hours === 1 ? 'hour' : 'hours'} ago`
+  const days = Math.floor(hours / 24)
+  if (days < 7) return `${days} ${days === 1 ? 'day' : 'days'} ago`
+  const weeks = Math.floor(days / 7)
+  if (days < 30) return `${weeks} ${weeks === 1 ? 'week' : 'weeks'} ago`
+  const months = Math.floor(days / 30)
+  return `${months} ${months === 1 ? 'month' : 'months'} ago`
 }
 
 function formatDateTime(iso: string): string {
@@ -298,7 +321,7 @@ watch(
       <Icon name="lucide:alert-circle" :size="24" />
       <span>{{ error }}</span>
     </div>
-    <div v-else-if="calls.length === 0" class="empty-state">
+    <div v-else-if="filteredCalls.length === 0" class="empty-state">
       <Icon name="lucide:phone-off" :size="24" />
       <span>No calls found</span>
     </div>
@@ -369,13 +392,12 @@ watch(
 
             <!-- Address -->
             <td class="col-address">
-              <span class="address-text">{{ call.address }}</span>
+              <span class="address-text">{{ call.address || '—' }}</span>
             </td>
 
             <!-- Created -->
             <td class="col-created" :title="formatDateTime(call.createdOn)">
               <span class="elapsed-time">{{ timeSince(call.createdOn) }}</span>
-              <span class="created-time">{{ formatTime(call.createdOn) }}</span>
             </td>
 
             <!-- Scheduled Date/Time -->

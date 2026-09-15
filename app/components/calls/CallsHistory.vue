@@ -182,8 +182,8 @@ function buildGetHistoryRequest(filters: Record<string, string>): Omit<GetCallsR
     params.category = filters.serviceType as ApiCall['category']
   }
 
-  if (filters.search) {
-    params.search_text = filters.search
+  if (filters.search || filters.residentName) {
+    params.search_text = filters.search || filters.residentName
   }
 
   if (filters.community) {
@@ -306,7 +306,7 @@ watch(
       <Icon name="lucide:alert-circle" :size="24" />
       <span>{{ error }}</span>
     </div>
-    <div v-else-if="historyCalls.length === 0" class="empty-state">
+    <div v-else-if="filteredHistoryCalls.length === 0" class="empty-state">
       <Icon name="lucide:phone-off" :size="24" />
       <span>No history found</span>
     </div>
