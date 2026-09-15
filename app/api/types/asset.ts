@@ -68,6 +68,7 @@ export interface Asset {
   installation_date: string | null
   replacement_date: string | null
   created_by: number
+  created_by_name: string | null
   created_on: string
   last_update: string | null
 }
@@ -85,6 +86,7 @@ export interface Post {
   permissions: PostPermissions | null
   is_active: boolean
   created_by: number
+  created_by_name: string | null
   created_on: string
   last_update: string | null
 }

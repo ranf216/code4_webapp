@@ -279,6 +279,7 @@ function handleAddPost(data: PostFormData) {
     location: pendingLocation.value ?? { x: 50, y: 50 },
     shape: activeShape.value ?? 'dot',
   } as MapPost)
+  showAddPostModal.value = false
   pendingLocation.value = null
   activeShape.value = null
   isBatchMode.value = false
@@ -728,6 +729,8 @@ function getMarkerIcon(item: MapItem): string {
     <MapAddPostModal
       :show="showAddPostModal"
       :location="pendingLocation"
+      :communities="[{ community_id: Number(communityId), name: communityName }]"
+      :community-id="communityId"
       @close="showAddPostModal = false; pendingLocation = null"
       @save="handleAddPost"
     />
