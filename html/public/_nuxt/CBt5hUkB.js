@@ -1,1 +1,0 @@
-import{B as e,m as t,x as n,y as r}from"./CgBH3Iz8.js";import{t as i}from"./BDNMzG2s.js";import{t as a}from"./CNs_Ozdc.js";import{t as o}from"./DW9QkoDH.js";var s={class:`reports-editor-page`},c=i(n({__name:`new`,setup(n){return a({layout:`default`}),(n,i)=>{let a=o;return e(),t(`div`,s,[r(a,{mode:`create`})])}}}),[[`__scopeId`,`data-v-d9f9ce81`]]);export{c as default};
