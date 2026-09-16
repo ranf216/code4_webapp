@@ -201,6 +201,8 @@ const editingPost = ref<GridPost | null>(null)
 const showEditModal = ref(false)
 const showDeleteModal = ref(false)
 const postToDelete = ref<GridPost | null>(null)
+const showCannotDeletePostModal = ref(false)
+const cannotDeletePostName = ref('')
 
 function openDetail(post: GridPost) {
   selectedPost.value = post
@@ -282,8 +284,32 @@ async function handleDelete() {
     postToDelete.value = null
     await loadPosts()
   } catch (error) {
+    if (error instanceof ApiError && error.rc === 759 && postToDelete.value) {
+      showDeleteModal.value = false
+      cannotDeletePostName.value = postToDelete.value.name
+      showCannotDeletePostModal.value = true
+      return
+    }
     console.error('Failed to delete post:', error)
     toastStore.error('Failed to delete post')
+  }
+}
+
+async function handleCannotDeleteDeactivate() {
+  if (!postToDelete.value) return
+  try {
+    await assetApi.updatePost({ post_id: postToDelete.value.postId, is_active: false })
+    showCannotDeletePostModal.value = false
+    if (selectedPost.value?.postId === postToDelete.value.postId) {
+      selectedPost.value = { ...selectedPost.value, active: false }
+    }
+    postToDelete.value = null
+    cannotDeletePostName.value = ''
+    toastStore.success('Post deactivated successfully')
+    await loadPosts()
+  } catch (error) {
+    console.error('Failed to deactivate post:', error)
+    toastStore.error('Failed to deactivate post')
   }
 }
 
@@ -469,6 +495,18 @@ onMounted(() => {
       @close="showDeleteModal = false"
       @cancel="showDeleteModal = false"
       @ok="handleDelete"
+    />
+
+    <!-- Cannot delete post (used in shift scheduling) -->
+    <AppModal
+      :show="showCannotDeletePostModal"
+      :title="t('map.cannot_delete_post_title')"
+      :message="t('map.cannot_delete_post_message', { name: cannotDeletePostName })"
+      :cancel-text="t('common.cancel')"
+      :ok-text="t('map.deactivate_post')"
+      @close="showCannotDeletePostModal = false"
+      @cancel="showCannotDeletePostModal = false"
+      @ok="handleCannotDeleteDeactivate"
     />
   </div>
 </template>

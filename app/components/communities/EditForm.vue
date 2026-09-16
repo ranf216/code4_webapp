@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { nextTick, onMounted, onUnmounted } from 'vue'
+import { onMounted, onUnmounted } from 'vue'
 import { communityApi } from '~/api/community'
 import { officerApi } from '~/api/officer'
 import ImageUpload from '~/components/ImageUpload.vue'
+import CommunityBoundaryMap from '~/components/communities/CommunityBoundaryMap.vue'
 import type { CommunityEditFormData } from '~/types/community'
 
 
@@ -28,8 +29,8 @@ const form = reactive<CommunityEditFormData>({
   mapBoundaries: '',
 })
 
-const showMapTool = ref(true)
-const mapToolLoaded = ref(false)
+const mapCenter = ref<{ lat: number; lng: number } | undefined>(undefined)
+const initialMapBoundaries = ref('')
 const existingMapImageUrl = ref<string | null>(null)
 
 const isLoading = ref(false)
@@ -115,8 +116,11 @@ async function loadCommunity() {
       form.active = c.is_active
       form.registrationDate = c.created_on ? c.created_on.split('T')[0] : ''
       form.mapBoundaries = c.map_boundaries || ''
+      initialMapBoundaries.value = form.mapBoundaries || ''
+      if (c.latitude != null && c.longitude != null) {
+        mapCenter.value = { lat: c.latitude, lng: c.longitude }
+      }
       existingMapImageUrl.value = c.map_image_url || null
-      console.log('EditForm mapBoundaries loaded:', form.mapBoundaries?.substring(0, 100))
       // officers/residents/posts not in API yet — keep as empty arrays
     } else {
       loadError.value = response.message || 'Failed to load community'
@@ -140,9 +144,6 @@ onMounted(async () => {
   }
   await loadCommunity()
   await loadCommunityOfficers()
-  nextTick(() => {
-    loadMapTool()
-  })
 })
 
 onUnmounted(() => {
@@ -157,103 +158,6 @@ function extractBase64FromDataUrl(dataUrl: string): string {
     return base64 || dataUrl
   }
   return dataUrl
-}
-
-function geoJsonToCoordinateString(geoJsonString: string): string | null {
-  try {
-    const geoJson = JSON.parse(geoJsonString)
-    const coordinates = geoJson.coordinates
-    if (!Array.isArray(coordinates)) return null
-
-    let coords: number[][] = []
-    if (geoJson.type === 'Polygon') {
-      coords = coordinates[0] || []
-    } else if (geoJson.type === 'LineString') {
-      coords = coordinates
-    } else {
-      return null
-    }
-
-    return coords
-      .map((point) => {
-        const [lng, lat] = point
-        return `${lng}, ${lat}`
-      })
-      .join('\n')
-  } catch {
-    return null
-  }
-}
-
-function importPolygon(geoJsonString: string) {
-  console.log('importPolygon called with:', geoJsonString.substring(0, 100))
-  if (!window.ksc?.maptool?.importCoordinates) {
-    console.log('Map tool importCoordinates not available')
-    return
-  }
-
-  const coordString = geoJsonToCoordinateString(geoJsonString)
-  console.log('Converted coordString:', coordString?.substring(0, 100))
-  if (!coordString) return
-
-  const coordinatesRs = document.getElementById('coordinates-rs')
-  if (coordinatesRs) {
-    coordinatesRs.innerHTML = coordString
-  }
-  window.ksc.maptool.importCoordinates(coordString)
-  console.log('importCoordinates called')
-}
-
-function waitForMapTool(callback: () => void, attempts = 0) {
-  if (window.ksc?.maptool?.importCoordinates) {
-    callback()
-    return
-  }
-  if (attempts > 50) return
-  setTimeout(() => waitForMapTool(callback, attempts + 1), 100)
-}
-
-function loadMapTool() {
-  if (mapToolLoaded.value) return
-  mapToolLoaded.value = true
-  console.log('loadMapTool called, mapBoundaries:', form.mapBoundaries?.substring(0, 100))
-
-  // Remove existing map tool instance so it re-binds to the current #map element
-  if (window.ksc?.maptool) {
-    delete window.ksc.maptool
-  }
-  const oldScript = document.querySelector('script[src="/map/maptool.min.js"]')
-  if (oldScript) {
-    oldScript.remove()
-  }
-
-  const script = document.createElement('script')
-  script.src = '/map/maptool.min.js'
-  script.type = 'text/javascript'
-  script.onload = () => {
-    console.log('Map tool script loaded')
-    waitForMapTool(() => {
-      setTimeout(() => {
-        if (form.mapBoundaries) {
-          importPolygon(form.mapBoundaries)
-        }
-      }, 1500)
-    })
-  }
-  document.body.appendChild(script)
-}
-
-function toggleMapTool() {
-  showMapTool.value = !showMapTool.value
-  if (showMapTool.value) {
-    nextTick(() => {
-      loadMapTool()
-    })
-  }
-}
-
-function getPolygon(): string {
-  return document.getElementById('polygon-rs')?.innerHTML || ''
 }
 
 function isValidPolygonString(value: string): boolean {
@@ -326,9 +230,11 @@ async function handleSubmit() {
       payload.map_image = ''
     }
 
-    const polygon = getPolygon()
-    if (polygon && isValidPolygonString(polygon)) {
-      payload.map_boundaries = polygon
+    if (form.mapBoundaries && isValidPolygonString(form.mapBoundaries)) {
+      payload.map_boundaries = form.mapBoundaries
+    } else if (!form.mapBoundaries && initialMapBoundaries.value) {
+      // User cleared the boundary -> send empty string to clear it
+      payload.map_boundaries = ''
     }
 
     const response = await communityApi.updateCommunity(payload)
@@ -556,26 +462,11 @@ async function handleSubmit() {
             />
             <p class="map-upload__hint">{{ t('communities.map_formats') }}</p>
 
-            <div class="map-tools">
-              <span class="map-tools__label">{{ t('communities.map_tools') }}</span>
-              <button
-                type="button"
-                class="map-tools__btn"
-                :class="{ 'map-tools__btn--active': showMapTool }"
-                @click="toggleMapTool"
-              >
-                <Icon name="lucide:hexagon" :size="14" />
-                <span>{{ t('communities.draw_boundary') }}</span>
-              </button>
-              <button type="button" class="map-tools__btn">
-                <Icon name="lucide:door-open" :size="14" />
-                <span>{{ t('communities.add_doors') }}</span>
-              </button>
-              <button type="button" class="map-tools__btn">
-                <Icon name="lucide:layout-grid" :size="14" />
-                <span>{{ t('communities.add_windows') }}</span>
-              </button>
-            </div>
+            <CommunityBoundaryMap
+              :center="mapCenter"
+              :boundary="form.mapBoundaries"
+              @change="form.mapBoundaries = $event"
+            />
           </div>
         </div>
 
@@ -626,45 +517,6 @@ async function handleSubmit() {
       @confirm="handleOfficerPickerConfirm"
     />
 
-    <!-- Map Tool Section -->
-    <div v-if="showMapTool" class="community-form__map-section">
-      <div class="form-section">
-        <h3 class="form-section__title">{{ t('communities.draw_boundary') }}</h3>
-        <div id="wrapper" class="map" style="height: 500px;">
-          <div id="map" class="map__leaflet" oncontextmenu="return false;"></div>
-          <div id="controls" class="map__information">
-            <h1 class="hidden">Polyline Tool</h1>
-            <a class="linker disabled hidden" href="#">
-              <svg width="100%" height="100%" viewBox="0 0 1792 1792" xmlns="http://www.w3.org/2000/svg"><path d="M1520 1216q0-40-28-68l-208-208q-28-28-68-28-42 0-72 32 3 3 19 18.5t21.5 21.5 15 19 13 25.5 3.5 27.5q0 40-28 68t-68 28q-15 0-27.5-3.5t-25.5-13-19-15-21.5-21.5-18.5-19q-33 31-33 73 0 40 28 68l206 207q27 27 68 27 40 0 68-26l147-146q28-28 28-67zm-703-705q0-40-28-68l-206-207q-28-28-68-28-39 0-68 27l-147 146q-28 28-28 67 0 40 28 68l208 208q27 27 68 27 42 0 72-31-3-3-19-18.5t-21.5-21.5-15-19-13-25.5-3.5-27.5q0-40 28-68t68-28q15 0 27.5 3.5t25.5 13 19 15 21.5 21.5 18.5 19q33-31 33-73zm895 705q0 120-85 203l-147 146q-83 83-203 83-121 0-204-85l-206-207q-83-83-83-203 0-123 88-209l-88-88q-86 88-208 88-120 0-204-84l-208-208q-84-84-84-204t85-203l147-146q83-83 203-83 121 0 204 85l206 207q83 83 83 203 0 123-88 209l88 88q86-88 208-88 120 0 204 84l208 208q84 84 84 204z" fill="#d0e1f9"/></svg>
-            </a>
-            <div class="map__information__buttons">
-              <button type="button" id="import" class="enabled" title="Import Coordinates">Import</button>
-              <button type="button" id="reset" class="enabled" title="Clear all Points">Reset</button>
-              <button type="button" id="undo" class="enabled" title="Undo Last Edit">Undo</button>
-              <button type="button" id="close" class="enabled" title="Close Shape">Close Shape</button>
-            </div>
-            <form class="map__information__form" name="import" method="GET">
-              <textarea name="coordinates" placeholder="longitude1, latitude1
-                                                                  longitude2, latitude2
-                                                                  etc."></textarea>
-              <p class="map__information__form__error"></p>
-              <button type="button" class="enabled">Import</button><button type="button" class="enabled">Cancel</button>
-            </form>
-            <div class="map__information__echo">
-              <p class="map__information__instruction m-2-t">Right click on map to begin.</p>
-              <div class="map__information__output">
-                <p class="map__information__alert hidden">
-                  <svg width="20" version="1.1" id="reverse" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" x="0px" y="0px" viewBox="0 0 38 38" enable-background="new 0 0 38 38" xml:space="preserve"><path fill="#fff" d="M24.9,13.7c0,0,3,0.9,4.2,2.6c1.4,1.8,1.5,6.3-4.3,6.6l0-4.9l-8.2,7.6l8.2,7.6l0-4.6c0,0,3.7,0.1,6.1-1.9 C35.3,23.2,34.4,14.6,24.9,13.7z"/><path fill="#fff" d="M21.2,13.6L13,5.9l0,4.6c0,0-3.7-0.1-6.1,1.9C2.5,16,3.4,24.6,12.9,25.5c0,0-3-0.9-4.2-2.6c-1.4-1.8-1.5-6.3,4.3-6.6l0,4.9 L21.2,13.6z"/></svg>
-                  Coordinate order reversed to conform to <a href="https://tools.ietf.org/html/rfc7946#section-3.1.6">right-hand rule</a>.
-                </p>
-                <pre class="map__information__coordinates" id="coordinates-rs"></pre>
-                <pre class="map__information__geojson" id="polygon-rs"></pre>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
   </form>
 </template>
 
@@ -1214,15 +1066,6 @@ async function handleSubmit() {
   opacity: 0.85;
 }
 
-/* Map Section */
-.community-form__map-section {
-  margin-top: var(--space-6);
-}
-
-.community-form__map-section .form-section {
-  width: 100%;
-}
-
 /* Map Upload */
 .map-upload {
   margin-top: var(--space-4);
@@ -1287,47 +1130,6 @@ async function handleSubmit() {
 .map-upload__btn:hover {
   background: var(--color-bg-overlay);
   border-color: var(--color-accent);
-}
-
-/* Map Tools */
-.map-tools {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  margin-top: var(--space-4);
-  padding-top: var(--space-4);
-  border-top: 1px solid var(--color-border);
-}
-
-.map-tools__label {
-  font-size: var(--font-size-sm);
-  color: var(--color-text-muted);
-}
-
-.map-tools__btn {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-1);
-  padding: var(--space-2) var(--space-3);
-  background: var(--color-bg-elevated);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  color: var(--color-text-secondary);
-  font-size: var(--font-size-base);
-  cursor: pointer;
-  transition: all var(--transition-base);
-}
-
-.map-tools__btn:hover {
-  background: var(--color-bg-overlay);
-  border-color: var(--color-accent);
-  color: var(--color-text-primary);
-}
-
-.map-tools__btn--active {
-  background: var(--color-accent);
-  border-color: var(--color-accent);
-  color: #0a0c10;
 }
 
 /* Posts Input */

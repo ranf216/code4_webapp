@@ -149,24 +149,31 @@ function renderDrawingPreview() {
     })
   }
   if ((props.drawingMode === 'line' || props.drawingMode === 'polygon') && props.drawingPoints.length) {
-    drawingPathPreview = props.drawingMode === 'polygon'
-      ? new google.maps.Polygon({
+    const isPolygon = props.drawingMode === 'polygon'
+    drawingPathPreview = new google.maps.Polyline({
+      map: mapInstance,
+      path: props.drawingPoints,
+      geodesic: true,
+      strokeColor: isPolygon ? '#DC3545' : '#0D6EFD',
+      strokeOpacity: 0.9,
+      strokeWeight: isPolygon ? 2 : 3,
+    })
+    if (advancedMarkerCtor) {
+      drawingPointMarkers = props.drawingPoints.map((point, index) => {
+        const dot = document.createElement('div')
+        dot.style.cssText = `
+          width:10px;height:10px;border-radius:50%;
+          background:${isPolygon ? '#DC3545' : '#0D6EFD'};border:2px solid #fff;
+          box-shadow:0 1px 4px rgba(0,0,0,.45);
+        `
+        return new advancedMarkerCtor!({
           map: mapInstance,
-          paths: props.drawingPoints,
-          fillColor: '#DC3545',
-          fillOpacity: 0.2,
-          strokeColor: '#DC3545',
-          strokeOpacity: 0.9,
-          strokeWeight: 2,
+          position: point,
+          content: dot,
+          title: `Point ${index + 1}`,
         })
-      : new google.maps.Polyline({
-          map: mapInstance,
-          path: props.drawingPoints,
-          geodesic: true,
-          strokeColor: '#0D6EFD',
-          strokeOpacity: 0.9,
-          strokeWeight: 3,
-        })
+      })
+    }
   }
   if (props.drawingMode === 'circle' && props.drawingCircleCenter && props.drawingCircleRadius > 0) {
     drawingCirclePreview = new google.maps.Circle({
@@ -447,6 +454,13 @@ watch(
   () => [props.boundaries, props.routes, props.waypoints, props.posts, props.workspaceMarkers, props.emergencyCalls, props.markers] as const,
   () => renderOverlays(),
   { deep: true },
+)
+
+watch(
+  () => [props.center?.lat, props.center?.lng] as const,
+  ([lat, lng]) => {
+    if (mapInstance && lat != null && lng != null) mapInstance.setCenter({ lat, lng })
+  },
 )
 
 onUnmounted(() => {

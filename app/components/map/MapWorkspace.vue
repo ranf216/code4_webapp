@@ -109,6 +109,32 @@ const mapCenter = computed(() => ({
   lng: selectedCommunity.value?.longitude ?? MAP_CENTER.lng,
 }))
 
+// Community geographic boundary (GeoJSON Polygon) — calibrates the uploaded
+// image map so percent coordinates map to real lat/lng and back.
+const mapBoundaries = ref<GeoPoint[]>([])
+
+function parseMapBoundaries(value?: string | null): GeoPoint[] {
+  try {
+    const parsed = JSON.parse(value || '')
+    if (parsed?.type !== 'Polygon' || !Array.isArray(parsed.coordinates?.[0])) return []
+    return (parsed.coordinates[0] as number[][]).map(([lng, lat]) => ({ lat: Number(lat), lng: Number(lng) }))
+  } catch {
+    return []
+  }
+}
+
+const boundaryBox = computed(() => {
+  const pts = mapBoundaries.value
+  if (pts.length < 3) return null
+  const lats = pts.map(p => p.lat)
+  const lngs = pts.map(p => p.lng)
+  return { minLat: Math.min(...lats), maxLat: Math.max(...lats), minLng: Math.min(...lngs), maxLng: Math.max(...lngs) }
+})
+
+const communityBoundaryOverlay = computed(() => mapBoundaries.value.length >= 3
+  ? [{ name: 'community-boundary', paths: mapBoundaries.value }]
+  : [])
+
 interface MapAsset {
   id: string
   type: 'asset'
@@ -179,7 +205,15 @@ function locationCenter(location: AssetLocation): { lat: number; lng: number } {
 
 function mapPoint(location: AssetLocation): MapPoint {
   const center = locationCenter(location)
-  return { x: 50, y: 50, lat: center.lat, lng: center.lng }
+  return { ...geoToPercent(center.lat, center.lng), lat: center.lat, lng: center.lng }
+}
+
+function mapLocationPoints(points: Array<{ lat: number; lng: number }>): MapPoint[] {
+  return points.map(point => {
+    const lat = Number(point.lat)
+    const lng = Number(point.lng)
+    return { ...geoToPercent(lat, lng), lat, lng }
+  })
 }
 
 function mapApiAsset(asset: ApiAsset): MapAsset {
@@ -193,7 +227,7 @@ function mapApiAsset(asset: ApiAsset): MapAsset {
     location: mapPoint(asset.location),
     shape: asset.shape,
     radius: 'radius' in asset.location ? Number(asset.location.radius) : undefined,
-    points: locationPoints(asset.location).map(point => ({ x: 50, y: 50, lat: Number(point.lat), lng: Number(point.lng) })),
+    points: mapLocationPoints(locationPoints(asset.location)),
     acres: asset.acres,
     createdBy: String(asset.created_by_name || asset.created_by),
     createdOn: asset.created_on,
@@ -213,7 +247,7 @@ function mapApiPost(post: ApiPost): MapPost {
     location: mapPoint(post.location),
     shape: post.shape,
     radius: 'radius' in post.location ? Number(post.location.radius) : undefined,
-    points: locationPoints(post.location).map(point => ({ x: 50, y: 50, lat: Number(point.lat), lng: Number(point.lng) })),
+    points: mapLocationPoints(locationPoints(post.location)),
     permissions: post.permissions,
     createdBy: String(post.created_by_name || post.created_by),
     createdOn: post.created_on,
@@ -230,7 +264,7 @@ function mapApiZone(zone: ApiMapZone): MapZone {
     name: zone.name,
     location: mapPoint(zone.location),
     shape: points.length ? 'polygon' : 'place',
-    points: points.map(point => ({ x: 50, y: 50, lat: Number(point.lat), lng: Number(point.lng) })),
+    points: mapLocationPoints(points),
   }
 }
 
@@ -319,6 +353,12 @@ const visibleItems = computed((): MapItem[] => {
   })
 })
 
+// Items whose geo position falls outside the boundary box can't be placed on
+// the image map — hide them there (they still show on the Google base).
+const imageVisibleItems = computed((): MapItem[] => visibleItems.value.filter(item =>
+  item.location.x >= 0 && item.location.x <= 100 && item.location.y >= 0 && item.location.y <= 100,
+))
+
 const liveItemCount = computed(() => mapItems.value.length)
 const liveCountClass = computed(() => {
   const ratio = liveItemCount.value / ITEM_LIMIT
@@ -352,11 +392,43 @@ const ZONE_TYPE_COLORS: Record<MapZone['zoneType'], string> = {
 }
 
 function toGeoPoint(point: MapPoint) {
+  if (point.lat != null && point.lng != null) return { lat: point.lat, lng: point.lng }
+  const box = boundaryBox.value
+  if (box) {
+    return {
+      lat: box.maxLat - (point.y / 100) * (box.maxLat - box.minLat),
+      lng: box.minLng + (point.x / 100) * (box.maxLng - box.minLng),
+    }
+  }
   return {
-    lat: point.lat ?? mapCenter.value.lat + (50 - point.y) * 0.0001,
-    lng: point.lng ?? mapCenter.value.lng + (point.x - 50) * 0.0001,
+    lat: mapCenter.value.lat + (50 - point.y) * 0.0001,
+    lng: mapCenter.value.lng + (point.x - 50) * 0.0001,
   }
 }
+
+function geoToPercent(lat: number, lng: number): { x: number; y: number } {
+  const box = boundaryBox.value
+  if (box && box.maxLng > box.minLng && box.maxLat > box.minLat) {
+    return {
+      x: ((lng - box.minLng) / (box.maxLng - box.minLng)) * 100,
+      y: ((box.maxLat - lat) / (box.maxLat - box.minLat)) * 100,
+    }
+  }
+  return {
+    x: 50 + (lng - mapCenter.value.lng) / 0.0001,
+    y: 50 - (lat - mapCenter.value.lat) / 0.0001,
+  }
+}
+
+// Real-world scale of the image map: meters per 1% of the image, derived from
+// the boundary bounding box. Falls back to the heuristic when no boundaries.
+const metersPerPercent = computed(() => {
+  const box = boundaryBox.value
+  if (!box) return METERS_PER_PERCENT
+  const widthMeters = geographicDistance({ lat: box.minLat, lng: box.minLng }, { lat: box.minLat, lng: box.maxLng })
+  const heightMeters = geographicDistance({ lat: box.minLat, lng: box.minLng }, { lat: box.maxLat, lng: box.minLng })
+  return Math.max(0.1, (widthMeters + heightMeters) / 200)
+})
 
 function getWorkspaceMarkerColor(item: MapItem): string {
   if (item.type === 'asset') return ASSET_TYPE_COLORS[item.assetType] ?? ASSET_TYPE_COLORS.Other!
@@ -453,7 +525,7 @@ function handleCanvasMousemove(event: MouseEvent) {
   const dy = event.clientY - rect.top - centerY
   const radiusPx = Math.hypot(dx, dy)
   const radiusPercent = (radiusPx / ((rect.width + rect.height) / 2)) * 100
-  const radiusMeters = Math.max(1, Math.round(radiusPercent * METERS_PER_PERCENT))
+  const radiusMeters = Math.max(1, Math.round(radiusPercent * metersPerPercent.value))
   circleRadiusPx.value = radiusPx
   pendingCircleRadius.value = radiusMeters
 }
@@ -690,6 +762,7 @@ async function initializeMapWorkspace() {
 
 watch(selectedCommunityId, async () => {
   mapImageUrl.value = selectedCommunity.value?.map_image_url ?? null
+  mapBoundaries.value = parseMapBoundaries(selectedCommunity.value?.map_boundaries)
   mapBase.value = mapImageUrl.value ? 'image' : 'google'
   await loadMapData()
 })
@@ -732,6 +805,8 @@ const postSaveError = ref('')
 const showDeleteModal = ref(false)
 const selectedItem = ref<MapItem | null>(null)
 const itemToDelete = ref<MapItem | null>(null)
+const showCannotDeletePostModal = ref(false)
+const cannotDeletePostName = ref('')
 const editingItem = ref<MapItem | null>(null)
 
 function selectItemType(type: 'asset' | 'post' | 'zone') {
@@ -1032,8 +1107,33 @@ async function handleDeleteItem() {
     toastStore.success('Item deleted successfully')
     await loadMapData()
   } catch (error) {
+    if (item.type === 'post' && error instanceof ApiError && error.rc === 759) {
+      showDeleteModal.value = false
+      cannotDeletePostName.value = item.type === 'post' ? item.name : ''
+      showCannotDeletePostModal.value = true
+      return
+    }
     console.error('Failed to delete map item:', error)
     toastStore.error('Failed to delete item')
+  }
+}
+
+async function handleDeactivateCannotDeletePost() {
+  const item = itemToDelete.value
+  if (!item || item.type !== 'post') return
+  try {
+    await assetApi.updatePost({ post_id: Number(item.id.replace('PST-', '')), is_active: false })
+    showCannotDeletePostModal.value = false
+    if (selectedItem.value?.id === item.id && selectedItem.value?.type === 'post') {
+      (selectedItem.value as MapPost).active = false
+    }
+    itemToDelete.value = null
+    cannotDeletePostName.value = ''
+    toastStore.success('Post deactivated successfully')
+    await loadMapData()
+  } catch (error) {
+    console.error('Failed to deactivate post:', error)
+    toastStore.error('Failed to deactivate post')
   }
 }
 
@@ -1311,6 +1411,7 @@ async function handleUploadMapSave(data: { communityId: string; file: File }) {
                 :center="mapCenter"
                 :zoom="15"
                 :workspace-markers="workspaceMarkers"
+                :boundaries="communityBoundaryOverlay"
                 :drawing-mode="activeShape"
                 :drawing-points="drawingGeoPoints"
                 :drawing-circle-center="drawingCircleCenter"
@@ -1377,7 +1478,7 @@ async function handleUploadMapSave(data: { communityId: string; file: File }) {
             </div>
 
             <div
-              v-for="item in useImageMap ? visibleItems : []"
+              v-for="item in useImageMap ? imageVisibleItems : []"
               :key="item.id"
               class="map-marker"
               :class="getMarkerClass(item)"
@@ -1551,6 +1652,18 @@ async function handleUploadMapSave(data: { communityId: string; file: File }) {
       @close="showDeleteModal = false"
       @cancel="showDeleteModal = false"
       @ok="handleDeleteItem"
+    />
+
+    <!-- Cannot delete post (used in shift scheduling) -->
+    <AppModal
+      :show="showCannotDeletePostModal"
+      :title="t('map.cannot_delete_post_title')"
+      :message="t('map.cannot_delete_post_message', { name: cannotDeletePostName })"
+      :cancel-text="t('common.cancel')"
+      :ok-text="t('map.deactivate_post')"
+      @close="showCannotDeletePostModal = false"
+      @cancel="showCannotDeletePostModal = false"
+      @ok="handleDeactivateCannotDeletePost"
     />
 
     <!-- Batch / map item limit warning -->

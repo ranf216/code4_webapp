@@ -258,6 +258,10 @@ function handleFileSelected(file: File) {
 async function handleIconUpload(event: Event) {
   // This function is no longer used - ImageUpload handles its own events
 }
+
+const props = defineProps<{
+  hideTitle?: boolean
+}>()
 </script>
 
 <template>
@@ -265,7 +269,7 @@ async function handleIconUpload(event: Event) {
     <!-- Header -->
     <div class="asset-types-header">
       <div>
-        <h2 class="asset-types-title">{{ t('settings.asset_types.list_title') }}</h2>
+        <h2 v-if="!props.hideTitle" class="asset-types-title">{{ t('settings.asset_types.list_title') }}</h2>
         <p class="asset-types-subtitle">{{ t('settings.types.total') }}: {{ filteredAssetTypes.length }} {{ t('settings.asset_types.assets_count') }}</p>
       </div>
       <div class="asset-types-actions">
