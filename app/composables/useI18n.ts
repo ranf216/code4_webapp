@@ -872,6 +872,7 @@ const translations: Record<string, Record<string, string>> = {
     'tasks.video': 'Video',
     'tasks.add_video': 'Add Video',
     'tasks.video_added': 'Video added',
+    'tasks.add_document': 'Add Document',
 
     // Shifts
     'shifts.title': 'Shift Management',

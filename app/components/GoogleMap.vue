@@ -2,6 +2,7 @@
 import { setOptions, importLibrary } from '@googlemaps/js-api-loader'
 
 interface MarkerData {
+  id?: string
   lat: number
   lng: number
   status: 'active' | 'responding' | 'idle' | 'offduty' | 'gps-lost' | 'skipped'

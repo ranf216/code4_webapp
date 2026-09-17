@@ -23,7 +23,7 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  (e: 'close'): void
+  (e: 'close' | 'view-profile'): void
 }>()
 
 const { t } = useTranslation()
@@ -92,7 +92,7 @@ const statusClass = computed(() => {
           <button class="btn btn--secondary" @click="$emit('close')">
             {{ t('common.close') }}
           </button>
-          <button class="btn btn--primary">
+          <button class="btn btn--primary" @click="$emit('view-profile')">
             {{ t('live_tracking.view_profile') }}
           </button>
         </div>

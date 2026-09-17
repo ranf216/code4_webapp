@@ -436,11 +436,17 @@ function handleDeleteConfirm() {
   flex-wrap: wrap;
 }
 
+.po-list__actions > * {
+  flex-shrink: 0;
+  align-self: center;
+}
+
 /* Search */
 .search-box {
   position: relative;
   display: flex;
   align-items: center;
+  height: 40px;
 }
 
 .search-box__icon {
@@ -472,7 +478,9 @@ function handleDeleteConfirm() {
   align-items: center;
   gap: var(--space-2);
   height: 40px;
+  margin: 0;
   padding: 0 var(--space-3);
+  line-height: normal;
   background: var(--color-bg-surface);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
@@ -487,6 +495,7 @@ function handleDeleteConfirm() {
 /* Community dropdown */
 .dropdown-filter {
   position: relative;
+  height: 40px;
 }
 
 .dropdown-menu {
@@ -520,9 +529,12 @@ function handleDeleteConfirm() {
 .btn-primary {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: var(--space-2);
   height: 40px;
+  margin: 0;
   padding: 0 var(--space-4);
+  line-height: normal;
   background: var(--color-accent);
   border: none;
   border-radius: var(--radius-md);

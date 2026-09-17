@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
+import { officerApi } from '~/api/officer'
+import type { Officer as ApiOfficer, OfficerEvaluation } from '~/api/types/officer'
 import { useTranslation } from '~/composables/useI18n'
 import { useMapRefresh } from '~/composables/useMapRefresh'
 
@@ -24,6 +26,7 @@ interface OfficerInfo {
 }
 
 interface OfficerMarker {
+  id: string
   lat: number
   lng: number
   status: 'active' | 'responding' | 'idle' | 'offduty' | 'skipped' | 'gps-lost'
@@ -63,9 +66,26 @@ interface CommunityBoundary {
 }
 
 const routeColors = ['#22c55e', '#4f6ef7']
+const demoLocations = [
+  { lat: 10.7775, lng: 106.7012 },
+  { lat: 10.7762, lng: 106.7005 },
+  { lat: 10.7782, lng: 106.7008 },
+  { lat: 10.7758, lng: 106.7015 },
+  { lat: 10.7765, lng: 106.6998 },
+  { lat: 10.7779, lng: 106.6999 },
+  { lat: 10.7759, lng: 106.7001 },
+  { lat: 10.7771, lng: 106.7020 },
+]
+const apiOfficers = ref<ApiOfficer[]>([])
 
-const communities = ['Sunset Gardens', 'Oakwood Residences', 'Marina Towers', 'Downtown Plaza']
-const allOfficers = ['John Smith', 'Mike Chen', 'Sarah Johnson', 'Robert Wilson', 'Emma Davis']
+const officerName = (officer: ApiOfficer) => [officer.first_name, officer.last_name].filter(Boolean).join(' ')
+const officerInitials = (officer: ApiOfficer) => [officer.first_name, officer.last_name]
+  .filter(Boolean)
+  .map((name) => name.charAt(0).toUpperCase())
+  .join('')
+  .slice(0, 2)
+const communities = computed(() => Array.from(new Set(apiOfficers.value.map((officer) => officer.community_name).filter((name): name is string => !!name))))
+const allOfficers = computed(() => apiOfficers.value.map(officerName))
 
 const filters = ref({
   community: '',
@@ -77,21 +97,23 @@ const filters = ref({
   onDutyOnly: true,
 })
 
-const mapKey = ref(0)
+async function loadOfficers() {
+  try {
+    const response = await officerApi.getOfficers({ include_inactive: true }, { showLoading: false })
+    if (response.rc === 0) apiOfficers.value = response.officers || []
+  } catch (error) {
+    console.error('Failed to load officers for live tracking:', error)
+  }
+}
 
-const { interval: refreshInterval, secondsAgo, refreshNow } = useMapRefresh(() => {
-  mapKey.value++
-})
+const { interval: refreshInterval, secondsAgo, refreshNow } = useMapRefresh(loadOfficers)
 
-const officers = computed((): OfficerMarker[] => {
-  return [
-    { lat: 10.7775, lng: 106.7012, status: 'active', label: 'John Smith' },
-    { lat: 10.7762, lng: 106.7005, status: 'responding', label: 'Mike Chen' },
-    { lat: 10.7782, lng: 106.7008, status: 'idle', label: 'Sarah Johnson' },
-    { lat: 10.7758, lng: 106.7015, status: 'skipped', label: 'Robert Wilson' },
-    { lat: 10.7765, lng: 106.6998, status: 'offduty', label: 'Emma Davis' },
-  ]
-})
+const officers = computed((): OfficerMarker[] => apiOfficers.value.map((officer, index) => ({
+  id: officer.user_id,
+  ...demoLocations[index % demoLocations.length]!,
+  status: officer.is_active ? 'active' : 'offduty',
+  label: officerName(officer),
+})))
 
 const routes = computed((): RouteOverlay[] => {
   return [
@@ -176,7 +198,7 @@ const filteredOfficers = computed((): OfficerMarker[] => {
     list = list.filter((o: OfficerMarker) => filters.value.selectedOfficers.includes(o.label))
   }
   if (filters.value.community) {
-    list = list.filter((o: OfficerMarker) => officerDetailsMap[o.label]?.community === filters.value.community)
+    list = list.filter((o: OfficerMarker) => officerDetailsMap.value[o.id]?.community === filters.value.community)
   }
   return filters.value.showOfficers ? list : []
 })
@@ -206,75 +228,28 @@ const filteredEmergencyCalls = computed((): EmergencyCallMarker[] => {
 })
 
 const selectedOfficer = ref<OfficerInfo | null>(null)
+const profileOfficer = ref<(ApiOfficer & { evaluations?: OfficerEvaluation[] }) | null>(null)
+const showProfileModal = ref(false)
 
-const officerDetailsMap: Record<string, OfficerInfo> = {
-  'John Smith': {
-    id: 'OFF-001',
-    name: 'John Smith',
-    initials: 'JS',
-    community: 'Sunset Gardens',
-    site: 'Gate A',
-    shiftTime: '06:00 - 14:00',
-    currentPost: 'Main Gate',
-    nextWaypoint: { name: 'North Perimeter', eta: 8 },
-    lastGpsUpdate: '2 min ago',
-    status: 'On patrol route',
-    statusColor: '#22c55e',
-  },
-  'Mike Chen': {
-    id: 'OFF-002',
-    name: 'Mike Chen',
-    initials: 'MC',
-    community: 'Downtown Plaza',
-    site: 'Main Entrance',
-    shiftTime: '14:00 - 22:00',
-    currentPost: 'Entrance',
-    activeCall: { id: 'EMG-001', type: 'Disturbance' },
-    nextWaypoint: { name: 'Loading Dock', eta: 4 },
-    lastGpsUpdate: '30 sec ago',
-    status: 'Responding to emergency call',
-    statusColor: '#4f6ef7',
-  },
-  'Sarah Johnson': {
-    id: 'OFF-003',
-    name: 'Sarah Johnson',
-    initials: 'SJ',
-    community: 'Oakwood Residences',
-    site: 'Perimeter',
-    shiftTime: '10:00 - 18:00',
-    currentPost: 'Perimeter Patrol',
-    lastGpsUpdate: '5 min ago',
-    status: 'GPS signal lost',
-    statusColor: '#f59e0b',
-  },
-  'Robert Wilson': {
-    id: 'OFF-004',
-    name: 'Robert Wilson',
-    initials: 'RW',
-    community: 'Marina Towers',
-    site: 'Parking',
-    shiftTime: '16:00 - 00:00',
-    currentPost: 'Parking Level 1',
-    nextWaypoint: { name: 'Lobby Desk', eta: 12 },
-    lastGpsUpdate: '1 min ago',
-    status: 'Waypoint skipped',
-    statusColor: '#ef4444',
-  },
-  'Emma Davis': {
-    id: 'OFF-005',
-    name: 'Emma Davis',
-    initials: 'ED',
-    community: 'Oakwood Residences',
-    site: 'Lobby',
-    shiftTime: '22:00 - 06:00',
-    currentPost: 'Front Desk',
-    lastGpsUpdate: '1 hr ago',
-    status: 'Checked out / not yet checked in',
-    statusColor: '#6b7280',
-  },
-}
+const officerDetailsMap = computed<Record<string, OfficerInfo>>(() => Object.fromEntries(apiOfficers.value.map((officer) => {
+  const name = officerName(officer)
+  return [officer.user_id, {
+    id: officer.user_id,
+    name,
+    photo: officer.image_url || undefined,
+    initials: officerInitials(officer),
+    community: officer.community_name || '—',
+    site: officer.address || '—',
+    shiftTime: '—',
+    currentPost: officer.title || '—',
+    lastGpsUpdate: 'Demo location',
+    status: officer.is_active ? 'Active' : 'Off duty',
+    statusColor: officer.is_active ? '#22c55e' : '#6b7280',
+  } satisfies OfficerInfo]
+})))
 
 interface GoogleMapMarker {
+  id?: string
   lat: number
   lng: number
   status: string
@@ -282,16 +257,35 @@ interface GoogleMapMarker {
 }
 
 function handleMarkerClick(marker: GoogleMapMarker) {
-  if (!marker.label) return
-  const info = officerDetailsMap[marker.label]
-  if (info) {
-    selectedOfficer.value = info
-  }
+  if (!marker.id) return
+  const info = officerDetailsMap.value[marker.id]
+  if (info) selectedOfficer.value = info
 }
 
 function closeOfficerPanel() {
   selectedOfficer.value = null
 }
+
+async function viewOfficerProfile() {
+  if (!selectedOfficer.value) return
+  try {
+    const response = await officerApi.getOfficer(selectedOfficer.value.id)
+    if (response.rc === 0 && response.officer) {
+      profileOfficer.value = response.officer
+      showProfileModal.value = true
+      closeOfficerPanel()
+    }
+  } catch (error) {
+    console.error('Failed to load officer profile:', error)
+  }
+}
+
+function closeProfileModal() {
+  showProfileModal.value = false
+  profileOfficer.value = null
+}
+
+onMounted(loadOfficers)
 
 const legend = [
   { color: '#22c55e', label: t('live_tracking.status_active') },
@@ -361,6 +355,13 @@ const legend = [
       v-if="selectedOfficer"
       :officer="selectedOfficer"
       @close="closeOfficerPanel"
+      @view-profile="viewOfficerProfile"
+    />
+
+    <OfficerDetailsModal
+      :show="showProfileModal"
+      :officer="profileOfficer"
+      @close="closeProfileModal"
     />
   </div>
 </template>
