@@ -28,6 +28,7 @@
   /* Borders */
   --color-border:         #1e2330;
   --color-border-subtle:  #161b27;
+  --color-border-light:   #686e7b;
 
   /* Text */
   --color-text-primary:   #fbfbfc;
@@ -114,6 +115,7 @@
 
   --color-border:         #e2e5ec;
   --color-border-subtle:  #edf0f5;
+  --color-border-light:   #686e7b;
 
   --color-text-primary:   #111318;
   --color-text-secondary: #b9bec9;

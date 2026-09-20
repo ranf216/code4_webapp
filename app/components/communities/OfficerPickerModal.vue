@@ -14,6 +14,7 @@ interface PickerOfficer {
 const props = defineProps<{
   show: boolean
   preselectedIds?: string[]
+  communityId?: number
 }>()
 
 const emit = defineEmits<{
@@ -61,7 +62,10 @@ async function loadOfficers() {
   if (allOfficers.value.length) return
   isLoading.value = true
   try {
-    const response = await officerApi.getOfficers({ include_inactive: true })
+    const response = await officerApi.getOfficers({
+      community_id: props.communityId,
+      include_inactive: true,
+    })
     if (response.rc === 0 && response.officers) {
       allOfficers.value = response.officers.map((o: any) => ({
         id: o.user_id,

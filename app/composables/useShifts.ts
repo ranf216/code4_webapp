@@ -13,9 +13,14 @@ export interface Waypoint {
 
 export interface Shift {
   id: string
+  apiId?: number
+  communityId?: number
+  seriesId?: number | null
+  isOvernight?: boolean
   community: string
   site: string
   officers: string[]
+  officerIds?: string[]
   start_time: string
   end_time: string
   date: string

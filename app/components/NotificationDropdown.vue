@@ -301,7 +301,7 @@ defineExpose({ toggle, close, isOpen })
 
         <!-- Footer -->
         <div class="notif-dropdown__footer">
-          <button class="notif-dropdown__view-all" @click="close">
+          <button class="notif-dropdown__view-all" @click="router.push('/notifications')">
             {{ t('notifications.view_all') }}
           </button>
         </div>
