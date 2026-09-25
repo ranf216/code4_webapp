@@ -26,6 +26,8 @@ export interface Shift {
   date: string
   status: 'draft' | 'published' | 'active' | 'completed' | 'cancelled'
   posts: string[]
+  postAssignments?: Array<{ officerId: string; postId: number; postName: string }>
+  checkins?: Array<{ officerId: string; checkInOn: string; checkOutOn: string | null; totalHours: number | null; autoCheckout?: boolean | number; notes?: string | null }>
   notes: string
   route?: Waypoint[]
 }

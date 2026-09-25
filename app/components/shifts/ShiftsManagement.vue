@@ -5,8 +5,10 @@ import { ApiError } from '~/api/base'
 import { communityApi } from '~/api/community'
 import type { Community } from '~/api/community'
 import { officerApi } from '~/api/officer'
+import { assetApi } from '~/api/asset'
+import type { Post } from '~/api/types/asset'
 import { ShiftErrorCodes } from '~/api/types/shift'
-import type { Shift as ApiShift, ShiftConflictWarning, ShiftStatus } from '~/api/types/shift'
+import type { Shift as ApiShift, ShiftCheckin, ShiftConflictWarning, ShiftStatus, PostEligibilityWarning } from '~/api/types/shift'
 import type { Officer } from '~/api/types/officer'
 import { shifts, generateRoute, saveRoute, type Shift, type Waypoint } from '~/composables/useShifts'
 
@@ -90,17 +92,25 @@ const shiftFormError = ref('')
 const shiftAction = ref<'publish' | 'delete' | 'cancel' | null>(null)
 const showDeleteShiftModal = ref(false)
 const showCancelShiftModal = ref(false)
+const showRecurringScopeModal = ref(false)
+const recurringUpdateScope = ref<'this_only' | 'this_and_future' | 'all'>('this_only')
 const showConflictModal = ref(false)
 const conflictWarnings = ref<ShiftConflictWarning[]>([])
-const conflictAcknowledged = ref(false)
 const showOfficerPicker = ref(false)
 const pendingRemoveOfficer = ref<{ id: string; name: string } | null>(null)
 const isOfficerActionRunning = ref(false)
 const showAllocationConflictModal = ref(false)
 const allocationConflictWarnings = ref<ShiftConflictWarning[]>([])
 const pendingAllocationOfficerId = ref<string | null>(null)
-const allocationConflictAcknowledged = ref(false)
+const availablePosts = ref<Post[]>([])
+const isLoadingPosts = ref(false)
+const postSelections = ref<Record<string, number | ''>>({})
+const postWarnings = ref<Record<string, PostEligibilityWarning>>({})
+const isAssigningPost = ref(false)
+const nowTimestamp = ref(Date.now())
+let checkinTimer: ReturnType<typeof setInterval> | null = null
 const canManageOfficers = computed(() => !!selectedShift.value && ['draft', 'published', 'active'].includes(shiftForm.value.status))
+const canAssignPosts = computed(() => !!selectedShift.value && ['draft', 'published'].includes(shiftForm.value.status))
 const isShiftReadOnly = computed(() => !!selectedShift.value && !['draft', 'published'].includes(shiftForm.value.status))
 const isNextDay = computed(() => shiftForm.value.end_time <= shiftForm.value.start_time)
 
@@ -131,6 +141,11 @@ const selectedOfficerRecord = computed(() => officerRecords.value.find(officer =
 const selectedCommunityName = computed(() => communities.value.find(community => community.community_id === selectedCommunity.value)?.name || '')
 const allocatedOfficerIds = computed(() => selectedShift.value?.officerIds || [])
 const allocatedOfficerDetails = computed(() => allocatedOfficerIds.value.map(id => officerRecords.value.find(officer => officer.user_id === id)).filter((officer): officer is Officer => !!officer))
+
+function assignedPostsForOfficer(officerId: string) {
+  return selectedShift.value?.postAssignments?.filter(assignment => assignment.officerId === officerId) || []
+}
+
 const allStatuses: ShiftStatus[] = ['draft', 'published', 'active', 'completed', 'cancelled']
 const recurrenceDays = [
   { label: 'Sun', value: 0 },
@@ -159,6 +174,26 @@ function toApiTime(time: string): string {
   return `${hour.padStart(2, '0')}:${minute.padStart(2, '0')}`
 }
 
+function formatLocalDateTime(value: string | null): string {
+  if (!value) return t('shifts.still_active')
+  const date = new Date(value.replace(' ', 'T'))
+  if (Number.isNaN(date.getTime())) return value
+  return date.toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' })
+}
+
+function formatLiveHours(checkin: { checkInOn: string; totalHours: number | null; checkOutOn: string | null }): string {
+  if (checkin.totalHours != null) return `${checkin.totalHours.toFixed(2)}h`
+  const start = new Date(checkin.checkInOn.replace(' ', 'T')).getTime()
+  if (Number.isNaN(start)) return '—'
+  const minutes = Math.max(0, Math.floor((nowTimestamp.value - start) / 60000))
+  return `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, '0')}m`
+}
+
+function officerNameById(officerId: string): string {
+  const officer = officerRecords.value.find((record: Officer) => record.user_id === officerId)
+  return officer ? [officer.first_name, officer.last_name].filter(Boolean).join(' ') : officerId
+}
+
 function getCalendarRange(): { dateFrom: string; dateTo: string } {
   if (dateFrom.value || dateTo.value) {
     const fallback = toDateString(currentDate.value)
@@ -181,7 +216,7 @@ function getCalendarRange(): { dateFrom: string; dateTo: string } {
   return { dateFrom: toDateString(start), dateTo: toDateString(end) }
 }
 
-function mapApiShift(shift: ApiShift): Shift {
+function mapApiShift(shift: ApiShift & { checkins?: ShiftCheckin[] }): Shift {
   return {
     id: `SHF-${shift.shift_id}`,
     apiId: shift.shift_id,
@@ -197,6 +232,15 @@ function mapApiShift(shift: ApiShift): Shift {
     date: shift.shift_date,
     status: shift.status,
     posts: (shift.posts || []).map(post => post.post_name),
+    postAssignments: (shift.posts || []).map(post => ({ officerId: post.officer_id, postId: post.post_id, postName: post.post_name })),
+    checkins: (shift.checkins || []).map(checkin => ({
+      officerId: checkin.officer_id,
+      checkInOn: checkin.check_in_on,
+      checkOutOn: checkin.check_out_on,
+      totalHours: checkin.total_hours,
+      autoCheckout: checkin.auto_checkout,
+      notes: checkin.notes,
+    })),
     notes: shift.notes || '',
   }
 }
@@ -246,11 +290,13 @@ watch(searchText, value => {
 })
 watch([currentDate, viewMode, selectedCommunity, selectedStatus, selectedOfficerRecord, dateFrom, dateTo, debouncedSearchText], loadCalendar, { deep: true })
 onMounted(async () => {
+  checkinTimer = setInterval(() => { nowTimestamp.value = Date.now() }, 60000)
   await loadFilterOptions()
   await loadCalendar()
 })
 onUnmounted(() => {
   if (searchTimer) clearTimeout(searchTimer)
+  if (checkinTimer) clearInterval(checkinTimer)
 })
 
 const weekDays = computed((): { date: Date; label: string; dateStr: string }[] => {
@@ -367,6 +413,7 @@ async function openShiftDetails(shift: Shift) {
   populateShiftForm(shift)
   shiftFormError.value = ''
   showDetailsPanel.value = true
+  if (shift.communityId) loadPostsForCommunity(shift.communityId)
   if (!shift.apiId) return
   isLoadingShiftDetails.value = true
   try {
@@ -397,7 +444,6 @@ function closeDetailsPanel() {
   showCancelShiftModal.value = false
   showConflictModal.value = false
   conflictWarnings.value = []
-  conflictAcknowledged.value = false
 }
 
 function openAllocationBoard() {
@@ -434,6 +480,28 @@ function handleAllocate(shiftId: string, officer: string, post: string) {
   }
 }
 
+async function saveRecurringShift() {
+  if (!selectedShift.value?.apiId || isSavingShift.value) return
+  isSavingShift.value = true
+  shiftFormError.value = ''
+  try {
+    await shiftApi.updateRecurringShifts({
+      shift_id: selectedShift.value.apiId,
+      scope: recurringUpdateScope.value,
+      start_time: toApiTime(shiftForm.value.start_time),
+      end_time: toApiTime(shiftForm.value.end_time),
+      notes: shiftForm.value.notes,
+    }, { showLoading: false })
+    showRecurringScopeModal.value = false
+    closeDetailsPanel()
+    await loadCalendar()
+  } catch (error) {
+    shiftFormError.value = error instanceof Error ? error.message : t('shifts.recurring_update_failed')
+  } finally {
+    isSavingShift.value = false
+  }
+}
+
 async function saveShift() {
   if (isSavingShift.value || isShiftReadOnly.value) return
   const form = shiftForm.value
@@ -448,6 +516,10 @@ async function saveShift() {
   }
   if (form.notes.length > 500) {
     shiftFormError.value = t('shifts.notes_max_error')
+    return
+  }
+  if (selectedShift.value?.seriesId != null && form.recurring) {
+    showRecurringScopeModal.value = true
     return
   }
   if (!selectedShift.value && form.recurring) {
@@ -512,6 +584,55 @@ async function saveShift() {
   }
 }
 
+async function loadPostsForCommunity(communityId: number) {
+  isLoadingPosts.value = true
+  try {
+    const firstResponse = await assetApi.getPostsList({
+      community_id: communityId,
+      include_inactive: false,
+      page: 0,
+    }, { showLoading: false })
+    const posts = [...(firstResponse.posts || [])]
+    const pageCount = firstResponse.num_of_pages || 1
+    if (pageCount > 1) {
+      const remaining = await Promise.all(Array.from({ length: pageCount - 1 }, (_, index) => assetApi.getPostsList({
+        community_id: communityId,
+        include_inactive: false,
+        page: index + 1,
+      }, { showLoading: false })))
+      remaining.forEach(response => posts.push(...(response.posts || [])))
+    }
+    availablePosts.value = posts
+  } catch (error) {
+    console.error('Failed to load community posts:', error)
+    availablePosts.value = []
+  } finally {
+    isLoadingPosts.value = false
+  }
+}
+
+async function assignPost(officerId: string) {
+  const shiftId = selectedShift.value?.apiId
+  const postId = postSelections.value[officerId]
+  if (!shiftId || !postId || isAssigningPost.value) return
+  isAssigningPost.value = true
+  try {
+    const response = await shiftApi.assignPost({
+      shift_id: shiftId,
+      officer_id: officerId,
+      post_id: postId,
+    }, { showLoading: false })
+    if (response.warning) postWarnings.value[officerId] = response.warning as PostEligibilityWarning
+    postSelections.value[officerId] = ''
+    await reloadSelectedShift()
+    await loadCalendar()
+  } catch (error) {
+    shiftFormError.value = error instanceof Error ? error.message : t('shifts.assign_post_failed')
+  } finally {
+    isAssigningPost.value = false
+  }
+}
+
 async function reloadSelectedShift() {
   const shiftId = selectedShift.value?.apiId
   if (!shiftId) return
@@ -540,7 +661,6 @@ async function allocateOfficer(officerId: string, acknowledgeConflicts = false) 
     if (error instanceof ApiError && error.rc === ShiftErrorCodes.OFFICER_CONFLICT) {
       allocationConflictWarnings.value = (error.data?.warnings || []) as ShiftConflictWarning[]
       pendingAllocationOfficerId.value = officerId
-      allocationConflictAcknowledged.value = false
       showAllocationConflictModal.value = true
       return false
     }
@@ -563,7 +683,7 @@ async function handleOfficerPickerConfirm(selected: Array<{ id: string }>) {
 }
 
 async function confirmAllocationConflict() {
-  if (!pendingAllocationOfficerId.value || !allocationConflictAcknowledged.value) return
+  if (!pendingAllocationOfficerId.value) return
   const officerId = pendingAllocationOfficerId.value
   showAllocationConflictModal.value = false
   await allocateOfficer(officerId, true)
@@ -600,8 +720,7 @@ async function publishShift(acknowledgeConflicts = false) {
   } catch (error) {
     if (error instanceof ApiError && error.rc === ShiftErrorCodes.OFFICER_CONFLICT) {
       conflictWarnings.value = (error.data?.warnings || []) as ShiftConflictWarning[]
-      conflictAcknowledged.value = false
-      showConflictModal.value = true
+          showConflictModal.value = true
     } else {
       console.error('Failed to publish shift:', error)
       shiftFormError.value = error instanceof Error ? error.message : t('shifts.publish_failed')
@@ -645,11 +764,6 @@ async function cancelShift() {
   } finally {
     shiftAction.value = null
   }
-}
-
-function formatConflictWarning(warning: ShiftConflictWarning): string {
-  if (warning.message) return warning.message
-  return t('shifts.conflict_default')
 }
 
 function toggleOfficer(officer: string) {
@@ -940,7 +1054,7 @@ function toggleStatus(status: ShiftStatus) {
             <!-- Shift Date -->
             <div class="form-group">
               <label class="form-label">{{ t('shifts.shift_date') }} *</label>
-              <input v-model="shiftForm.date" type="date" class="form-input" :disabled="isShiftReadOnly" />
+              <input v-model="shiftForm.date" type="date" class="form-input" :disabled="isShiftReadOnly || !!shiftForm.recurring" />
             </div>
 
             <!-- Time Range -->
@@ -980,6 +1094,26 @@ function toggleStatus(status: ShiftStatus) {
                     <div class="officer-pills">
                       <span v-for="role in officer.roles" :key="`role-${role}`" class="officer-pill">{{ role }}</span>
                       <span v-for="badge in officer.certification_badges" :key="`badge-${badge}`" class="officer-pill officer-pill--badge">{{ badge }}</span>
+                    </div>
+                    <div class="assigned-posts">
+                      <span v-for="assignment in assignedPostsForOfficer(officer.user_id)" :key="assignment.postId" class="assigned-post-chip">
+                        {{ assignment.postName }}
+                      </span>
+                      <span v-if="!assignedPostsForOfficer(officer.user_id).length" class="form-hint">{{ t('shifts.no_post_assigned') }}</span>
+                    </div>
+                    <div v-if="canAssignPosts" class="post-assignment-controls">
+                      <select v-model="postSelections[officer.user_id]" class="form-input post-picker" :disabled="isLoadingPosts || isAssigningPost">
+                        <option value="">{{ isLoadingPosts ? t('common.loading') : t('shifts.select_post') }}</option>
+                        <option v-for="post in availablePosts" :key="post.post_id" :value="post.post_id">{{ post.name }}</option>
+                      </select>
+                      <button type="button" class="btn btn--primary btn--small post-assign-button" :disabled="!postSelections[officer.user_id] || isAssigningPost" @click="assignPost(officer.user_id)">
+                        {{ isAssigningPost ? t('shifts.assigning_post') : t('shifts.assign_post') }}
+                      </button>
+                    </div>
+                    <div v-if="postWarnings[officer.user_id]" class="post-eligibility-warning">
+                      <strong>{{ t('shifts.post_eligibility_warning') }}</strong>
+                      <span v-if="postWarnings[officer.user_id]?.missing_roles?.length">{{ t('shifts.missing_roles') }}: {{ postWarnings[officer.user_id]?.missing_roles.join(', ') }}</span>
+                      <span v-if="postWarnings[officer.user_id]?.missing_badges?.length">{{ t('shifts.missing_badges') }}: {{ postWarnings[officer.user_id]?.missing_badges.join(', ') }}</span>
                     </div>
                   </div>
                   <button v-if="canManageOfficers" type="button" class="icon-action-btn" :title="t('shifts.remove_officer')" :disabled="isOfficerActionRunning" @click="pendingRemoveOfficer = { id: officer.user_id, name: [officer.first_name, officer.last_name].filter(Boolean).join(' ') }">
@@ -1079,6 +1213,46 @@ function toggleStatus(status: ShiftStatus) {
               <label class="form-label">{{ t('shifts.status') }}</label>
               <Badge type="shiftStatus" :value="shiftForm.status" />
             </div>
+
+            <div v-if="selectedShift && (shiftForm.status === 'active' || shiftForm.status === 'completed')" class="checkin-history-section">
+              <div class="section-heading">
+                <div>
+                  <label class="form-label">{{ t('shifts.checkin_history') }}</label>
+                  <span class="form-hint">{{ selectedShift.checkins?.length || 0 }} {{ t('shifts.checkin_records') }}</span>
+                </div>
+              </div>
+              <div v-if="selectedShift.checkins?.length" class="checkin-history-table-wrap">
+                <table class="checkin-history-table">
+                  <thead>
+                    <tr>
+                      <th>{{ t('shifts.officer') }}</th>
+                      <th>{{ t('shifts.check_in_time') }}</th>
+                      <th>{{ t('shifts.check_out_time') }}</th>
+                      <th>{{ t('shifts.total_hours') }}</th>
+                      <th>{{ t('shifts.auto_checkout') }}</th>
+                      <th>{{ t('shifts.checkin_notes') }}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="checkin in selectedShift.checkins" :key="`${checkin.officerId}-${checkin.checkInOn}`">
+                      <td>{{ officerNameById(checkin.officerId) }}</td>
+                      <td>{{ formatLocalDateTime(checkin.checkInOn) }}</td>
+                      <td>
+                        <span v-if="!checkin.checkOutOn" class="still-active-badge">{{ t('shifts.still_active') }}</span>
+                        <span v-else>{{ formatLocalDateTime(checkin.checkOutOn) }}</span>
+                      </td>
+                      <td>{{ formatLiveHours(checkin) }}</td>
+                      <td>
+                        <Icon v-if="checkin.autoCheckout === true || checkin.autoCheckout === 1" name="lucide:flag" :size="14" :title="t('shifts.auto_checkout')" />
+                        <span v-else>—</span>
+                      </td>
+                      <td>{{ checkin.notes || '—' }}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <div v-else class="empty-officer-state">{{ t('shifts.no_checkin_records') }}</div>
+            </div>
           </div>
         </div>
 
@@ -1145,29 +1319,48 @@ function toggleStatus(status: ShiftStatus) {
     />
 
     <AppModal
-      :show="showConflictModal"
-      :title="t('shifts.conflict_title')"
+      :show="showRecurringScopeModal"
+      :title="t('shifts.recurring_update_title')"
       :cancel-text="t('common.cancel')"
-      :ok-text="shiftAction === 'publish' ? t('shifts.publishing') : t('shifts.acknowledge_publish')"
-      :ok-disabled="!conflictAcknowledged || !!shiftAction"
-      @close="showConflictModal = false"
-      @cancel="showConflictModal = false"
-      @ok="publishShift(true)"
+      :ok-text="isSavingShift ? t('common.saving') : t('common.save')"
+      :ok-disabled="isSavingShift"
+      @close="showRecurringScopeModal = false"
+      @cancel="showRecurringScopeModal = false"
+      @ok="saveRecurringShift"
     >
-      <div class="conflict-modal-content">
-        <div v-for="(warning, index) in conflictWarnings" :key="index" class="conflict-warning-card">
-          <Icon name="lucide:triangle-alert" :size="18" />
-          <div>
-            <strong>{{ warning.type.replaceAll('_', ' ') }}</strong>
-            <p>{{ formatConflictWarning(warning) }}</p>
-          </div>
-        </div>
-        <label class="conflict-acknowledgment">
-          <input v-model="conflictAcknowledged" type="checkbox" />
-          <span>{{ t('shifts.conflict_acknowledgment') }}</span>
+      <div class="recurring-scope-options">
+        <label class="recurring-scope-option">
+          <input v-model="recurringUpdateScope" type="radio" value="this_only" />
+          <span>
+            <strong>{{ t('shifts.scope_this_only') }}</strong>
+            <small>{{ t('shifts.scope_this_only_description') }}</small>
+          </span>
+        </label>
+        <label class="recurring-scope-option">
+          <input v-model="recurringUpdateScope" type="radio" value="this_and_future" />
+          <span>
+            <strong>{{ t('shifts.scope_this_future') }}</strong>
+            <small>{{ t('shifts.scope_this_future_description') }}</small>
+          </span>
+        </label>
+        <label class="recurring-scope-option">
+          <input v-model="recurringUpdateScope" type="radio" value="all" />
+          <span>
+            <strong>{{ t('shifts.scope_all') }}</strong>
+            <small>{{ t('shifts.scope_all_description') }}</small>
+          </span>
         </label>
       </div>
     </AppModal>
+
+    <ConflictWarningModal
+      :show="showConflictModal"
+      :warnings="conflictWarnings"
+      :confirm-text="t('shifts.acknowledge_publish')"
+      :confirming="shiftAction === 'publish'"
+      @close="showConflictModal = false"
+      @confirm="publishShift(true)"
+    />
 
     <AppModal
       :show="!!pendingRemoveOfficer"
@@ -1181,30 +1374,14 @@ function toggleStatus(status: ShiftStatus) {
       @ok="removeOfficer"
     />
 
-    <AppModal
+    <ConflictWarningModal
       :show="showAllocationConflictModal"
-      :title="t('shifts.conflict_title')"
-      :cancel-text="t('common.cancel')"
-      :ok-text="t('shifts.acknowledge_allocate')"
-      :ok-disabled="!allocationConflictAcknowledged || isOfficerActionRunning"
+      :warnings="allocationConflictWarnings"
+      :confirm-text="t('shifts.acknowledge_allocate')"
+      :confirming="isOfficerActionRunning"
       @close="showAllocationConflictModal = false"
-      @cancel="showAllocationConflictModal = false"
-      @ok="confirmAllocationConflict"
-    >
-      <div class="conflict-modal-content">
-        <div v-for="(warning, index) in allocationConflictWarnings" :key="index" class="conflict-warning-card">
-          <Icon name="lucide:triangle-alert" :size="18" />
-          <div>
-            <strong>{{ warning.type.replaceAll('_', ' ') }}</strong>
-            <p>{{ formatConflictWarning(warning) }}</p>
-          </div>
-        </div>
-        <label class="conflict-acknowledgment">
-          <input v-model="allocationConflictAcknowledged" type="checkbox" />
-          <span>{{ t('shifts.conflict_acknowledgment') }}</span>
-        </label>
-      </div>
-    </AppModal>
+      @confirm="confirmAllocationConflict"
+    />
 
     <OfficerPickerModal
       :show="showOfficerPicker"
@@ -1216,12 +1393,9 @@ function toggleStatus(status: ShiftStatus) {
 
     <AllocationBoard
       v-if="showAllocationBoard"
-      :shifts="filteredShifts"
-      :current-date="currentDate"
-      :selected-community="selectedCommunityName"
-      :officers="officers"
+      :community-id="selectedCommunity"
+      :communities="communities"
       @close="closeAllocationBoard"
-      @allocate="handleAllocate"
     />
 
     <PatrolRoutePanel
@@ -1814,6 +1988,57 @@ function toggleStatus(status: ShiftStatus) {
   border-top: 1px solid var(--color-border);
 }
 
+.checkin-history-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--color-border);
+}
+
+.checkin-history-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.checkin-history-table {
+  width: 100%;
+  min-width: 760px;
+  border-collapse: collapse;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+}
+
+.checkin-history-table th,
+.checkin-history-table td {
+  padding: var(--space-2);
+  border-bottom: 1px solid var(--color-border-subtle);
+  text-align: left;
+  vertical-align: middle;
+}
+
+.checkin-history-table th {
+  background: var(--color-bg-base);
+  color: var(--color-text-muted);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.checkin-history-table tr:last-child td {
+  border-bottom: 0;
+}
+
+.still-active-badge {
+  display: inline-flex;
+  padding: 2px var(--space-1);
+  border-radius: var(--radius-sm);
+  background: var(--color-ok-bg);
+  color: var(--color-ok);
+  white-space: nowrap;
+}
+
 .officer-allocation-section {
   display: flex;
   flex-direction: column;
@@ -1905,6 +2130,60 @@ function toggleStatus(status: ShiftStatus) {
 
 .officer-pill--badge {
   background: var(--color-ok-bg);
+}
+
+.assigned-posts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+  margin-top: var(--space-1);
+}
+
+.assigned-post-chip {
+  padding: 2px var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+}
+
+.post-assignment-controls {
+  display: flex;
+  align-items: stretch;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.post-picker {
+  min-width: 160px;
+  height: 36px;
+  padding: 0 var(--space-2);
+}
+
+.post-assign-button {
+  height: 36px;
+  min-width: 92px;
+  justify-content: center;
+  white-space: nowrap;
+  margin-top: 0px;
+}
+
+.post-eligibility-warning {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: var(--space-2);
+  padding: var(--space-2);
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  border-radius: var(--radius-sm);
+  background: var(--color-warn-bg);
+  color: var(--color-warn);
+  font-size: var(--font-size-xs);
+}
+
+.post-eligibility-warning span {
+  color: var(--color-text-secondary);
 }
 
 .icon-action-btn {
@@ -2085,6 +2364,43 @@ function toggleStatus(status: ShiftStatus) {
 
 .toggle input:checked + .toggle-slider::before {
   transform: translateX(20px);
+}
+
+.recurring-scope-options {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.recurring-scope-option {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.recurring-scope-option:has(input:checked) {
+  border-color: var(--color-accent);
+  background: var(--color-accent-subtle);
+}
+
+.recurring-scope-option input {
+  margin-top: 3px;
+  accent-color: var(--color-accent);
+}
+
+.recurring-scope-option span {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.recurring-scope-option small {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
 }
 
 .recurring-section {

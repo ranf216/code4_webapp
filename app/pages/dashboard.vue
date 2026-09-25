@@ -17,6 +17,7 @@ definePageMeta({ layout: 'default' })
     <div class="dashboard__body">
       <div class="dashboard__main">
         <LiveOperations />
+        <LiveShiftMonitor />
         <ActiveCalls />
       </div>
       <RightPanel />

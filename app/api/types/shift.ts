@@ -26,6 +26,8 @@ export interface ShiftCheckin {
   check_in_on: string
   check_out_on: string | null
   total_hours: number | null
+  auto_checkout?: boolean | number
+  notes?: string | null
 }
 
 export interface Shift {
