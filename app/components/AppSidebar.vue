@@ -27,7 +27,6 @@ const baseGroups: NavGroup[] = [
     label: t('nav.operate'),
     items: [
       { key: 'dashboard',       label: t('nav.dashboard'),        icon: 'lucide:layout-dashboard', to: '/dashboard',   badge: null },
-      { key: 'live-tracking',   label: t('nav.live_tracking'),    icon: 'lucide:map',              to: '/live-tracking', badge: 24 },
       { key: 'calls-incidents', label: t('nav.calls_incidents'),  icon: 'lucide:phone',       to: '/calls',         badge: 1, badgeType: 'critical' },
       { key: 'tasks',           label: t('nav.tasks'),            icon: 'lucide:check-square',     to: '/tasks',         badge: 12 },
       {
@@ -49,6 +48,7 @@ const baseGroups: NavGroup[] = [
       { key: 'communities',     label: t('nav.communities'),      icon: 'lucide:home',             to: '/communities',   badge: null },
       { key: 'officers',        label: t('nav.officers'),         icon: 'lucide:user-round',           to: '/officers',      badge: null },
       { key: 'shifts-routes',   label: t('nav.shifts_routes'),    icon: 'lucide:calendar',            to: '/shifts',        badge: null },
+      { key: 'live-tracking',   label: t('nav.live_tracking'),    icon: 'lucide:map-pin',              to: '/live-tracking', badge: null },
       { key: 'post-orders',     label: t('nav.post_orders'),      icon: 'lucide:file-text',        to: '/post-orders',   badge: null },
       { key: 'poi-trespass',    label: t('nav.poi_trespass'),     icon: 'lucide:search-alert',          to: '/poi',           badge: null },
       { key: 'report-templates',label: t('nav.report_templates'), icon: 'lucide:panels-top-left',   to: '/reports',       badge: null },

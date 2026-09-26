@@ -5,8 +5,13 @@ interface MarkerData {
   id?: string
   lat: number
   lng: number
-  status: 'active' | 'responding' | 'idle' | 'offduty' | 'gps-lost' | 'skipped'
+  status: 'green' | 'amber' | 'blue' | 'red' | 'grey' | 'active' | 'responding' | 'idle' | 'offduty' | 'gps-lost' | 'skipped'
   label?: string
+  initials?: string
+  image?: string
+  heading?: number | null
+  lastUpdate?: string
+  activeCallCategory?: string | null
 }
 
 interface RouteOverlay {
@@ -411,27 +416,104 @@ function renderOverlays() {
 
   // Officer markers (rendered last to stay on top)
   for (const m of props.markers) {
-    const color = statusColor[m.status] ?? statusColor.idle
-    const pin = document.createElement('div')
-    pin.style.cssText = `
-      display:flex;align-items:center;justify-content:center;
-      width:40px;height:40px;border-radius:50%;
-      background:${color};
-      border:3px solid rgba(255,255,255,0.95);
-      box-shadow:0 0 14px ${color};
-      color:#fff;font-size:13px;font-weight:700;
-      font-family:sans-serif;cursor:pointer;
+    const color = statusColor[m.status] ?? statusColor.grey
+    const wrapper = document.createElement('button')
+    const pin = document.createElement('span')
+    const avatar = document.createElement('span')
+    const label = document.createElement('span')
+    wrapper.type = 'button'
+    wrapper.style.cssText = `
+      display:flex;align-items:center;gap:6px;padding:0;background:transparent;
+      border:0;cursor:pointer;opacity:${m.status === 'grey' || m.status === 'offduty' ? '.65' : '1'};
       position:relative;z-index:100;
     `
-    pin.textContent = m.label ? m.label.slice(0, 2).toUpperCase() : ''
+    pin.style.cssText = `
+      display:flex;align-items:center;justify-content:center;
+      width:44px;height:44px;border-radius:50%;box-sizing:border-box;
+      background:#111827;border:4px ${m.status === 'amber' || m.status === 'idle' || m.status === 'gps-lost' ? 'dashed' : 'solid'} ${color};
+      box-shadow:0 2px 12px rgba(0,0,0,.45);position:relative;flex-shrink:0;
+    `
+    avatar.style.cssText = `
+      display:flex;align-items:center;justify-content:center;width:32px;height:32px;
+      overflow:hidden;border-radius:50%;background:#1f2937;color:#fff;
+      font:700 11px sans-serif;
+    `
+    if (m.image) {
+      const image = document.createElement('img')
+      image.src = m.image
+      image.alt = m.label || 'Officer'
+      image.style.cssText = 'width:100%;height:100%;object-fit:cover;'
+      image.addEventListener('error', () => {
+        image.remove()
+        avatar.textContent = m.initials || ''
+      })
+      avatar.append(image)
+    } else {
+      avatar.textContent = m.initials || (m.label ? m.label.slice(0, 2).toUpperCase() : '')
+    }
+    pin.append(avatar)
+
+    if (m.heading != null) {
+      const heading = document.createElement('span')
+      heading.textContent = '▲'
+      heading.style.cssText = `
+        position:absolute;top:-12px;left:15px;color:${color};font:700 12px sans-serif;
+        transform:rotate(${m.heading}deg);transform-origin:50% 18px;text-shadow:0 1px 2px rgba(0,0,0,.8);
+      `
+      pin.append(heading)
+    }
+
+    if (m.status === 'red' || m.status === 'skipped') {
+      const warning = document.createElement('span')
+      warning.textContent = '!'
+      warning.style.cssText = `
+        position:absolute;right:-5px;top:-5px;display:flex;align-items:center;justify-content:center;
+        width:17px;height:17px;border-radius:50%;background:#DC3545;border:2px solid #fff;
+        color:#fff;font:700 11px sans-serif;
+      `
+      pin.append(warning)
+    }
+
+    if (m.activeCallCategory) {
+      const callBadge = document.createElement('span')
+      callBadge.textContent = '●'
+      callBadge.style.cssText = `
+        position:absolute;right:-4px;bottom:-4px;display:flex;align-items:center;justify-content:center;
+        width:16px;height:16px;border-radius:50%;background:#0D6EFD;border:2px solid #fff;
+        color:#fff;font:700 8px sans-serif;
+      `
+      pin.append(callBadge)
+    }
+
+    label.style.cssText = `
+      max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+      padding:3px 7px;border-radius:5px;background:rgba(13,17,23,.88);color:#fff;
+      font:600 11px sans-serif;box-shadow:0 1px 4px rgba(0,0,0,.3);
+    `
+    label.textContent = m.label || ''
+    wrapper.append(pin, label)
+
+    if (m.status === 'blue' || m.status === 'responding') {
+      pin.animate([
+        { boxShadow: `0 0 0 0 ${color}99` },
+        { boxShadow: `0 0 0 12px ${color}00` },
+      ], { duration: 1500, iterations: Infinity })
+    }
+
     const marker = trackOverlay(new AdvancedMarkerElement({
       map,
       position: { lat: m.lat, lng: m.lng },
-      content: pin,
-      title: m.label || m.status,
+      content: wrapper,
+      title: m.status === 'amber'
+        ? `${m.label || 'Officer'} — GPS signal stale — last update ${m.lastUpdate || 'unknown'}`
+        : m.status === 'red'
+          ? `${m.label || 'Officer'} — Waypoint overdue`
+          : m.status === 'grey'
+            ? `${m.label || 'Officer'} — Off duty`
+            : m.label || m.status,
     }))
     marker.addEventListener('gmp-click', () => emit('marker-click', m))
-    pin.addEventListener('click', (e: Event) => {
+    wrapper.addEventListener('click', (e: Event) => {
       e.stopPropagation()
       emit('marker-click', m)
     })
@@ -464,6 +546,30 @@ watch(
   },
 )
 
+function fitToVisibleMarkers() {
+  if (!mapInstance) return
+  const points: GeoPoint[] = [
+    ...props.markers.map(marker => ({ lat: marker.lat, lng: marker.lng })),
+    ...props.posts.map(post => ({ lat: post.lat, lng: post.lng })),
+    ...props.emergencyCalls.map(call => ({ lat: call.lat, lng: call.lng })),
+    ...props.workspaceMarkers.flatMap((item) => [
+      { lat: item.lat, lng: item.lng },
+      ...(item.points ?? []),
+    ]),
+  ]
+  if (!points.length) return
+  if (points.length === 1) {
+    mapInstance.setCenter(points[0]!)
+    mapInstance.setZoom(16)
+    return
+  }
+  const bounds = new google.maps.LatLngBounds()
+  points.forEach(point => bounds.extend(point))
+  mapInstance.fitBounds(bounds, 48)
+}
+
+defineExpose({ fitToVisibleMarkers })
+
 onUnmounted(() => {
   clearDrawingPreview()
   clearOverlays()
@@ -472,11 +578,17 @@ onUnmounted(() => {
 })
 
 const statusColor: Record<string, string> = {
-  active:     '#22c55e', // Green
-  responding: '#4f6ef7', // Blue
-  idle:       '#f59e0b', // Amber (GPS lost/stale)
-  offduty:    '#6b7280', // Grey
-  skipped:    '#ef4444', // Red
+  green:      '#198754',
+  amber:      '#FFC107',
+  blue:       '#0D6EFD',
+  red:        '#DC3545',
+  grey:       '#6C757D',
+  active:     '#198754', // Green
+  responding: '#0D6EFD', // Blue
+  idle:       '#FFC107', // Amber (GPS lost/stale)
+  'gps-lost': '#FFC107',
+  offduty:    '#6C757D', // Grey
+  skipped:    '#DC3545', // Red
 }
 
 const darkMapStyles = [

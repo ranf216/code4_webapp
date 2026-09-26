@@ -1,7 +1,7 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 import { settingsApi } from '~/api/settings'
 
-export function useMapRefresh(onRefresh: () => void) {
+export function useMapRefresh(onRefresh: () => void | Promise<void>) {
   const interval = ref(30)
   const lastRefreshed = ref(new Date())
   const secondsAgo = ref(0)
@@ -21,10 +21,10 @@ export function useMapRefresh(onRefresh: () => void) {
 
   function startTimers() {
     stopTimers()
-    refreshTimer = setInterval(() => {
+    refreshTimer = setInterval(async () => {
+      await onRefresh()
       lastRefreshed.value = new Date()
       secondsAgo.value = 0
-      onRefresh()
     }, interval.value * 1000)
 
     countTimer = setInterval(() => {
@@ -39,11 +39,15 @@ export function useMapRefresh(onRefresh: () => void) {
     countTimer = null
   }
 
-  function refreshNow() {
-    lastRefreshed.value = new Date()
-    secondsAgo.value = 0
-    onRefresh()
-    startTimers()
+  async function refreshNow() {
+    stopTimers()
+    try {
+      await onRefresh()
+    } finally {
+      lastRefreshed.value = new Date()
+      secondsAgo.value = 0
+      startTimers()
+    }
   }
 
   onMounted(async () => {

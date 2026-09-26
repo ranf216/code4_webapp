@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import moment from 'moment'
 import { notificationApi } from '~/api/notification'
+import { utcToLocal } from '~/utils/dateTime'
 import { useNotificationBadge } from '~/composables/useNotificationBadge'
 import { useNotificationSocket } from '~/composables/useNotificationSocket'
 import { useToastStore } from '~/stores/toast'
@@ -222,7 +223,7 @@ function getTypeIcon(type: NotificationType): string {
 
 // Relative timestamp formatting (spec 2.9) — converts UTC to local
 function formatRelativeTime(utcDateStr: string): string {
-  const local = moment.utc(utcDateStr).local()
+  const local = utcToLocal(utcDateStr)
   const now = moment()
   const diffMin = Math.max(0, now.diff(local, 'minutes'))
   const diffHr = Math.max(0, now.diff(local, 'hours'))

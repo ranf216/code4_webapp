@@ -5,6 +5,7 @@ import { notificationApi } from '~/api/notification'
 import { useNotificationBadge } from '~/composables/useNotificationBadge'
 import { useToastStore } from '~/stores/toast'
 import { getNotificationTypeIcon, resolveNotificationEntityPath } from '~/utils/notification'
+import { utcToLocal } from '~/utils/dateTime'
 import type { Notification } from '~/api/types/notification'
 
 definePageMeta({ layout: 'default' })
@@ -121,7 +122,7 @@ function handleItemClick(item: Notification) {
 }
 
 function formatRelativeTime(utcDateStr: string): string {
-  const local = moment.utc(utcDateStr).local()
+  const local = utcToLocal(utcDateStr)
   const now = moment()
   const diffMin = Math.max(0, now.diff(local, 'minutes'))
   const diffHr = Math.max(0, now.diff(local, 'hours'))
