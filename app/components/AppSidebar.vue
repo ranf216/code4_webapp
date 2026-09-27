@@ -10,6 +10,7 @@ interface NavItem {
   to?: string
   badge: number | null
   badgeType?: 'critical'
+  exact?: boolean
   children?: NavItem[]
 }
 
@@ -48,7 +49,16 @@ const baseGroups: NavGroup[] = [
       { key: 'communities',     label: t('nav.communities'),      icon: 'lucide:home',             to: '/communities',   badge: null },
       { key: 'officers',        label: t('nav.officers'),         icon: 'lucide:user-round',           to: '/officers',      badge: null },
       { key: 'shifts-routes',   label: t('nav.shifts_routes'),    icon: 'lucide:calendar',            to: '/shifts',        badge: null },
-      { key: 'live-tracking',   label: t('nav.live_tracking'),    icon: 'lucide:map-pin',              to: '/live-tracking', badge: null },
+      {
+        key: 'live-tracking',
+        label: t('nav.live_tracking'),
+        icon: 'lucide:map-pin',
+        badge: null,
+        children: [
+          { key: 'live-map', label: 'Live Map', icon: 'lucide:map-pin', to: '/live-tracking', badge: null, exact: true },
+          { key: 'route-history', label: 'Route History', icon: 'lucide:history', to: '/live-tracking/history', badge: null },
+        ],
+      },
       { key: 'post-orders',     label: t('nav.post_orders'),      icon: 'lucide:file-text',        to: '/post-orders',   badge: null },
       { key: 'poi-trespass',    label: t('nav.poi_trespass'),     icon: 'lucide:search-alert',          to: '/poi',           badge: null },
       { key: 'report-templates',label: t('nav.report_templates'), icon: 'lucide:panels-top-left',   to: '/reports',       badge: null },
@@ -77,12 +87,14 @@ const navGroups = computed<NavGroup[]>(() => {
   return groups
 })
 
-function isActive(to?: string) {
-  return !!to && (route.path === to || route.path.startsWith(to + '/'))
+function isActive(to?: string, exact?: boolean) {
+  if (!to) return false
+  if (exact) return route.path === to
+  return route.path === to || route.path.startsWith(to + '/')
 }
 
 function isAnyChildActive(item: NavItem) {
-  return item.children?.some(child => isActive(child.to)) ?? false
+  return item.children?.some(child => isActive(child.to, child.exact)) ?? false
 }
 
 const expandedKeys = ref<Set<string>>(new Set())
@@ -167,7 +179,7 @@ function closePanicModal() {
                 :key="child.key"
                 :to="child.to"
                 class="sidebar__item sidebar__item--sub"
-                :class="{ 'sidebar__item--active': isActive(child.to) }"
+                :class="{ 'sidebar__item--active': isActive(child.to, child.exact) }"
               >
                 <Icon :name="child.icon" :size="14" class="sidebar__item-icon" />
                 <span class="sidebar__item-label">{{ child.label }}</span>
@@ -179,7 +191,7 @@ function closePanicModal() {
             v-else
             :to="item.to"
             class="sidebar__item"
-            :class="{ 'sidebar__item--active': isActive(item.to) }"
+            :class="{ 'sidebar__item--active': isActive(item.to, item.exact) }"
           >
             <Icon :name="item.icon" :size="16" class="sidebar__item-icon" />
             <span class="sidebar__item-label">{{ item.label }}</span>

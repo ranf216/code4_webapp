@@ -66,7 +66,7 @@ const isFormValid = computed(() => !!form.firstName.trim() && !!form.mobile.trim
 const imageItems = computed(() => keptImages.value.map((id) => ({ id, isNew: false })))
 
 function imageUrl(imageId: string) {
-  return imageId.startsWith('http') ? imageId : `${config.public.apiBase}/files/n/${imageId}.png`
+  return imageId.startsWith('http') ? imageId : `${config.public.apiUrl}/files/n/${imageId}.png`
 }
 
 function resetState() {

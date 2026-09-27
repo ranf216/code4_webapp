@@ -1,12 +1,18 @@
 <script setup lang="ts">
 import { trackingApi } from '~/api/tracking'
 import { assetApi } from '~/api/asset'
+import { officerApi } from '~/api/officer'
+import { callApi } from '~/api/call'
+import type { Call as ApiCall } from '~/api/types/call'
+import type { Officer, OfficerEvaluation } from '~/api/types/officer'
 import { communityApi } from '~/api/community'
 import type { Community } from '~/api/community'
 import type { AssetLocation, MapZone, Post } from '~/api/types/asset'
-import type { LiveTrackingOfficer, OfficerTrackingStatus } from '~/api/types/tracking'
+import type { GetOfficerLocationResponse, LiveTrackingOfficer, OfficerTrackingStatus } from '~/api/types/tracking'
 import { useMapRefresh } from '~/composables/useMapRefresh'
+import { useToastStore } from '~/stores/toast'
 import { utcToLocal } from '~/utils/dateTime'
+import { fileUrl } from '~/utils/fileUrl'
 
 interface OfficerMarker {
   id: string
@@ -19,21 +25,6 @@ interface OfficerMarker {
   heading?: number | null
   lastUpdate: string
   activeCallCategory?: string | null
-}
-
-interface OfficerInfo {
-  id: string
-  name: string
-  photo?: string
-  initials: string
-  community: string
-  site: string
-  shiftTime: string
-  currentPost: string
-  activeCall?: { id: string; type: string }
-  lastGpsUpdate: string
-  status: string
-  statusColor: string
 }
 
 interface WorkspaceMarker {
@@ -52,16 +43,20 @@ interface WorkspaceMarker {
 
 interface GoogleMapExpose {
   fitToVisibleMarkers: () => void
+  focusOn: (point: { lat: number; lng: number }, zoom?: number) => void
 }
 
 definePageMeta({ layout: 'default' })
 
 const { t } = useTranslation()
+const toastStore = useToastStore()
 const officers = ref<LiveTrackingOfficer[]>([])
 const communities = ref<Community[]>([])
 const posts = ref<Post[]>([])
 const zones = ref<MapZone[]>([])
-const selectedOfficer = ref<OfficerInfo | null>(null)
+const selectedOfficer = ref<LiveTrackingOfficer | null>(null)
+const telemetryDetail = ref<GetOfficerLocationResponse | null>(null)
+const telemetryLoading = ref(false)
 const selectedCommunityId = ref(0)
 const selectedStatuses = ref<OfficerTrackingStatus[]>(['green', 'amber', 'blue', 'red', 'grey'])
 const layers = reactive({ officers: true, posts: true, zones: true })
@@ -71,7 +66,14 @@ const layersLoading = ref(false)
 const error = ref('')
 const sidebarCollapsed = ref(false)
 const staleThreshold = ref(2)
+const brokenImages = ref(new Set<string>())
 const googleMapRef = ref<GoogleMapExpose | null>(null)
+const profileOfficer = ref<(Officer & { evaluations?: OfficerEvaluation[] }) | null>(null)
+const showProfileModal = ref(false)
+const detailsCall = ref<any | null>(null)
+const showCallDetailsModal = ref(false)
+const panicCallId = ref<number | null>(null)
+const showPanicCallModal = ref(false)
 
 const statusMeta: Record<OfficerTrackingStatus, { color: string; label: string }> = {
   green: { color: '#198754', label: t('live_tracking.status_active') },
@@ -196,7 +198,7 @@ const markers = computed<OfficerMarker[]>(() => layers.officers ? filteredOffice
   status: officer.status,
   label: officerName(officer),
   initials: officerInitials(officer),
-  image: officer.image || undefined,
+  image: fileUrl(officer.image) || undefined,
   heading: officer.heading,
   lastUpdate: officer.last_update,
   activeCallCategory: officer.active_call_category,
@@ -268,31 +270,100 @@ const counts = computed(() => ({
   offDuty: officers.value.filter(officer => officer.status === 'grey').length,
 }))
 
-function selectOfficer(officer: LiveTrackingOfficer) {
-  const meta = statusMeta[officer.status]
-  selectedOfficer.value = {
-    id: officer.officer_id,
-    name: officerName(officer),
-    photo: officer.image || undefined,
-    initials: officerInitials(officer),
-    community: officer.community_name || '—',
-    site: `${officer.latitude.toFixed(6)}, ${officer.longitude.toFixed(6)}`,
-    shiftTime: shiftTime(officer),
-    currentPost: '—',
-    activeCall: officer.active_call_id ? {
-      id: String(officer.active_call_id),
-      type: officer.active_call_category || 'Call',
-    } : undefined,
-    lastGpsUpdate: formatLastUpdate(officer.last_update),
-    status: meta.label,
-    statusColor: meta.color,
+async function selectOfficer(officer: LiveTrackingOfficer, focus = false) {
+  selectedOfficer.value = officer
+  if (focus) googleMapRef.value?.focusOn({ lat: officer.latitude, lng: officer.longitude })
+  telemetryDetail.value = null
+  telemetryLoading.value = true
+  try {
+    const response = await trackingApi.getOfficerLocation(officer.officer_id, { showLoading: false })
+    if (response.rc === 0 && response.location) telemetryDetail.value = response as unknown as GetOfficerLocationResponse
+  } catch {
+    telemetryDetail.value = null
+  } finally {
+    telemetryLoading.value = false
   }
+}
+
+function closeOfficerPanel() {
+  selectedOfficer.value = null
+  telemetryDetail.value = null
 }
 
 function handleMarkerClick(marker: { id?: string }) {
   if (!marker.id) return
   const officer = officers.value.find(item => item.officer_id === marker.id)
   if (officer) selectOfficer(officer)
+}
+
+function mapCallForModal(apiCall: ApiCall) {
+  const categoryMap: Record<ApiCall['category'], { type: string; label: string; icon: string; color: string }> = {
+    medical_emergency: { type: 'medical', label: 'Medical Emergency', icon: 'lucide:heart-pulse', color: '#ef4444' },
+    security_emergency: { type: 'security', label: 'Security Emergency', icon: 'lucide:shield-alert', color: '#f97316' },
+    panic: { type: 'panic', label: 'Panic Button', icon: 'lucide:siren', color: '#ef4444' },
+    concierge_service: { type: 'concierge', label: 'Concierge Service', icon: 'lucide:bell-concierge', color: '#3b82f6' },
+    test: { type: 'test', label: 'Test Call', icon: 'lucide:test-tube', color: '#8b5cf6' },
+  }
+  const category = categoryMap[apiCall.category]
+  const serviceName = apiCall.service_type || category.label
+  return {
+    id: apiCall.call_id.toString(),
+    displayId: `CL-${apiCall.call_id}`,
+    category,
+    serviceType: { name: serviceName, icon: category.icon },
+    residentName: apiCall.resident_name || '',
+    communityName: apiCall.community_name || '',
+    address: apiCall.address || apiCall.current_address || '',
+    currentAddress: apiCall.current_address || apiCall.address || undefined,
+    latitude: apiCall.latitude,
+    longitude: apiCall.longitude,
+    description: apiCall.description || undefined,
+    scheduledDateTime: apiCall.scheduled_date
+      ? `${apiCall.scheduled_date}${apiCall.scheduled_time_from ? ' ' + apiCall.scheduled_time_from : ''}`
+      : null,
+    officerName: apiCall.officer_name,
+    status: apiCall.status === 'resolved' ? 'done' : apiCall.status,
+    priority: apiCall.priority,
+    createdOn: apiCall.created_on,
+    callDateTime: apiCall.created_on,
+    acceptedOn: apiCall.accepted_on,
+    resolvedOn: apiCall.resolved_on,
+    media: apiCall.media,
+    confirmationImages: apiCall.confirmation_media,
+    confirmationVideoUrl: apiCall.confirmation_video_url,
+    audioUrl: apiCall.audio_url || undefined,
+    videoUrl: apiCall.video_url || undefined,
+    officerComments: apiCall.officer_comments || undefined,
+    residentComments: apiCall.resident_comment || undefined,
+    assignedBy: apiCall.assigned_by,
+    lastUpdate: apiCall.last_update || undefined,
+    likeReaction: apiCall.reaction === 1 ? true : apiCall.reaction === 0 ? false : undefined,
+  }
+}
+
+async function viewCallDetails(callId: number) {
+  try {
+    const response = await callApi.getCall(callId)
+    if (!response.call) return
+    if (response.call.category === 'panic') {
+      panicCallId.value = response.call.call_id
+      showPanicCallModal.value = true
+      return
+    }
+    detailsCall.value = mapCallForModal(response.call)
+    showCallDetailsModal.value = true
+  } catch {
+    toastStore.error('Failed to load call details')
+  }
+}
+
+function viewOfficerHistory() {
+  if (!selectedOfficer.value) return
+  navigateTo(`/live-tracking/history?officer_id=${selectedOfficer.value.officer_id}`)
+}
+
+function viewOfficerRoute() {
+  toastStore.info('Patrol route view is coming in the next update')
 }
 
 function toggleStatus(status: OfficerTrackingStatus) {
@@ -305,7 +376,30 @@ function zoomToFit() {
   googleMapRef.value?.fitToVisibleMarkers()
 }
 
+async function viewOfficerProfile() {
+  if (!selectedOfficer.value) return
+  try {
+    const response = await officerApi.getOfficer(selectedOfficer.value.officer_id)
+    if (response.rc === 0 && response.officer) {
+      profileOfficer.value = response.officer
+      showProfileModal.value = true
+      selectedOfficer.value = null
+    }
+  } catch {
+    error.value = 'Unable to load officer profile.'
+  }
+}
+
+let hasFittedInitial = false
+watch([markers, workspaceMarkers], async () => {
+  if (hasFittedInitial || (!markers.value.length && !workspaceMarkers.value.length)) return
+  hasFittedInitial = true
+  await nextTick()
+  window.setTimeout(zoomToFit, 300)
+})
+
 watch(selectedCommunityId, async () => {
+  hasFittedInitial = false
   selectedOfficer.value = null
   await Promise.all([loadTracking(true), loadMapLayers()])
 })
@@ -323,6 +417,8 @@ onMounted(async () => {
   />
 
   <div class="tracking-page">
+    <TrackingTabs />
+
     <div class="summary-bar" aria-label="Officer tracking summary">
       <div class="summary-item" title="Officers with at least one GPS location">
         <span class="summary-icon"><Icon name="lucide:map-pin" :size="17" /></span>
@@ -413,10 +509,15 @@ onMounted(async () => {
               :key="officer.officer_id"
               type="button"
               class="officer-row"
-              @click="selectOfficer(officer)"
+              @click="selectOfficer(officer, true)"
             >
               <span class="officer-avatar" :style="{ borderColor: statusMeta[officer.status].color }">
-                <img v-if="officer.image" :src="officer.image" :alt="officerName(officer)" />
+                <img
+                  v-if="officer.image && !brokenImages.has(officer.officer_id)"
+                  :src="fileUrl(officer.image)"
+                  :alt="officerName(officer)"
+                  @error="brokenImages.add(officer.officer_id)"
+                />
                 <span v-else>{{ officerInitials(officer) }}</span>
               </span>
               <span class="officer-copy">
@@ -443,7 +544,7 @@ onMounted(async () => {
         <GoogleMap
           ref="googleMapRef"
           :center="mapCenter"
-          :zoom="markers.length > 1 ? 13 : 16"
+          :zoom="12"
           :markers="markers"
           :workspace-markers="workspaceMarkers"
           height="100%"
@@ -481,8 +582,35 @@ onMounted(async () => {
     <OfficerInfoPanel
       v-if="selectedOfficer"
       :officer="selectedOfficer"
-      @close="selectedOfficer = null"
-      @view-profile="navigateTo(`/officers?id=${selectedOfficer.id}`)"
+      :detail="telemetryDetail"
+      :detail-loading="telemetryLoading"
+      @close="closeOfficerPanel"
+      @view-profile="viewOfficerProfile"
+      @view-history="viewOfficerHistory"
+      @view-route="viewOfficerRoute"
+      @view-call="viewCallDetails"
+    />
+
+    <OfficerDetailsModal
+      :show="showProfileModal"
+      :officer="profileOfficer"
+      @close="showProfileModal = false"
+    />
+
+    <CallDetailsModal
+      :show="showCallDetailsModal"
+      :call="detailsCall"
+      @close="showCallDetailsModal = false; detailsCall = null"
+      @resolved="showCallDetailsModal = false; detailsCall = null"
+      @canceled="showCallDetailsModal = false; detailsCall = null"
+      @deleted="showCallDetailsModal = false; detailsCall = null"
+    />
+
+    <PanicCallModal
+      :show="showPanicCallModal"
+      :call-id="panicCallId"
+      @close="showPanicCallModal = false; panicCallId = null"
+      @resolved="showPanicCallModal = false; panicCallId = null"
     />
   </div>
 </template>

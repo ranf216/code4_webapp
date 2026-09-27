@@ -27,6 +27,7 @@ interface WaypointMarker {
   lat: number
   lng: number
   visited?: boolean
+  title?: string
 }
 
 interface PostMarker {
@@ -68,6 +69,7 @@ interface GeoPoint {
 const emit = defineEmits<{
   (e: 'marker-click', marker: MarkerData): void
   (e: 'workspace-marker-click', marker: WorkspaceMarker): void
+  (e: 'waypoint-click', index: number): void
   (e: 'draw-click' | 'draw-mousedown' | 'draw-mousemove' | 'draw-mouseup', point: GeoPoint): void
   (e: 'draw-double-click'): void
   (e: 'draw-point-remove', index: number): void
@@ -259,7 +261,7 @@ function renderOverlays() {
   }
 
   // Waypoint markers
-  for (const w of props.waypoints) {
+  props.waypoints.forEach((w, wpIndex) => {
     const el = document.createElement('div')
     el.style.cssText = `
       display:flex;align-items:center;justify-content:center;
@@ -270,13 +272,18 @@ function renderOverlays() {
       font-family:sans-serif;position:relative;z-index:10;
     `
     el.textContent = String(w.number)
-    trackOverlay(new AdvancedMarkerElement({
+    el.style.cursor = 'pointer'
+    const wpMarker = new AdvancedMarkerElement({
       map,
       position: { lat: w.lat, lng: w.lng },
       content: el,
-      title: w.visited ? `Waypoint ${w.number} - visited` : `Waypoint ${w.number} - pending`,
-    }))
-  }
+      title: w.title ?? (w.visited ? `Waypoint ${w.number} - visited` : `Waypoint ${w.number} - pending`),
+      gmpClickable: true,
+    })
+    wpMarker.addEventListener('gmp-click', () => emit('waypoint-click', wpIndex))
+    el.addEventListener('click', () => emit('waypoint-click', wpIndex))
+    trackOverlay(wpMarker)
+  })
 
   // Post markers
   for (const p of props.posts) {
@@ -551,6 +558,8 @@ function fitToVisibleMarkers() {
   const points: GeoPoint[] = [
     ...props.markers.map(marker => ({ lat: marker.lat, lng: marker.lng })),
     ...props.posts.map(post => ({ lat: post.lat, lng: post.lng })),
+    ...props.routes.flatMap(route => route.path),
+    ...props.waypoints.map(wp => ({ lat: wp.lat, lng: wp.lng })),
     ...props.emergencyCalls.map(call => ({ lat: call.lat, lng: call.lng })),
     ...props.workspaceMarkers.flatMap((item) => [
       { lat: item.lat, lng: item.lng },
@@ -560,7 +569,7 @@ function fitToVisibleMarkers() {
   if (!points.length) return
   if (points.length === 1) {
     mapInstance.setCenter(points[0]!)
-    mapInstance.setZoom(16)
+    mapInstance.setZoom(14)
     return
   }
   const bounds = new google.maps.LatLngBounds()
@@ -568,7 +577,13 @@ function fitToVisibleMarkers() {
   mapInstance.fitBounds(bounds, 48)
 }
 
-defineExpose({ fitToVisibleMarkers })
+function focusOn(point: GeoPoint, zoom = 17) {
+  if (!mapInstance) return
+  mapInstance.panTo(point)
+  mapInstance.setZoom(zoom)
+}
+
+defineExpose({ fitToVisibleMarkers, focusOn })
 
 onUnmounted(() => {
   clearDrawingPreview()
