@@ -126,10 +126,10 @@ const displayUrl = computed(() => {
   }
   // Assume it's a file ID, build URL
   if (props.modelValue) {
-    return `${useRuntimeConfig().public.apiBase}/files/n/${props.modelValue}.png`
+    return `${useRuntimeConfig().public.apiUrl}/files/n/${props.modelValue}.png`
   }
   if (props.initialUrl) {
-    return `${useRuntimeConfig().public.apiBase}/files/n/${props.initialUrl}.png`
+    return `${useRuntimeConfig().public.apiUrl}/files/n/${props.initialUrl}.png`
   }
   return ''
 })

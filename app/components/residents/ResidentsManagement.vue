@@ -493,6 +493,7 @@ watch(() => route.query.resident_id, (residentId: typeof route.query.resident_id
 .residents-management__table th {
   padding: var(--space-3) var(--space-4);
   text-align: left;
+  vertical-align: middle;
   font-weight: 600;
   font-size: var(--font-size-sm);
   letter-spacing: 0.05em;
@@ -528,6 +529,7 @@ watch(() => route.query.resident_id, (residentId: typeof route.query.resident_id
 
 .residents-management__table td {
   padding: var(--space-3) var(--space-4);
+  vertical-align: middle;
   font-size: var(--font-size-sm);
   color: var(--color-text-primary);
   border-bottom: 1px solid var(--color-border);
@@ -598,6 +600,12 @@ watch(() => route.query.resident_id, (residentId: typeof route.query.resident_id
   cursor: pointer;
   font-size: var(--font-size-sm);
   color: var(--color-text-primary);
+  margin-top: 0px;
+}
+
+.comm-test-toggle :deep(svg) {
+  display: block;
+  flex-shrink: 0;
 }
 
 .comm-test-toggle.enabled {
@@ -640,6 +648,7 @@ watch(() => route.query.resident_id, (residentId: typeof route.query.resident_id
   color: var(--color-text-primary);
   cursor: pointer;
   transition: all var(--transition-base);
+  margin-top: 0px;
 }
 
 .action-btn:hover {

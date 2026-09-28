@@ -2,10 +2,16 @@
 import { setOptions, importLibrary } from '@googlemaps/js-api-loader'
 
 interface MarkerData {
+  id?: string
   lat: number
   lng: number
-  status: 'active' | 'responding' | 'idle' | 'offduty' | 'gps-lost' | 'skipped'
+  status: 'green' | 'amber' | 'blue' | 'red' | 'grey' | 'active' | 'responding' | 'idle' | 'offduty' | 'gps-lost' | 'skipped'
   label?: string
+  initials?: string
+  image?: string
+  heading?: number | null
+  lastUpdate?: string
+  activeCallCategory?: string | null
 }
 
 interface RouteOverlay {
@@ -21,6 +27,7 @@ interface WaypointMarker {
   lat: number
   lng: number
   visited?: boolean
+  title?: string
 }
 
 interface PostMarker {
@@ -62,6 +69,7 @@ interface GeoPoint {
 const emit = defineEmits<{
   (e: 'marker-click', marker: MarkerData): void
   (e: 'workspace-marker-click', marker: WorkspaceMarker): void
+  (e: 'waypoint-click', index: number): void
   (e: 'draw-click' | 'draw-mousedown' | 'draw-mousemove' | 'draw-mouseup', point: GeoPoint): void
   (e: 'draw-double-click'): void
   (e: 'draw-point-remove', index: number): void
@@ -149,24 +157,31 @@ function renderDrawingPreview() {
     })
   }
   if ((props.drawingMode === 'line' || props.drawingMode === 'polygon') && props.drawingPoints.length) {
-    drawingPathPreview = props.drawingMode === 'polygon'
-      ? new google.maps.Polygon({
+    const isPolygon = props.drawingMode === 'polygon'
+    drawingPathPreview = new google.maps.Polyline({
+      map: mapInstance,
+      path: props.drawingPoints,
+      geodesic: true,
+      strokeColor: isPolygon ? '#DC3545' : '#0D6EFD',
+      strokeOpacity: 0.9,
+      strokeWeight: isPolygon ? 2 : 3,
+    })
+    if (advancedMarkerCtor) {
+      drawingPointMarkers = props.drawingPoints.map((point, index) => {
+        const dot = document.createElement('div')
+        dot.style.cssText = `
+          width:10px;height:10px;border-radius:50%;
+          background:${isPolygon ? '#DC3545' : '#0D6EFD'};border:2px solid #fff;
+          box-shadow:0 1px 4px rgba(0,0,0,.45);
+        `
+        return new advancedMarkerCtor!({
           map: mapInstance,
-          paths: props.drawingPoints,
-          fillColor: '#DC3545',
-          fillOpacity: 0.2,
-          strokeColor: '#DC3545',
-          strokeOpacity: 0.9,
-          strokeWeight: 2,
+          position: point,
+          content: dot,
+          title: `Point ${index + 1}`,
         })
-      : new google.maps.Polyline({
-          map: mapInstance,
-          path: props.drawingPoints,
-          geodesic: true,
-          strokeColor: '#0D6EFD',
-          strokeOpacity: 0.9,
-          strokeWeight: 3,
-        })
+      })
+    }
   }
   if (props.drawingMode === 'circle' && props.drawingCircleCenter && props.drawingCircleRadius > 0) {
     drawingCirclePreview = new google.maps.Circle({
@@ -178,6 +193,336 @@ function renderDrawingPreview() {
       strokeColor: '#0D6EFD',
       strokeOpacity: 0.9,
       strokeWeight: 2,
+    })
+  }
+}
+
+type OverlayLike = { setMap: (map: google.maps.Map | null) => void } | google.maps.marker.AdvancedMarkerElement
+
+const overlayObjects: OverlayLike[] = []
+
+function trackOverlay<T extends OverlayLike>(overlay: T): T {
+  overlayObjects.push(overlay)
+  return overlay
+}
+
+function setOverlayMap(overlay: OverlayLike, map: google.maps.Map | null) {
+  if (typeof (overlay as { setMap?: unknown }).setMap === 'function') {
+    ;(overlay as { setMap: (m: google.maps.Map | null) => void }).setMap(map)
+  } else {
+    ;(overlay as google.maps.marker.AdvancedMarkerElement).map = map
+  }
+}
+
+function clearOverlays() {
+  for (const overlay of overlayObjects) setOverlayMap(overlay, null)
+  overlayObjects.length = 0
+}
+
+function renderOverlays() {
+  if (!mapInstance || !advancedMarkerCtor) return
+  const map = mapInstance
+  const AdvancedMarkerElement = advancedMarkerCtor
+  clearOverlays()
+
+  // Community boundaries
+  for (const b of props.boundaries) {
+    trackOverlay(new google.maps.Polygon({
+      map,
+      paths: b.paths,
+      strokeColor: '#4f6ef7',
+      strokeOpacity: 0.8,
+      strokeWeight: 2,
+      fillColor: '#4f6ef7',
+      fillOpacity: 0.05,
+    }))
+  }
+
+  // Patrol route overlays
+  for (const r of props.routes) {
+    trackOverlay(new google.maps.Polyline({
+      map,
+      path: r.path,
+      geodesic: true,
+      strokeColor: r.color || '#6b7280',
+      strokeOpacity: 0.8,
+      strokeWeight: 3,
+    }))
+    if (r.traveledPath && r.traveledPath.length > 0) {
+      trackOverlay(new google.maps.Polyline({
+        map,
+        path: r.traveledPath,
+        geodesic: true,
+        strokeColor: r.color || '#22c55e',
+        strokeOpacity: 1,
+        strokeWeight: 4,
+      }))
+    }
+  }
+
+  // Waypoint markers
+  props.waypoints.forEach((w, wpIndex) => {
+    const el = document.createElement('div')
+    el.style.cssText = `
+      display:flex;align-items:center;justify-content:center;
+      width:24px;height:24px;border-radius:50%;
+      background:${w.visited ? '#22c55e' : '#1f2937'};
+      border:2px solid ${w.visited ? '#22c55e' : '#fff'};
+      color:#fff;font-size:11px;font-weight:700;
+      font-family:sans-serif;position:relative;z-index:10;
+    `
+    el.textContent = String(w.number)
+    el.style.cursor = 'pointer'
+    const wpMarker = new AdvancedMarkerElement({
+      map,
+      position: { lat: w.lat, lng: w.lng },
+      content: el,
+      title: w.title ?? (w.visited ? `Waypoint ${w.number} - visited` : `Waypoint ${w.number} - pending`),
+      gmpClickable: true,
+    })
+    wpMarker.addEventListener('gmp-click', () => emit('waypoint-click', wpIndex))
+    el.addEventListener('click', () => emit('waypoint-click', wpIndex))
+    trackOverlay(wpMarker)
+  })
+
+  // Post markers
+  for (const p of props.posts) {
+    const el = document.createElement('div')
+    el.style.cssText = `
+      display:flex;align-items:center;justify-content:center;
+      width:16px;height:16px;border-radius:4px;
+      background:#3b82f6;border:1px solid #fff;
+      box-shadow:0 0 4px #3b82f6;position:relative;z-index:10;
+    `
+    trackOverlay(new AdvancedMarkerElement({
+      map,
+      position: { lat: p.lat, lng: p.lng },
+      content: el,
+      title: p.type,
+    }))
+  }
+
+  for (const item of props.workspaceMarkers) {
+    const color = item.color ?? (item.type === 'asset' ? '#0D6EFD' : item.type === 'post' ? '#0D6EFD' : '#198754')
+    const position = { lat: item.lat, lng: item.lng }
+    const emitItemClick = () => emit('workspace-marker-click', item)
+
+    if (item.shape === 'circle' && item.radius) {
+      const circle = trackOverlay(new google.maps.Circle({
+        map,
+        center: position,
+        radius: item.radius,
+        fillColor: color,
+        fillOpacity: 0.16,
+        strokeColor: color,
+        strokeOpacity: 0.8,
+        strokeWeight: 2,
+      }))
+      circle.addListener('click', emitItemClick)
+    }
+
+    if (item.shape === 'line' && item.points?.length) {
+      const line = trackOverlay(new google.maps.Polyline({
+        map,
+        path: item.points,
+        geodesic: true,
+        strokeColor: color,
+        strokeOpacity: 0.85,
+        strokeWeight: 3,
+      }))
+      line.addListener('click', emitItemClick)
+    }
+
+    if (item.shape === 'polygon' && item.points?.length) {
+      const isEntryExit = item.zoneType === 'entry_exit'
+      const polygon = trackOverlay(new google.maps.Polygon({
+        map,
+        paths: item.points,
+        fillColor: color,
+        fillOpacity: 0.2,
+        strokeColor: color,
+        strokeOpacity: isEntryExit ? 0 : 0.9,
+        strokeWeight: 2,
+      }))
+      polygon.addListener('click', emitItemClick)
+
+      if (isEntryExit) {
+        const firstPoint = item.points[0]
+        if (!firstPoint) continue
+        const closedPath = [...item.points, firstPoint]
+        trackOverlay(new google.maps.Polyline({
+          map,
+          path: closedPath,
+          geodesic: true,
+          strokeOpacity: 0,
+          icons: [{
+            icon: {
+              path: 'M 0,-1 0 1',
+              strokeColor: color,
+              strokeOpacity: 0.9,
+              scale: 2,
+            },
+            offset: '0',
+            repeat: '10px',
+          }],
+        }))
+      }
+    }
+
+    const el = document.createElement('button')
+    const pin = document.createElement('span')
+    const label = document.createElement('span')
+    el.type = 'button'
+    el.style.cssText = `
+      display:flex;align-items:center;gap:4px;padding:0;background:transparent;
+      border:0;cursor:pointer;opacity:${item.active === false ? '.4' : '1'};
+    `
+    pin.style.cssText = `
+      display:flex;align-items:center;justify-content:center;width:34px;height:34px;
+      border-radius:${item.type === 'asset' ? '8px' : '50%'};background:${color};
+      border:2px solid #fff;color:#fff;box-shadow:0 2px 10px rgba(0,0,0,.45);
+      font:700 12px sans-serif;flex-shrink:0;
+    `
+    pin.textContent = item.type === 'asset' ? 'A' : item.type === 'post' ? 'P' : 'Z'
+    label.style.cssText = `
+      max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+      padding:2px 5px;border-radius:4px;background:rgba(13,17,23,.82);color:#fff;
+      font:500 11px sans-serif;text-decoration:${item.active === false ? 'line-through' : 'none'};
+    `
+    label.textContent = item.label
+    el.append(pin, label)
+    const marker = trackOverlay(new AdvancedMarkerElement({
+      map,
+      position,
+      content: el,
+      title: item.label,
+    }))
+    marker.addEventListener('gmp-click', emitItemClick)
+    el.addEventListener('click', (event) => {
+      event.stopPropagation()
+      emitItemClick()
+    })
+  }
+
+  // Emergency call markers
+  for (const c of props.emergencyCalls) {
+    const el = document.createElement('div')
+    el.style.cssText = `
+      width:18px;height:18px;border-radius:50%;
+      background:#ef4444;border:2px solid #fff;
+      box-shadow:0 0 0 0 rgba(239,68,68,0.7);
+      animation:pulse 1.5s infinite;position:relative;z-index:10;
+    `
+    trackOverlay(new AdvancedMarkerElement({
+      map,
+      position: { lat: c.lat, lng: c.lng },
+      content: el,
+      title: `Emergency call ${c.id}`,
+    }))
+  }
+
+  // Officer markers (rendered last to stay on top)
+  for (const m of props.markers) {
+    const color = statusColor[m.status] ?? statusColor.grey
+    const wrapper = document.createElement('button')
+    const pin = document.createElement('span')
+    const avatar = document.createElement('span')
+    const label = document.createElement('span')
+    wrapper.type = 'button'
+    wrapper.style.cssText = `
+      display:flex;align-items:center;gap:6px;padding:0;background:transparent;
+      border:0;cursor:pointer;opacity:${m.status === 'grey' || m.status === 'offduty' ? '.65' : '1'};
+      position:relative;z-index:100;
+    `
+    pin.style.cssText = `
+      display:flex;align-items:center;justify-content:center;
+      width:44px;height:44px;border-radius:50%;box-sizing:border-box;
+      background:#111827;border:4px ${m.status === 'amber' || m.status === 'idle' || m.status === 'gps-lost' ? 'dashed' : 'solid'} ${color};
+      box-shadow:0 2px 12px rgba(0,0,0,.45);position:relative;flex-shrink:0;
+    `
+    avatar.style.cssText = `
+      display:flex;align-items:center;justify-content:center;width:32px;height:32px;
+      overflow:hidden;border-radius:50%;background:#1f2937;color:#fff;
+      font:700 11px sans-serif;
+    `
+    if (m.image) {
+      const image = document.createElement('img')
+      image.src = m.image
+      image.alt = m.label || 'Officer'
+      image.style.cssText = 'width:100%;height:100%;object-fit:cover;'
+      image.addEventListener('error', () => {
+        image.remove()
+        avatar.textContent = m.initials || ''
+      })
+      avatar.append(image)
+    } else {
+      avatar.textContent = m.initials || (m.label ? m.label.slice(0, 2).toUpperCase() : '')
+    }
+    pin.append(avatar)
+
+    if (m.heading != null) {
+      const heading = document.createElement('span')
+      heading.textContent = '▲'
+      heading.style.cssText = `
+        position:absolute;top:-12px;left:15px;color:${color};font:700 12px sans-serif;
+        transform:rotate(${m.heading}deg);transform-origin:50% 18px;text-shadow:0 1px 2px rgba(0,0,0,.8);
+      `
+      pin.append(heading)
+    }
+
+    if (m.status === 'red' || m.status === 'skipped') {
+      const warning = document.createElement('span')
+      warning.textContent = '!'
+      warning.style.cssText = `
+        position:absolute;right:-5px;top:-5px;display:flex;align-items:center;justify-content:center;
+        width:17px;height:17px;border-radius:50%;background:#DC3545;border:2px solid #fff;
+        color:#fff;font:700 11px sans-serif;
+      `
+      pin.append(warning)
+    }
+
+    if (m.activeCallCategory) {
+      const callBadge = document.createElement('span')
+      callBadge.textContent = '●'
+      callBadge.style.cssText = `
+        position:absolute;right:-4px;bottom:-4px;display:flex;align-items:center;justify-content:center;
+        width:16px;height:16px;border-radius:50%;background:#0D6EFD;border:2px solid #fff;
+        color:#fff;font:700 8px sans-serif;
+      `
+      pin.append(callBadge)
+    }
+
+    label.style.cssText = `
+      max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+      padding:3px 7px;border-radius:5px;background:rgba(13,17,23,.88);color:#fff;
+      font:600 11px sans-serif;box-shadow:0 1px 4px rgba(0,0,0,.3);
+    `
+    label.textContent = m.label || ''
+    wrapper.append(pin, label)
+
+    if (m.status === 'blue' || m.status === 'responding') {
+      pin.animate([
+        { boxShadow: `0 0 0 0 ${color}99` },
+        { boxShadow: `0 0 0 12px ${color}00` },
+      ], { duration: 1500, iterations: Infinity })
+    }
+
+    const marker = trackOverlay(new AdvancedMarkerElement({
+      map,
+      position: { lat: m.lat, lng: m.lng },
+      content: wrapper,
+      title: m.status === 'amber'
+        ? `${m.label || 'Officer'} — GPS signal stale — last update ${m.lastUpdate || 'unknown'}`
+        : m.status === 'red'
+          ? `${m.label || 'Officer'} — Waypoint overdue`
+          : m.status === 'grey'
+            ? `${m.label || 'Officer'} — Off duty`
+            : m.label || m.status,
+    }))
+    marker.addEventListener('gmp-click', () => emit('marker-click', m))
+    wrapper.addEventListener('click', (e: Event) => {
+      e.stopPropagation()
+      emit('marker-click', m)
     })
   }
 }
@@ -195,18 +540,70 @@ watch(
   { deep: true },
 )
 
+watch(
+  () => [props.boundaries, props.routes, props.waypoints, props.posts, props.workspaceMarkers, props.emergencyCalls, props.markers] as const,
+  () => renderOverlays(),
+  { deep: true },
+)
+
+watch(
+  () => [props.center?.lat, props.center?.lng] as const,
+  ([lat, lng]) => {
+    if (mapInstance && lat != null && lng != null) mapInstance.setCenter({ lat, lng })
+  },
+)
+
+function fitToVisibleMarkers() {
+  if (!mapInstance) return
+  const points: GeoPoint[] = [
+    ...props.markers.map(marker => ({ lat: marker.lat, lng: marker.lng })),
+    ...props.posts.map(post => ({ lat: post.lat, lng: post.lng })),
+    ...props.routes.flatMap(route => route.path),
+    ...props.waypoints.map(wp => ({ lat: wp.lat, lng: wp.lng })),
+    ...props.emergencyCalls.map(call => ({ lat: call.lat, lng: call.lng })),
+    ...props.workspaceMarkers.flatMap((item) => [
+      { lat: item.lat, lng: item.lng },
+      ...(item.points ?? []),
+    ]),
+  ]
+  if (!points.length) return
+  if (points.length === 1) {
+    mapInstance.setCenter(points[0]!)
+    mapInstance.setZoom(14)
+    return
+  }
+  const bounds = new google.maps.LatLngBounds()
+  points.forEach(point => bounds.extend(point))
+  mapInstance.fitBounds(bounds, 48)
+}
+
+function focusOn(point: GeoPoint, zoom = 17) {
+  if (!mapInstance) return
+  mapInstance.panTo(point)
+  mapInstance.setZoom(zoom)
+}
+
+defineExpose({ fitToVisibleMarkers, focusOn })
+
 onUnmounted(() => {
   clearDrawingPreview()
+  clearOverlays()
   if (mapInstance) google.maps.event.clearInstanceListeners(mapInstance)
   mapInstance = null
 })
 
 const statusColor: Record<string, string> = {
-  active:     '#22c55e', // Green
-  responding: '#4f6ef7', // Blue
-  idle:       '#f59e0b', // Amber (GPS lost/stale)
-  offduty:    '#6b7280', // Grey
-  skipped:    '#ef4444', // Red
+  green:      '#198754',
+  amber:      '#FFC107',
+  blue:       '#0D6EFD',
+  red:        '#DC3545',
+  grey:       '#6C757D',
+  active:     '#198754', // Green
+  responding: '#0D6EFD', // Blue
+  idle:       '#FFC107', // Amber (GPS lost/stale)
+  'gps-lost': '#FFC107',
+  offduty:    '#6C757D', // Grey
+  skipped:    '#DC3545', // Red
 }
 
 const darkMapStyles = [
@@ -290,225 +687,7 @@ onMounted(async () => {
       markers: props.markers.length,
     })
 
-    // Community boundaries
-    for (const b of props.boundaries) {
-      new google.maps.Polygon({
-        map,
-        paths: b.paths,
-        strokeColor: '#4f6ef7',
-        strokeOpacity: 0.8,
-        strokeWeight: 2,
-        fillColor: '#4f6ef7',
-        fillOpacity: 0.05,
-      })
-    }
-
-    // Patrol route overlays
-    for (const r of props.routes) {
-      new google.maps.Polyline({
-        map,
-        path: r.path,
-        geodesic: true,
-        strokeColor: r.color || '#6b7280',
-        strokeOpacity: 0.8,
-        strokeWeight: 3,
-      })
-      if (r.traveledPath && r.traveledPath.length > 0) {
-        new google.maps.Polyline({
-          map,
-          path: r.traveledPath,
-          geodesic: true,
-          strokeColor: r.color || '#22c55e',
-          strokeOpacity: 1,
-          strokeWeight: 4,
-        })
-      }
-    }
-
-    // Waypoint markers
-    for (const w of props.waypoints) {
-      const el = document.createElement('div')
-      el.style.cssText = `
-        display:flex;align-items:center;justify-content:center;
-        width:24px;height:24px;border-radius:50%;
-        background:${w.visited ? '#22c55e' : '#1f2937'};
-        border:2px solid ${w.visited ? '#22c55e' : '#fff'};
-        color:#fff;font-size:11px;font-weight:700;
-        font-family:sans-serif;position:relative;z-index:10;
-      `
-      el.textContent = String(w.number)
-      new AdvancedMarkerElement({
-        map,
-        position: { lat: w.lat, lng: w.lng },
-        content: el,
-        title: w.visited ? `Waypoint ${w.number} - visited` : `Waypoint ${w.number} - pending`,
-      })
-    }
-
-    // Post markers
-    for (const p of props.posts) {
-      const el = document.createElement('div')
-      el.style.cssText = `
-        display:flex;align-items:center;justify-content:center;
-        width:16px;height:16px;border-radius:4px;
-        background:#3b82f6;border:1px solid #fff;
-        box-shadow:0 0 4px #3b82f6;position:relative;z-index:10;
-      `
-      new AdvancedMarkerElement({
-        map,
-        position: { lat: p.lat, lng: p.lng },
-        content: el,
-        title: p.type,
-      })
-    }
-
-    for (const item of props.workspaceMarkers) {
-      const color = item.color ?? (item.type === 'asset' ? '#0D6EFD' : item.type === 'post' ? '#0D6EFD' : '#198754')
-      const position = { lat: item.lat, lng: item.lng }
-      const emitItemClick = () => emit('workspace-marker-click', item)
-
-      if (item.shape === 'circle' && item.radius) {
-        const circle = new google.maps.Circle({
-          map,
-          center: position,
-          radius: item.radius,
-          fillColor: color,
-          fillOpacity: 0.16,
-          strokeColor: color,
-          strokeOpacity: 0.8,
-          strokeWeight: 2,
-        })
-        circle.addListener('click', emitItemClick)
-      }
-
-      if (item.shape === 'line' && item.points?.length) {
-        const line = new google.maps.Polyline({
-          map,
-          path: item.points,
-          geodesic: true,
-          strokeColor: color,
-          strokeOpacity: 0.85,
-          strokeWeight: 3,
-        })
-        line.addListener('click', emitItemClick)
-      }
-
-      if (item.shape === 'polygon' && item.points?.length) {
-        const isEntryExit = item.zoneType === 'entry_exit'
-        const polygon = new google.maps.Polygon({
-          map,
-          paths: item.points,
-          fillColor: color,
-          fillOpacity: 0.2,
-          strokeColor: color,
-          strokeOpacity: isEntryExit ? 0 : 0.9,
-          strokeWeight: 2,
-        })
-        polygon.addListener('click', emitItemClick)
-
-        if (isEntryExit) {
-          const firstPoint = item.points[0]
-          if (!firstPoint) continue
-          const closedPath = [...item.points, firstPoint]
-          new google.maps.Polyline({
-            map,
-            path: closedPath,
-            geodesic: true,
-            strokeOpacity: 0,
-            icons: [{
-              icon: {
-                path: 'M 0,-1 0 1',
-                strokeColor: color,
-                strokeOpacity: 0.9,
-                scale: 2,
-              },
-              offset: '0',
-              repeat: '10px',
-            }],
-          })
-        }
-      }
-
-      const el = document.createElement('button')
-      const pin = document.createElement('span')
-      const label = document.createElement('span')
-      el.type = 'button'
-      el.style.cssText = `
-        display:flex;align-items:center;gap:4px;padding:0;background:transparent;
-        border:0;cursor:pointer;opacity:${item.active === false ? '.4' : '1'};
-      `
-      pin.style.cssText = `
-        display:flex;align-items:center;justify-content:center;width:34px;height:34px;
-        border-radius:${item.type === 'asset' ? '8px' : '50%'};background:${color};
-        border:2px solid #fff;color:#fff;box-shadow:0 2px 10px rgba(0,0,0,.45);
-        font:700 12px sans-serif;flex-shrink:0;
-      `
-      pin.textContent = item.type === 'asset' ? 'A' : item.type === 'post' ? 'P' : 'Z'
-      label.style.cssText = `
-        max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
-        padding:2px 5px;border-radius:4px;background:rgba(13,17,23,.82);color:#fff;
-        font:500 11px sans-serif;text-decoration:${item.active === false ? 'line-through' : 'none'};
-      `
-      label.textContent = item.label
-      el.append(pin, label)
-      const marker = new AdvancedMarkerElement({
-        map,
-        position,
-        content: el,
-        title: item.label,
-      })
-      marker.addEventListener('gmp-click', emitItemClick)
-      el.addEventListener('click', (event) => {
-        event.stopPropagation()
-        emitItemClick()
-      })
-    }
-
-    // Emergency call markers
-    for (const c of props.emergencyCalls) {
-      const el = document.createElement('div')
-      el.style.cssText = `
-        width:18px;height:18px;border-radius:50%;
-        background:#ef4444;border:2px solid #fff;
-        box-shadow:0 0 0 0 rgba(239,68,68,0.7);
-        animation:pulse 1.5s infinite;position:relative;z-index:10;
-      `
-      new AdvancedMarkerElement({
-        map,
-        position: { lat: c.lat, lng: c.lng },
-        content: el,
-        title: `Emergency call ${c.id}`,
-      })
-    }
-
-    // Officer markers (rendered last to stay on top)
-    console.log('[GoogleMap] rendering markers:', props.markers.length, props.markers)
-    for (const m of props.markers) {
-      const color = statusColor[m.status] ?? statusColor.idle
-      const pin = document.createElement('div')
-      pin.style.cssText = `
-        display:flex;align-items:center;justify-content:center;
-        width:40px;height:40px;border-radius:50%;
-        background:${color};
-        border:3px solid rgba(255,255,255,0.95);
-        box-shadow:0 0 14px ${color};
-        color:#fff;font-size:13px;font-weight:700;
-        font-family:sans-serif;cursor:pointer;
-        position:relative;z-index:100;
-      `
-      pin.textContent = m.label ? m.label.slice(0, 2).toUpperCase() : ''
-      const marker = new AdvancedMarkerElement({
-        map,
-        position: { lat: m.lat, lng: m.lng },
-        content: pin,
-        title: m.label || m.status,
-      })
-      marker.addEventListener('gmp-click', () => emit('marker-click', m))
-      pin.addEventListener('click', (e: Event) => {
-        e.stopPropagation()
-        emit('marker-click', m)
-      })
-    }
+    renderOverlays()
   } catch (e) {
     error.value = 'Failed to load Google Maps.'
     loading.value = false

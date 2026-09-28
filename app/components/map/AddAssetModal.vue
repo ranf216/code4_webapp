@@ -13,6 +13,9 @@ const props = defineProps<{
   location?: FormLocation | null
   assetTypes?: string[]
   initialData?: AssetFormData | null
+  communities?: { community_id: number; name: string }[]
+  communityId?: string
+  shape?: 'place' | 'circle' | 'line'
 }>()
 
 const emit = defineEmits<{
@@ -29,6 +32,7 @@ export interface AssetFormData {
   location: FormLocation | null
   shape?: 'place' | 'circle' | 'line'
   acres?: number
+  communityId?: string
 }
 
 const { t } = useTranslation()
@@ -42,6 +46,8 @@ const form = reactive<AssetFormData>({
   replacementDate: '',
   description: '',
   location: props.location ?? null,
+  shape: props.shape,
+  communityId: props.communityId ?? '',
 })
 
 watch(() => props.show, (show: boolean) => {
@@ -53,12 +59,19 @@ watch(() => props.show, (show: boolean) => {
   form.replacementDate = initial?.replacementDate || ''
   form.description = initial?.description || ''
   form.location = props.location ?? initial?.location ?? null
-  form.shape = initial?.shape
+  form.shape = initial?.shape ?? props.shape
   form.acres = initial?.acres
+  form.communityId = initial?.communityId ?? props.communityId ?? ''
 })
 
 const isEditing = computed(() => !!props.initialData?.id)
 const showAcreage = computed(() => isEditing.value && form.shape === 'circle' && form.acres != null && form.acres > 0)
+const communityName = computed(() => props.communities?.find(c => String(c.community_id) === String(form.communityId))?.name || '')
+const shapeOptions = computed(() => [
+  { value: 'place', label: t('map.shape_dot') },
+  { value: 'circle', label: t('map.shape_circle') },
+  { value: 'line', label: t('map.shape_line') },
+] as const)
 const locationLabel = computed(() => {
   const location = form.location
   if (!location) return ''
@@ -69,8 +82,9 @@ const locationLabel = computed(() => {
 const errors = reactive<Record<string, string>>({})
 
 function validate(): boolean {
+  errors.community = !isEditing.value && !form.communityId ? t('validation.required') : ''
   errors.type = !form.type ? t('validation.required') : ''
-  return !errors.type
+  return !errors.community && !errors.type
 }
 
 function handleSave() {
@@ -97,6 +111,16 @@ function handleSave() {
           <div class="readonly-value">{{ form.id }}</div>
         </div>
 
+        <div class="form-field" :class="{ error: errors.community }">
+          <label class="field-label">{{ t('communities.community') }} <span v-if="!isEditing" class="required">*</span></label>
+          <select v-if="!isEditing" v-model="form.communityId" class="field-select">
+            <option value="" disabled>{{ t('officers.select_community') }}</option>
+            <option v-for="c in communities || []" :key="c.community_id" :value="String(c.community_id)">{{ c.name }}</option>
+          </select>
+          <div v-else class="readonly-value">{{ communityName || '—' }}</div>
+          <span v-if="errors.community" class="error-message">{{ errors.community }}</span>
+        </div>
+
         <div class="form-field" :class="{ error: errors.type }">
           <label class="field-label">{{ t('map.asset_type') }} <span class="required">*</span></label>
           <select v-model="form.type" class="field-select">
@@ -104,6 +128,21 @@ function handleSave() {
             <option v-for="type in assetTypeOptions" :key="type" :value="type">{{ type }}</option>
           </select>
           <span v-if="errors.type" class="error-message">{{ errors.type }}</span>
+        </div>
+
+        <div class="form-field">
+          <label class="field-label">{{ t('map.shape') }}</label>
+          <div class="shape-radio-group">
+            <label
+              v-for="option in shapeOptions"
+              :key="option.value"
+              class="shape-radio"
+              :class="{ 'shape-radio--checked': form.shape === option.value }"
+            >
+              <input type="radio" :value="option.value" :checked="form.shape === option.value" disabled>
+              <span>{{ option.label }}</span>
+            </label>
+          </div>
         </div>
 
         <div class="form-row-2col">
@@ -119,7 +158,8 @@ function handleSave() {
 
         <div class="form-field">
           <label class="field-label">{{ t('map.description') }}</label>
-          <textarea v-model="form.description" class="field-textarea" rows="3" :placeholder="t('map.asset_description_placeholder')" />
+          <textarea v-model="form.description" class="field-textarea" rows="3" maxlength="500" :placeholder="t('map.asset_description_placeholder')" />
+          <span class="char-counter">{{ form.description.length }} / 500</span>
         </div>
 
         <div v-if="showAcreage" class="form-field form-field--readonly">
@@ -234,5 +274,38 @@ function handleSave() {
   color: var(--color-text-muted);
   font-style: italic;
   font-weight: 400;
+}
+
+.shape-radio-group {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.shape-radio {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}
+
+.shape-radio--checked {
+  color: var(--color-text-primary);
+  border-color: var(--color-accent);
+  background: var(--color-accent-subtle);
+}
+
+.shape-radio input {
+  accent-color: var(--color-accent);
+  margin: 0;
+}
+
+.char-counter {
+  align-self: flex-end;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
 }
 </style>

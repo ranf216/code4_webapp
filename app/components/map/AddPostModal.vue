@@ -7,6 +7,10 @@ const props = defineProps<{
   location?: { x: number; y: number; lat?: number; lng?: number } | null
   priorities?: string[]
   initialData?: PostFormData | null
+  communities?: { community_id: number; name: string }[]
+  communityId?: string
+  shape?: 'place' | 'circle' | 'line'
+  serverError?: string
 }>()
 
 const emit = defineEmits<{
@@ -23,6 +27,8 @@ export interface PostFormData {
   active: boolean
   location: { x: number; y: number } | null
   permissions?: PostPermissions
+  communityId?: string
+  shape?: 'place' | 'circle' | 'line'
 }
 
 const { t } = useTranslation()
@@ -49,7 +55,11 @@ const form = reactive<PostFormData>({
   active: true,
   location: props.location ?? null,
   permissions: emptyPermissions(),
+  communityId: props.communityId ?? '',
+  shape: props.shape,
 })
+
+const errors = reactive<Record<string, string>>({})
 
 watch(() => props.show, (show: boolean) => {
   if (!show) return
@@ -61,20 +71,42 @@ watch(() => props.show, (show: boolean) => {
   form.equipment = initial?.equipment || ''
   form.active = initial?.active ?? true
   form.location = props.location ? { x: props.location.x, y: props.location.y } : (initial?.location ?? null)
+  form.communityId = initial?.communityId ?? props.communityId ?? ''
+  form.shape = initial?.shape ?? props.shape
   form.permissions = {
     required_roles: [...(initial?.permissions?.required_roles || [])],
     required_badges: [...(initial?.permissions?.required_badges || [])],
     required_equipment: [...(initial?.permissions?.required_equipment || [])],
   }
   newEquipment.value = ''
+  for (const key of Object.keys(errors)) errors[key] = ''
 })
 
-const errors = reactive<Record<string, string>>({})
+watch(() => props.serverError, (message) => {
+  if (message) errors.name = message
+})
+
+const isEditing = computed(() => !!props.initialData?.id)
+
+const shapeOptions = computed(() => [
+  { value: 'place', label: t('map.shape_dot') },
+  { value: 'circle', label: t('map.shape_circle') },
+  { value: 'line', label: t('map.shape_line') },
+] as const)
+
+const communityName = computed(() => {
+  const communityId = Number(form.communityId)
+  if (!communityId) return '—'
+  return props.communities?.find(c => c.community_id === communityId)?.name || '—'
+})
 
 function validate(): boolean {
   errors.name = !form.name.trim() ? t('validation.required') : ''
   if (form.name.length > 60) errors.name = t('map.post_name_max')
-  return !errors.name
+  if (!isEditing.value) {
+    errors.communityId = !form.communityId ? t('validation.required') : ''
+  }
+  return !errors.name && !errors.communityId
 }
 
 function handleSave() {
@@ -84,7 +116,6 @@ function handleSave() {
   const hasPermissions = p && (p.required_roles?.length || p.required_badges?.length || p.required_equipment?.length)
   if (!hasPermissions) delete payload.permissions
   emit('save', payload)
-  emit('close')
 }
 
 function isRoleSelected(role: string) {
@@ -128,8 +159,6 @@ function handleEquipmentKeydown(event: KeyboardEvent) {
   }
 }
 
-const isEditing = computed(() => !!props.initialData?.id)
-
 const locationLabel = computed(() => {
   const location = props.location ?? form.location
   if (!location) return ''
@@ -155,6 +184,17 @@ const locationLabel = computed(() => {
         <div class="form-field form-field--readonly">
           <label class="field-label">{{ t('map.post_id') }}</label>
           <div class="readonly-value">{{ form.id }}</div>
+        </div>
+
+        <!-- Community (Section 1.8) -->
+        <div class="form-field" :class="{ 'form-field--readonly': isEditing, error: errors.communityId }">
+          <label class="field-label">{{ t('communities.community') }} <span v-if="!isEditing" class="required">*</span></label>
+          <select v-if="!isEditing" v-model="form.communityId" class="field-select">
+            <option value="" disabled>{{ t('officers.select_community') }}</option>
+            <option v-for="community in communities" :key="community.community_id" :value="String(community.community_id)">{{ community.name }}</option>
+          </select>
+          <div v-else class="readonly-value">{{ communityName }}</div>
+          <span v-if="errors.communityId" class="error-message">{{ errors.communityId }}</span>
         </div>
 
         <div class="form-field" :class="{ error: errors.name }">
@@ -186,9 +226,34 @@ const locationLabel = computed(() => {
           </div>
         </div>
 
+        <!-- Shape (Section 1.8) -->
+        <div class="form-field">
+          <label class="field-label">{{ t('map.shape') }}</label>
+          <div class="shape-radio-group">
+            <label
+              v-for="option in shapeOptions"
+              :key="option.value"
+              class="shape-radio"
+              :class="{ 'shape-radio--checked': form.shape === option.value }"
+            >
+              <input type="radio" :value="option.value" :checked="form.shape === option.value" disabled>
+              <span>{{ option.label }}</span>
+            </label>
+          </div>
+        </div>
+
+        <div class="form-field form-field--readonly">
+          <label class="field-label">{{ t('map.location') }}</label>
+          <div class="readonly-value location-value">
+            <Icon name="lucide:map-pin" :size="14" />
+            <span v-if="locationLabel">{{ locationLabel }}</span>
+            <span v-else class="muted">{{ t('map.location_auto') }}</span>
+          </div>
+        </div>
+
         <div class="form-field">
           <label class="field-label">{{ t('map.equipment') }}</label>
-          <input v-model="form.equipment" type="text" class="field-input" :placeholder="t('map.equipment_placeholder')" />
+          <textarea v-model="form.equipment" class="field-textarea" rows="2" :placeholder="t('map.equipment_placeholder')" />
         </div>
 
         <!-- Eligibility Requirements (Section 1.5) -->
@@ -228,19 +293,10 @@ const locationLabel = computed(() => {
               <span v-for="(item, index) in form.permissions.required_equipment" :key="item" class="equipment-tag">
                 {{ item }}
                 <button type="button" class="equipment-tag__remove" @click="removeEquipmentTag(index)">
-                  <Icon name="lucide:x" :size="10" />
+                  <Icon name="lucide:x" :size="20" />
                 </button>
               </span>
             </div>
-          </div>
-        </div>
-
-        <div class="form-field form-field--readonly">
-          <label class="field-label">{{ t('map.location') }}</label>
-          <div class="readonly-value location-value">
-            <Icon name="lucide:map-pin" :size="14" />
-            <span v-if="locationLabel">{{ locationLabel }}</span>
-            <span v-else class="muted">{{ t('map.location_auto') }}</span>
           </div>
         </div>
       </div>
@@ -310,7 +366,8 @@ const locationLabel = computed(() => {
   line-height: 1.5;
 }
 
-.form-field.error .field-input {
+.form-field.error .field-input,
+.form-field.error .field-select {
   border-color: var(--color-critical);
 }
 
@@ -446,29 +503,61 @@ const locationLabel = computed(() => {
 .equipment-tag {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 12px;
   padding: 2px var(--space-2);
   color: var(--color-text-primary);
   background: var(--color-bg-overlay);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-full);
-  font-size: var(--font-size-xs);
+  font-size: var(--font-size-sm);
 }
 
 .equipment-tag__remove {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 14px;
-  height: 14px;
-  padding: 0;
+  width: 16px;
+  height: 16px;
+  padding: 0 0 10px 0;
   background: none;
   border: none;
   color: var(--color-text-muted);
   cursor: pointer;
+  line-height: 0;
+}
+
+.equipment-tag__remove :deep(svg) {
+  display: block;
 }
 
 .equipment-tag__remove:hover {
   color: var(--color-critical);
+}
+
+.shape-radio-group {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.shape-radio {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}
+
+.shape-radio--checked {
+  color: var(--color-text-primary);
+  border-color: var(--color-accent);
+  background: var(--color-accent-subtle);
+}
+
+.shape-radio input {
+  accent-color: var(--color-accent);
+  margin: 0;
 }
 </style>
