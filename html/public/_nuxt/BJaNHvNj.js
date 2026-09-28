@@ -1,0 +1,1 @@
+import{x as e}from"./DGqW7AN2.js";import{u as t}from"./BIl9lKgv.js";import{t as n}from"./CNs_Ozdc.js";var r=e({__name:`new`,setup(e){return n({layout:`default`,middleware:e=>t(`/communities/${e.params.id}/residents`,{replace:!0})}),()=>{}}});export{r as default};
