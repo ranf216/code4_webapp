@@ -13,6 +13,7 @@ import type { Officer } from '~/api/types/officer'
 import { shifts, generateRoute, saveRoute, type Shift, type Waypoint } from '~/composables/useShifts'
 
 const { t } = useTranslation()
+const route = useRoute()
 
 const viewMode = ref<'day' | 'week' | 'month'>('week')
 const viewModeModel = computed({
@@ -293,11 +294,27 @@ onMounted(async () => {
   checkinTimer = setInterval(() => { nowTimestamp.value = Date.now() }, 60000)
   await loadFilterOptions()
   await loadCalendar()
+  await openShiftFromQuery(route.query.shift_id)
 })
 onUnmounted(() => {
   if (searchTimer) clearTimeout(searchTimer)
   if (checkinTimer) clearInterval(checkinTimer)
 })
+
+watch(() => route.query.shift_id, (shiftId) => {
+  openShiftFromQuery(shiftId)
+})
+
+async function openShiftFromQuery(shiftId: unknown) {
+  const id = Number(typeof shiftId === 'string' ? shiftId : '')
+  if (!Number.isFinite(id)) return
+  try {
+    const response = await shiftApi.getShift(id)
+    if (response.shift) openShiftDetails(mapApiShift(response.shift))
+  } catch (error) {
+    console.error('Failed to open shift from query:', error)
+  }
+}
 
 const weekDays = computed((): { date: Date; label: string; dateStr: string }[] => {
   const start = new Date(currentDate.value)
