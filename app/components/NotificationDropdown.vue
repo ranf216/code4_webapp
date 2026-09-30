@@ -495,7 +495,7 @@ defineExpose({ toggle, close, isOpen })
 .notif-item__item-title {
   font-size: var(--font-size-sm);
   font-weight: 400;
-  color: var(--color-text-secondary);
+  color: var(--color-text-primary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -516,7 +516,7 @@ defineExpose({ toggle, close, isOpen })
 .notif-item__message {
   margin: 2px 0 0;
   font-size: var(--font-size-xs);
-  color: var(--color-text-muted);
+  color: var(--color-text-secondary);
   line-height: 1.4;
   display: -webkit-box;
   -webkit-line-clamp: 2;
@@ -526,12 +526,7 @@ defineExpose({ toggle, close, isOpen })
 }
 
 .notif-item--unread .notif-item__message {
-  color: var(--color-text-secondary);
-}
-
-/* Read items: slightly reduced opacity */
-.notif-item:not(.notif-item--unread) {
-  opacity: 0.85;
+  color: var(--color-text-primary);
 }
 
 /* Footer */
