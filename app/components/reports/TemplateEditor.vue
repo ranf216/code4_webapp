@@ -1459,6 +1459,9 @@ const customFieldTypeOptions: { value: CustomFieldType; label: string; icon: str
   color: var(--color-accent);
   opacity: 0.7;
   transition: opacity var(--transition-base);
+  margin-left: 10px;
+  margin-top: 0px;
+  margin-right: 0px;  
 }
 .chip-remove:hover { opacity: 1; }
 

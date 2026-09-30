@@ -39,12 +39,12 @@ export function getNotificationTypeIcon(type: NotificationType): string {
 export function resolveNotificationEntityPath(entityType?: string, entityId?: number | string): string | null {
   if (!entityType || entityId === undefined || entityId === null) return null
   switch (entityType) {
-    case 'call': return `/calls/${entityId}`
+    case 'call': return `/calls?call_id=${entityId}`
     case 'report': return `/reports/${entityId}`
-    case 'shift': return `/shifts/${entityId}`
+    case 'shift': return `/shifts?shift_id=${entityId}`
     case 'post_order': return `/post-orders/${entityId}`
     case 'poi': return `/poi/${entityId}`
-    case 'task': return `/tasks/${entityId}`
+    case 'task': return `/tasks?task_id=${entityId}`
     default: return null
   }
 }

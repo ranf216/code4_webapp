@@ -2,6 +2,7 @@
 import moment from 'moment'
 import { notificationApi } from '~/api/notification'
 import { utcToLocal } from '~/utils/dateTime'
+import { resolveNotificationEntityPath } from '~/utils/notification'
 import { useNotificationBadge } from '~/composables/useNotificationBadge'
 import { useNotificationSocket } from '~/composables/useNotificationSocket'
 import { useToastStore } from '~/stores/toast'
@@ -115,7 +116,7 @@ async function handleUrgentView() {
 
   // Navigate to linked entity
   if (urgentAlert.value.payload?.entity_type && urgentAlert.value.payload?.entity_id) {
-    const path = resolveEntityPath(urgentAlert.value.payload.entity_type, urgentAlert.value.payload.entity_id)
+    const path = resolveNotificationEntityPath(urgentAlert.value.payload.entity_type, urgentAlert.value.payload.entity_id)
     if (path) {
       router.push(path)
     }
@@ -145,7 +146,7 @@ async function handleItemClick(item: Notification) {
 
   // 2. Navigate to linked entity
   if (item.payload?.entity_type && item.payload?.entity_id) {
-    const path = resolveEntityPath(item.payload.entity_type, item.payload.entity_id)
+    const path = resolveNotificationEntityPath(item.payload.entity_type, item.payload.entity_id)
     if (path) {
       router.push(path)
     }
@@ -153,26 +154,6 @@ async function handleItemClick(item: Notification) {
 
   // 3. Close panel
   close()
-}
-
-// Resolve entity path for deep linking
-function resolveEntityPath(entityType: string, entityId: number | string): string | null {
-  switch (entityType) {
-    case 'call':
-      return `/calls/${entityId}`
-    case 'report':
-      return `/reports/${entityId}`
-    case 'shift':
-      return `/shifts/${entityId}`
-    case 'post_order':
-      return `/post-orders/${entityId}`
-    case 'poi':
-      return `/poi/${entityId}`
-    case 'task':
-      return `/tasks/${entityId}`
-    default:
-      return null
-  }
 }
 
 // Notification type → icon mapping (Lucide icons)
@@ -495,7 +476,7 @@ defineExpose({ toggle, close, isOpen })
 .notif-item__item-title {
   font-size: var(--font-size-sm);
   font-weight: 400;
-  color: var(--color-text-secondary);
+  color: var(--color-text-primary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -516,7 +497,7 @@ defineExpose({ toggle, close, isOpen })
 .notif-item__message {
   margin: 2px 0 0;
   font-size: var(--font-size-xs);
-  color: var(--color-text-muted);
+  color: var(--color-text-secondary);
   line-height: 1.4;
   display: -webkit-box;
   -webkit-line-clamp: 2;
@@ -526,12 +507,7 @@ defineExpose({ toggle, close, isOpen })
 }
 
 .notif-item--unread .notif-item__message {
-  color: var(--color-text-secondary);
-}
-
-/* Read items: slightly reduced opacity */
-.notif-item:not(.notif-item--unread) {
-  opacity: 0.85;
+  color: var(--color-text-primary);
 }
 
 /* Footer */

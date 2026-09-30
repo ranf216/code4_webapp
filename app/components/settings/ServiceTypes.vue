@@ -458,6 +458,9 @@ function handleCancelMaintenanceTypeAdd() {
   cursor: pointer;
   transition: all 0.2s ease;
 }
+.btn-icon--danger {
+  margin-top: 9px
+}
 .btn-icon:hover { background: var(--color-surface); color: var(--color-text-primary); }
 .btn-icon--danger:hover { background: rgba(239, 68, 68, 0.1); color: #ef4444; }
 .btn-icon--success:hover { background: rgba(34, 197, 94, 0.1); color: #22c55e; }

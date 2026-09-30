@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { useTranslation } from '~/composables/useI18n'
 import { taskApi } from '~/api/task'
 import { officerApi } from '~/api/officer'
@@ -11,6 +12,7 @@ import type { Officer } from '~/api/types/officer'
 import type { Task as ApiTask, TaskMedia } from '~/api/types/task'
 
 const { t } = useTranslation()
+const route = useRoute()
 
 // Types
 interface Task {
@@ -304,6 +306,7 @@ onMounted(() => {
   fetchTaskMetadata()
   fetchOfficers()
   fetchTasks()
+  openTaskFromQuery(route.query.task_id)
   autoRefreshInterval.value = setInterval(() => {
     if (!showTaskModal.value && !showAddModal.value && !showRejectModal.value && !showCompleteModal.value) {
       fetchTasks()
@@ -333,6 +336,24 @@ watch(searchQuery, () => {
 })
 
 watch(offset, fetchTasks)
+
+watch(() => route.query.task_id, (taskId) => {
+  openTaskFromQuery(taskId)
+})
+
+async function openTaskFromQuery(taskId: unknown) {
+  const id = Number(typeof taskId === 'string' ? taskId : '')
+  if (!Number.isFinite(id)) return
+  try {
+    const res = await taskApi.getTask(id)
+    if (res.rc === 0 && res.task) {
+      selectedTask.value = mapApiTask(res.task)
+      showTaskModal.value = true
+    }
+  } catch (err) {
+    console.error('Failed to open task from query:', err)
+  }
+}
 
 function clearFilters() {
   searchQuery.value = ''

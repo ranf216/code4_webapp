@@ -41,7 +41,6 @@ const searchValue = ref(props.searchModelValue || '')
 const searchResults = ref<GlobalSearchResult[]>([])
 const isSearching = ref(false)
 const searchOpen = ref(false)
-let searchTimer: ReturnType<typeof setTimeout> | null = null
 let searchRequestId = 0
 
 const breadcrumbItems = computed(() => props.breadcrumb || [])
@@ -66,20 +65,22 @@ watch(() => props.searchModelValue, (value: string | undefined) => {
 
 watch(searchValue, (value: string) => {
   emit('update:searchModelValue', value)
-  if (searchTimer) clearTimeout(searchTimer)
-  const query = value.trim()
-  if (!query) {
+  if (!value.trim()) {
     searchRequestId++
     searchResults.value = []
     isSearching.value = false
     searchOpen.value = false
-    return
   }
+})
+
+function handleSearchEnter() {
+  const query = searchValue.value.trim()
+  if (!query) return
   searchOpen.value = true
   isSearching.value = true
   const requestId = ++searchRequestId
-  searchTimer = setTimeout(() => performGlobalSearch(query, requestId), 2000)
-})
+  performGlobalSearch(query, requestId)
+}
 
 async function performGlobalSearch(query: string, requestId: number) {
   const responses = await Promise.allSettled([
@@ -163,7 +164,6 @@ onMounted(() => {
 
 onUnmounted(() => {
   if (clockTimer) clearInterval(clockTimer)
-  if (searchTimer) clearTimeout(searchTimer)
   document.removeEventListener('click', handleSearchOutside)
 })
 </script>
@@ -192,12 +192,13 @@ onUnmounted(() => {
             class="app-header__search-input"
             type="text"
             :placeholder="placeholder"
-            @focus="searchOpen = !!searchValue.trim()"
+            @keydown.enter.prevent="handleSearchEnter"
+            @focus="searchOpen = searchResults.length > 0"
           />
           <button v-if="searchValue" class="app-header__search-clear" aria-label="Clear search" @click="clearSearch">
             <Icon name="lucide:x" :size="14" />
           </button>
-          <span v-else class="app-header__search-kbd">⌘K</span>
+          <span v-else class="app-header__search-kbd">Enter</span>
         </div>
 
         <div v-if="searchOpen" class="app-header__search-results">
@@ -441,6 +442,7 @@ onUnmounted(() => {
   border-radius: var(--radius-md);
   cursor: pointer;
   transition: background var(--transition-base);
+  margin-top: 0px
 }
 
 .app-header__icon-btn:hover {
