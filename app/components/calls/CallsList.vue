@@ -560,11 +560,6 @@ watch(
 }
 
 /* Created time */
-.col-created {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
 .elapsed-time {
   font-size: var(--font-size-xs);
   color: var(--color-text-primary);

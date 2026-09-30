@@ -523,11 +523,7 @@ watch(
 }
 
 /* Created time */
-.col-created {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
+.col-created > span { display: block; }
 .elapsed-time {
   font-size: var(--font-size-xs);
   color: var(--color-text-primary);
@@ -561,6 +557,7 @@ watch(
 .address-text {
   display: -webkit-box;
   -webkit-line-clamp: 2;
+  line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
   max-width: 200px;
