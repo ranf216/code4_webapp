@@ -166,6 +166,12 @@ export interface AssignPostResponse {
   warning?: PostEligibilityWarning
 }
 
+export interface UnassignPostRequest extends ShiftIdRequest {
+  '#request': 'Shift/unassign_post'
+  officer_id: string
+  post_id: number
+}
+
 export interface AllocationBoardOfficer {
   officer_id: string
   name: string
