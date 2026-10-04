@@ -2,10 +2,12 @@
 import { ref, computed, watch, onMounted } from 'vue'
 import { assetApi } from '~/api/asset'
 import { communityApi } from '~/api/community'
+import { postOrderApi } from '~/api/postOrder'
 import { ApiError } from '~/api/base'
 import { useToastStore } from '~/stores/toast'
 import type { Community } from '~/api/community'
 import type { Post as ApiPost, PostPriority } from '~/api/types/asset'
+import type { PostOrder } from '~/api/types/postOrder'
 import type { PostFormData } from './AddPostModal.vue'
 
 interface GridPost {
@@ -37,6 +39,9 @@ const toastStore = useToastStore()
 const communities = ref<Community[]>([])
 const selectedCommunityId = ref<string>('')
 const posts = ref<GridPost[]>([])
+// Interim for §1.7: post_order_id is not in Asset API yet, so we map
+// PostOrder.post_id -> PostOrder via PostOrder/get_post_orders_list.
+const postOrdersByPostId = ref<Map<number, PostOrder>>(new Map())
 const totalItems = ref(0)
 const isLoading = ref(false)
 const priorities = ref<string[]>(['Urgent', 'Important', 'Normal', 'Low'])
@@ -150,16 +155,29 @@ async function loadPosts() {
   if (!communityId) return
   isLoading.value = true
   try {
-    const response = await assetApi.getPostsList({
-      community_id: communityId,
-      include_inactive: statusFilter.value === 'all',
-      search_text: debouncedSearchQuery.value.trim() || undefined,
-      sort_by: sortBy.value,
-      sort_dir: sortDir.value,
-      page: page.value - 1,
-    }, { showLoading: false })
+    const [response, poResponse] = await Promise.all([
+      assetApi.getPostsList({
+        community_id: communityId,
+        include_inactive: statusFilter.value === 'all',
+        search_text: debouncedSearchQuery.value.trim() || undefined,
+        sort_by: sortBy.value,
+        sort_dir: sortDir.value,
+        page: page.value - 1,
+      }, { showLoading: false }),
+      postOrderApi.getPostOrdersList({ community_id: communityId, limit: 100 }, { showLoading: false })
+        .catch(() => null),
+    ])
     posts.value = (response.posts || []).map(mapApiPost)
     totalItems.value = response.num_of_items || posts.value.length
+    const map = new Map<number, PostOrder>()
+    for (const po of poResponse?.post_orders || []) {
+      // Prefer non-archived PO if multiple exist for the same post
+      const existing = map.get(po.post_id)
+      if (!existing || (existing.status === 'archived' && po.status !== 'archived')) {
+        map.set(po.post_id, po)
+      }
+    }
+    postOrdersByPostId.value = map
   } catch (error) {
     console.error('Failed to load posts:', error)
     toastStore.error('Failed to load posts')
@@ -400,6 +418,7 @@ onMounted(() => {
             <th class="col-shape">{{ t('map.shape') }}</th>
             <th class="col-equipment">{{ t('map.equipment') }}</th>
             <th class="col-status">{{ t('common.status') }}</th>
+            <th class="col-post-order">{{ t('post_orders.list_title') }}</th>
             <th class="col-date clickable" @click="toggleSort('created_on')">
               <span>{{ t('map.created') }}</span>
               <Icon :name="sortIcon('created_on')" :size="14" />
@@ -430,6 +449,17 @@ onMounted(() => {
             <td class="col-equipment" :title="post.equipment">{{ truncate(post.equipment) }}</td>
             <td class="col-status">
               <span :class="['status-badge', post.active ? 'status-active' : 'status-inactive']">{{ post.active ? t('common.active') : t('common.inactive') }}</span>
+            </td>
+            <td class="col-post-order">
+              <NuxtLink
+                v-if="postOrdersByPostId.get(post.postId)"
+                :to="`/post-orders/${postOrdersByPostId.get(post.postId)!.post_order_id}`"
+                class="po-link"
+                @click.stop
+              >
+                PO-{{ postOrdersByPostId.get(post.postId)!.post_order_id }}
+              </NuxtLink>
+              <span v-else class="text-muted">—</span>
             </td>
             <td class="col-date">{{ formatDateTime(post.createdOn) }}</td>
             <td class="col-date">{{ formatDateTime(post.lastUpdated) }}</td>
@@ -467,6 +497,7 @@ onMounted(() => {
         createdOn: selectedPost.createdOn,
         lastUpdated: selectedPost.lastUpdated,
       }"
+      :post-order="postOrdersByPostId.get(selectedPost.postId) ?? null"
       @close="closeDetail"
       @edit="openEditFromDrawer(selectedPost)"
       @toggle="togglePostActive(selectedPost)"
@@ -667,7 +698,17 @@ onMounted(() => {
 .col-shape { width: 90px; }
 .col-equipment { width: 140px; }
 .col-status { width: 100px; }
+.col-post-order { width: 110px; }
 .col-date { width: 175px; }
+
+.po-link {
+  font-family: monospace;
+  font-size: var(--font-size-xs);
+  color: var(--color-accent);
+  text-decoration: none;
+}
+
+.po-link:hover { text-decoration: underline; }
 
 .post-id {
   font-family: monospace;

@@ -2,6 +2,10 @@
 import { settingsApi } from '~/api/settings'
 import type { PostOrderSectionTypeItem } from '~/api/settings'
 
+const props = defineProps<{
+  hideTitle?: boolean
+}>()
+
 const { t } = useTranslation()
 
 interface SectionType {
@@ -24,6 +28,7 @@ const editingId = ref<string | null>(null)
 // Delete confirmation modal state
 const showDeleteModal = ref(false)
 const deletingId = ref<string | null>(null)
+const deletingName = ref('')
 
 // Form fields
 const formName = ref('')
@@ -41,7 +46,7 @@ async function fetchSectionTypes() {
         id: item.type_id,
         name: item.name,
         clientVisible: item.client_visible,
-        description: item.short_description,
+        description: item.short_description || '',
         active: item.active,
       }))
     }
@@ -79,7 +84,7 @@ function openEditModal(section: SectionType) {
   editingId.value = section.id
   formName.value = section.name
   formClientVisible.value = section.clientVisible
-  formDescription.value = section.description
+  formDescription.value = section.description || ''
   formActive.value = section.active
   showModal.value = true
 }
@@ -89,7 +94,7 @@ function closeModal() {
 }
 
 async function handleSubmit() {
-  if (!formName.value.trim() || !formDescription.value.trim()) return
+  if (!formName.value.trim()) return
   try {
     if (isEditing.value && editingId.value) {
       const response = await settingsApi.updatePostOrderSectionType(
@@ -125,14 +130,14 @@ async function handleSubmit() {
   }
 }
 
-// Handle delete - open confirm modal
-function handleDelete(typeId: string) {
-  deletingId.value = typeId
+// Deactivate (soft-delete) — existing post orders using the type are unaffected
+function handleDeactivate(section: SectionType) {
+  deletingId.value = section.id
+  deletingName.value = section.name
   showDeleteModal.value = true
 }
 
-// Confirm delete
-async function confirmDelete() {
+async function confirmDeactivate() {
   if (!deletingId.value) return
 
   try {
@@ -140,20 +145,42 @@ async function confirmDelete() {
     if (response.rc === 0) {
       await fetchSectionTypes()
     } else {
-      alert(response.message || 'Failed to delete section type')
+      alert(response.message || 'Failed to deactivate section type')
     }
   } catch (err) {
-    console.error('Error deleting section type:', err)
-    alert('Failed to delete section type')
+    console.error('Error deactivating section type:', err)
+    alert('Failed to deactivate section type')
   } finally {
     closeDeleteModal()
   }
 }
 
-// Close delete modal
+// Reactivate a deactivated type
+async function handleReactivate(section: SectionType) {
+  try {
+    const response = await settingsApi.updatePostOrderSectionType(
+      section.id,
+      section.name,
+      section.clientVisible,
+      section.description,
+      true
+    )
+    if (response.rc === 0) {
+      await fetchSectionTypes()
+    } else {
+      alert(response.message || 'Failed to reactivate section type')
+    }
+  } catch (err) {
+    console.error('Error reactivating section type:', err)
+    alert('Failed to reactivate section type')
+  }
+}
+
+// Close deactivate modal
 function closeDeleteModal() {
   showDeleteModal.value = false
   deletingId.value = null
+  deletingName.value = ''
 }
 </script>
 
@@ -162,7 +189,7 @@ function closeDeleteModal() {
     <!-- Header -->
     <div class="section-types-header">
       <div>
-        <h2 class="section-types-title">{{ t('settings.post_order_sections.list_title') }}</h2>
+        <h2 v-if="!props.hideTitle" class="section-types-title">{{ t('settings.post_order_sections.list_title') }}</h2>
         <p class="section-types-subtitle">{{ t('settings.types.total') }}: {{ filteredSectionTypes.length }} {{ t('settings.post_order_sections.sections_count') }}</p>
       </div>
       <div class="section-types-actions">
@@ -215,8 +242,21 @@ function closeDeleteModal() {
                 <button class="btn-icon" :title="t('common.edit')" @click="openEditModal(section)">
                   <Icon name="lucide:pencil" :size="14" />
                 </button>
-                <button class="btn-icon btn-icon--danger" :title="t('common.delete')" @click="handleDelete(section.id)">
-                  <Icon name="lucide:trash-2" :size="14" />
+                <button
+                  v-if="section.active"
+                  class="btn-icon btn-icon--warning"
+                  :title="t('settings.post_order_sections.deactivate')"
+                  @click="handleDeactivate(section)"
+                >
+                  <Icon name="lucide:archive" :size="14" />
+                </button>
+                <button
+                  v-else
+                  class="btn-icon btn-icon--ok"
+                  :title="t('settings.post_order_sections.reactivate')"
+                  @click="handleReactivate(section)"
+                >
+                  <Icon name="lucide:refresh-ccw" :size="14" />
                 </button>
               </div>
             </td>
@@ -252,7 +292,7 @@ function closeDeleteModal() {
 
         <!-- Short Description -->
         <div class="form-field">
-          <label class="form-label">{{ t('settings.post_order_sections.short_description') }} *</label>
+          <label class="form-label">{{ t('settings.post_order_sections.short_description') }}</label>
           <textarea
             v-model="formDescription"
             class="form-textarea"
@@ -302,23 +342,24 @@ function closeDeleteModal() {
         <AppButton
           :text="isEditing ? t('common.save') : t('common.add')"
           type="primary"
-          :disabled="!formName.trim() || !formDescription.trim()"
+          :disabled="!formName.trim()"
           @click="handleSubmit"
         />
       </template>
     </AppDialogModal>
 
-    <!-- Delete Confirmation Modal -->
+    <!-- Deactivate Confirmation Modal -->
     <AppDialogModal
       :show="showDeleteModal"
-      :title="t('settings.post_order_sections.delete_title')"
+      :title="t('settings.post_order_sections.deactivate_title')"
       max-width="400px"
       @close="closeDeleteModal"
     >
-      <p>{{ t('settings.types.delete_confirm') }}</p>
+      <p>{{ t('settings.post_order_sections.deactivate_confirm', { name: deletingName }) }}</p>
+      <p class="deactivate-hint">{{ t('settings.post_order_sections.deactivate_hint') }}</p>
       <template #footer>
         <AppButton :text="t('common.cancel')" type="ghost" @click="closeDeleteModal" />
-        <AppButton :text="t('common.delete')" type="danger" @click="confirmDelete" />
+        <AppButton :text="t('settings.post_order_sections.deactivate')" type="danger" @click="confirmDeactivate" />
       </template>
     </AppDialogModal>
   </div>
@@ -459,10 +500,19 @@ function closeDeleteModal() {
   color: var(--color-text-secondary);
   cursor: pointer;
   transition: all 0.2s ease;
+  margin: 0px;
 }
 
 .btn-icon:hover { background: rgba(255,255,255,0.05); color: var(--color-text-primary); }
 .btn-icon--danger:hover { background: rgba(239, 68, 68, 0.1); color: #ef4444; }
+.btn-icon--warning:hover { background: rgba(245, 158, 11, 0.1); color: #f59e0b; }
+.btn-icon--ok:hover { background: rgba(34, 197, 94, 0.1); color: #22c55e; }
+
+.deactivate-hint {
+  margin: var(--space-2) 0 0;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+}
 
 .empty-state {
   text-align: center;

@@ -2,11 +2,13 @@
 import { ref, reactive, computed, watch, onMounted, onUnmounted } from 'vue'
 import { assetApi } from '~/api/asset'
 import { communityApi } from '~/api/community'
+import { postOrderApi } from '~/api/postOrder'
 import { ApiError } from '~/api/base'
 import { fileToBase64 } from '~/composables/useFileApi'
 import { useToastStore } from '~/stores/toast'
 import type { Community } from '~/api/community'
 import type { Asset as ApiAsset, AssetLocation, AssetTypeMeta, MapZone as ApiMapZone, Post as ApiPost, PostPriorityMeta } from '~/api/types/asset'
+import type { PostOrder } from '~/api/types/postOrder'
 import type { AssetFormData } from './AddAssetModal.vue'
 import type { PostFormData } from './AddPostModal.vue'
 import type { ZoneFormData } from './AddZoneModal.vue'
@@ -20,6 +22,10 @@ const communities = ref<Community[]>([])
 const selectedCommunityId = ref('')
 const isLoadingMapData = ref(false)
 let mapDataRequestId = 0
+
+// Interim for §1.7: post_order_id is not in Asset API yet, so we map
+// PostOrder.post_id -> PostOrder via PostOrder/get_post_orders_list.
+const postOrdersByPostId = ref<Map<number, PostOrder>>(new Map())
 
 const selectedCommunity = computed(() => communities.value.find(community => String(community.community_id) === selectedCommunityId.value))
 const selectedCommunityName = computed(() => selectedCommunity.value?.name ?? '')
@@ -304,7 +310,7 @@ async function loadMapData() {
   selectedItem.value = null
   try {
     const searchText = debouncedSearchQuery.value.trim() || undefined
-    const [assets, posts, zonesResponse] = await Promise.all([
+    const [assets, posts, zonesResponse, poResponse] = await Promise.all([
       fetchAllAssetPages({
         community_id: communityId,
         asset_type: selectedAssetTypes.value.length === 1 ? getAssetTypeKey(selectedAssetTypes.value[0]!) : undefined,
@@ -312,8 +318,18 @@ async function loadMapData() {
       }),
       fetchAllPostPages({ community_id: communityId, include_inactive: true, search_text: searchText }),
       assetApi.getMapZones({ community_id: communityId, zone_type: selectedZoneType.value === 'all' ? undefined : selectedZoneType.value }, { showLoading: false }),
+      postOrderApi.getPostOrdersList({ community_id: communityId, limit: 100 }, { showLoading: false })
+        .catch(() => null),
     ])
     if (requestId !== mapDataRequestId) return
+    const poMap = new Map<number, PostOrder>()
+    for (const po of poResponse?.post_orders || []) {
+      const existing = poMap.get(po.post_id)
+      if (!existing || (existing.status === 'archived' && po.status !== 'archived')) {
+        poMap.set(po.post_id, po)
+      }
+    }
+    postOrdersByPostId.value = poMap
     mapItems.value = [
       ...assets.map(mapApiAsset),
       ...posts.map(mapApiPost),
@@ -1528,6 +1544,7 @@ async function handleUploadMapSave(data: { communityId: string; file: File }) {
       <PostDetailDrawer
         v-else-if="selectedItem && selectedItem.type === 'post'"
         :post="selectedItem"
+        :post-order="postOrdersByPostId.get(Number(selectedItem.id.replace('PST-', ''))) ?? null"
         @close="selectedItem = null"
         @edit="openEditModal(selectedItem)"
         @toggle="togglePostActive(selectedItem)"

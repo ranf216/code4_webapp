@@ -65,7 +65,7 @@ const isArchived = computed(() => currentStatus.value === 'archived')
 const canEdit = computed(() => !isArchived.value)
 const canPublish = computed(() => currentStatus.value === 'draft' && !isArchived.value)
 const canDelete = computed(() => currentStatus.value === 'draft' && historyEntries.value.length === 0 && !isArchived.value)
-const canArchive = computed(() => currentStatus.value === 'published' && !isArchived.value)
+const canArchive = computed(() => (currentStatus.value === 'published' || (currentStatus.value === 'draft' && historyEntries.value.length > 0)) && !isArchived.value)
 
 function formatUtc(utcDateStr: string | null): string {
   if (!utcDateStr) return '—'

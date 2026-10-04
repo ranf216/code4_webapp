@@ -4,6 +4,7 @@ import { useTranslation } from '~/composables/useI18n'
 import { postOrderApi } from '~/api/postOrder'
 import { communityApi } from '~/api/community'
 import type { Community } from '~/api/community'
+import { useToastStore } from '~/stores/toast'
 import { utcToLocal } from '~/utils/dateTime'
 import type { PostOrder, PostOrderStatus } from '~/api/types/postOrder'
 
@@ -11,6 +12,7 @@ type SortBy = 'community_name' | 'post_name' | 'status' | 'last_published_on'
 
 const { t } = useTranslation()
 const router = useRouter()
+const toastStore = useToastStore()
 
 const postOrders = ref<PostOrder[]>([])
 const totalCount = ref(0)
@@ -157,6 +159,19 @@ const showDeleteModal = ref(false)
 const orderToDelete = ref<PostOrder | null>(null)
 const deleting = ref(false)
 
+function canDeletePo(po: PostOrder): boolean {
+  // Spec: draft status, no published history.
+  // Only truly-new drafts (never published) can be deleted.
+  return po.status === 'draft' && !po.last_published_on
+}
+
+function canArchivePo(po: PostOrder): boolean {
+  // Published POs can be archived. Draft POs that have been published
+  // before (i.e. edited after publish but not yet re-published) also
+  // have published history so they must be archived, not deleted.
+  return po.status === 'published' || (po.status === 'draft' && !!po.last_published_on)
+}
+
 function openDeleteModal(po: PostOrder, event: MouseEvent) {
   event.stopPropagation()
   orderToDelete.value = po
@@ -170,11 +185,40 @@ async function handleDeleteConfirm() {
     await postOrderApi.deletePostOrder(orderToDelete.value.post_order_id)
     showDeleteModal.value = false
     orderToDelete.value = null
+    toastStore.success(t('post_orders.delete_success'))
     await fetchPostOrders()
   } catch (err) {
     console.error('Failed to delete post order:', err)
+    toastStore.error(err instanceof Error ? err.message : t('post_orders.delete_failed'))
   } finally {
     deleting.value = false
+  }
+}
+
+const showArchiveModal = ref(false)
+const orderToArchive = ref<PostOrder | null>(null)
+const archiving = ref(false)
+
+function openArchiveModal(po: PostOrder, event: MouseEvent) {
+  event.stopPropagation()
+  orderToArchive.value = po
+  showArchiveModal.value = true
+}
+
+async function handleArchiveConfirm() {
+  if (!orderToArchive.value || archiving.value) return
+  archiving.value = true
+  try {
+    await postOrderApi.archivePostOrder(orderToArchive.value.post_order_id)
+    showArchiveModal.value = false
+    orderToArchive.value = null
+    toastStore.success(t('post_orders.archive_success'))
+    await fetchPostOrders()
+  } catch (err) {
+    console.error('Failed to archive post order:', err)
+    toastStore.error(err instanceof Error ? err.message : t('post_orders.archive_failed'))
+  } finally {
+    archiving.value = false
   }
 }
 
@@ -348,7 +392,15 @@ onUnmounted(() => {
                   <Icon name="lucide:pencil" :size="14" />
                 </NuxtLink>
                 <button
-                  v-if="po.status === 'draft'"
+                  v-if="canArchivePo(po)"
+                  class="action-btn action-btn--icon action-btn--warning"
+                  :title="t('post_orders.btn_archive')"
+                  @click="openArchiveModal(po, $event)"
+                >
+                  <Icon name="lucide:archive" :size="14" />
+                </button>
+                <button
+                  v-if="canDeletePo(po)"
                   class="action-btn action-btn--icon action-btn--danger"
                   :title="t('common.delete')"
                   @click="openDeleteModal(po, $event)"
@@ -402,6 +454,18 @@ onUnmounted(() => {
       @close="showDeleteModal = false"
       @cancel="showDeleteModal = false"
       @ok="handleDeleteConfirm"
+    />
+
+    <!-- Archive Modal -->
+    <AppModal
+      :show="showArchiveModal"
+      :title="t('post_orders.archive_title')"
+      :message="t('post_orders.archive_message')"
+      :cancel-text="t('common.cancel')"
+      :ok-text="t('post_orders.btn_archive')"
+      @close="showArchiveModal = false"
+      @cancel="showArchiveModal = false"
+      @ok="handleArchiveConfirm"
     />
   </div>
 </template>
@@ -758,6 +822,11 @@ onUnmounted(() => {
 .action-btn--danger:hover {
   border-color: var(--color-critical);
   color: var(--color-critical);
+}
+
+.action-btn--warning:hover {
+  border-color: #f59e0b;
+  color: #f59e0b;
 }
 
 /* Pagination */
