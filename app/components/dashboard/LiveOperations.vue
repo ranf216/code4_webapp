@@ -1,13 +1,59 @@
 <script setup lang="ts">
+import { trackingApi } from '~/api/tracking'
+import type { LiveTrackingOfficer } from '~/api/types/tracking'
+
 const liveOpsRef = ref<HTMLElement | null>(null)
 const isFullscreen = ref(false)
+const officers = ref<LiveTrackingOfficer[]>([])
+const loading = ref(true)
+const error = ref('')
+const mapCenter = ref({ lat: 34.0522, lng: -118.2437 })
+const mapZoom = ref(4)
 
-const sampleMarkers = [
-  { lat: 34.0545, lng: -118.2450, status: 'active'     as const },
-  { lat: 34.0510, lng: -118.2410, status: 'responding' as const },
-  { lat: 34.0530, lng: -118.2480, status: 'idle'       as const },
-  { lat: 34.0500, lng: -118.2460, status: 'active'     as const },
-]
+const markers = computed(() => officers.value.map((officer: LiveTrackingOfficer) => ({
+  id: officer.officer_id,
+  lat: officer.latitude,
+  lng: officer.longitude,
+  status: officer.status,
+  label: [officer.first_name, officer.last_name].filter(Boolean).join(' ') || officer.officer_id,
+  initials: [officer.first_name, officer.last_name]
+    .filter(Boolean)
+    .map((name: string) => name.charAt(0).toUpperCase())
+    .join('')
+    .slice(0, 2) || '—',
+  image: officer.image,
+  heading: officer.heading,
+  activeCallCategory: officer.active_call_category,
+})))
+
+watch(
+  officers,
+  (newOfficers: LiveTrackingOfficer[], oldOfficers: LiveTrackingOfficer[] | undefined) => {
+    if (newOfficers.length && !oldOfficers?.length) {
+      const first = newOfficers[0]!
+      mapCenter.value = { lat: first.latitude, lng: first.longitude }
+      mapZoom.value = 15
+    }
+  },
+  { flush: 'post' },
+)
+
+async function loadLiveOps() {
+  loading.value = true
+  error.value = ''
+  try {
+    const response = await trackingApi.getLiveTracking({}, { showLoading: false })
+    if (response.rc === 0) {
+      officers.value = response.officers ?? []
+    } else {
+      error.value = response.message || 'Unable to load live tracking data.'
+    }
+  } catch {
+    error.value = 'Unable to load live tracking data.'
+  } finally {
+    loading.value = false
+  }
+}
 
 function updateFullscreenState() {
   isFullscreen.value = document.fullscreenElement === liveOpsRef.value
@@ -28,6 +74,7 @@ async function toggleFullscreen() {
 
 onMounted(() => {
   document.addEventListener('fullscreenchange', updateFullscreenState)
+  loadLiveOps()
 })
 
 onUnmounted(() => {
@@ -41,10 +88,14 @@ onUnmounted(() => {
     <div class="live-ops__header">
       <span class="live-ops__title">LIVE OPERATIONS</span>
       <div class="live-ops__actions">
-        <span class="live-badge">
+        <!-- <span class="live-badge">
           <span class="live-badge__dot" />
           Live
-        </span>
+        </span> -->
+        <NuxtLink to="/live-tracking" class="live-ops__link" title="Open Live Tracking">
+          <Icon name="lucide:map" :size="14" />
+          <span class="live-ops__link-text">Live Tracking</span>
+        </NuxtLink>
         <button class="live-ops__fullscreen" @click="toggleFullscreen">
           <Icon :name="isFullscreen ? 'lucide:minimize-2' : 'lucide:maximize-2'" :size="14" />
           {{ isFullscreen ? 'Exit full screen' : 'Open full screen' }}
@@ -54,10 +105,19 @@ onUnmounted(() => {
 
     <!-- Map -->
     <div class="live-ops__map">
+      <div v-if="loading" class="live-ops__loading">
+        <Icon name="lucide:loader-circle" :size="24" class="live-ops__loading-spin" />
+        <span>Loading live operations…</span>
+      </div>
+      <div v-else-if="error" class="live-ops__error">
+        <Icon name="lucide:alert-circle" :size="20" />
+        <span>{{ error }}</span>
+      </div>
       <GoogleMap
-        :center="{ lat: 34.0522, lng: -118.2437 }"
-        :zoom="15"
-        :markers="sampleMarkers"
+        v-else
+        :center="mapCenter"
+        :zoom="mapZoom"
+        :markers="markers"
         height="100%"
       />
     </div>
@@ -131,9 +191,29 @@ onUnmounted(() => {
   cursor: pointer;
   transition: background var(--transition-base);
   font-family: var(--font-family);
+  margin: 0px;
 }
 .live-ops__fullscreen:hover {
   background: var(--color-bg-overlay);
+}
+.live-ops__link {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--font-size-base);
+  font-weight: 500;
+  padding: 5px var(--space-3);
+  background: var(--color-accent-subtle);
+  border: 1px solid var(--color-accent);
+  border-radius: var(--radius-md);
+  color: var(--color-accent);
+  cursor: pointer;
+  transition: background var(--transition-base);
+  text-decoration: none;
+}
+.live-ops__link:hover {
+  background: var(--color-accent);
+  color: #fff;
 }
 
 .live-ops__map {
@@ -142,6 +222,24 @@ onUnmounted(() => {
   background: var(--color-bg-elevated);
   position: relative;
   overflow: hidden;
+}
+.live-ops__loading,
+.live-ops__error {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+}
+.live-ops__error {
+  color: var(--color-critical);
+}
+.live-ops__loading-spin {
+  animation: spin 1s linear infinite;
 }
 .live-ops__map-placeholder {
   display: flex;

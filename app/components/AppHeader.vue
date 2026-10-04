@@ -87,7 +87,7 @@ async function performGlobalSearch(query: string, requestId: number) {
     callApi.getCalls({ search_text: query, offset: 0, limit: 5 }, { showLoading: false }),
     residentApi.getResidents({ search_text: query, include_inactive: true }, { showLoading: false }),
     officerApi.getOfficers({ search_text: query, include_inactive: true }, { showLoading: false }),
-    assetApi.getPostsList({ community_id: 0, search_text: query, include_inactive: true, page: 0 }, { showLoading: false }),
+    assetApi.getPostsList({ search_text: query, include_inactive: true, page: 0 }, { showLoading: false }),
   ])
   if (requestId !== searchRequestId) return
 

@@ -230,6 +230,7 @@ function renderOverlays() {
     trackOverlay(new google.maps.Polygon({
       map,
       paths: b.paths,
+      clickable: false,
       strokeColor: '#4f6ef7',
       strokeOpacity: 0.8,
       strokeWeight: 2,

@@ -9,12 +9,15 @@ export interface SectionData {
   clientVisible: boolean
   notes: string
   attachments: string[]
+  existingAttachments: { url: string }[]
+  inactiveType?: boolean
 }
 
 export interface SectionTypeOption {
   type_id: string
   name: string
   client_visible: boolean
+  active?: boolean
 }
 
 const props = defineProps<{
@@ -29,23 +32,43 @@ const emit = defineEmits<{
   'move-up': []
   'move-down': []
   'remove': []
+  'dragstart': []
+  'dragend': []
 }>()
 
 const { t } = useTranslation()
 
 const collapsed = ref(false)
+const fileUploadRef = ref<{ uploadAll: () => Promise<string[]> } | null>(null)
+
+defineExpose({
+  /** Upload pending attachments, returns file_ids */
+  uploadAttachments: async () => (await fileUploadRef.value?.uploadAll()) ?? [],
+})
 
 function update<K extends keyof SectionData>(key: K, value: SectionData[K]) {
   emit('update:modelValue', { ...props.modelValue, [key]: value })
 }
 
+function removeExistingAttachment(url: string) {
+  update('existingAttachments', props.modelValue.existingAttachments.filter(a => a.url !== url))
+}
+
+function attachmentName(url: string): string {
+  try {
+    return decodeURIComponent(url.split('/').pop() || url)
+  } catch {
+    return url
+  }
+}
+
 function onTypeChange(event: Event) {
-  const newType = (event.target as HTMLSelectElement).value
-  const matched = props.sectionTypes.find((st) => st.name === newType)
+  const newTypeId = (event.target as HTMLSelectElement).value
+  const matched = props.sectionTypes.find((st) => st.type_id === newTypeId)
   emit('update:modelValue', {
     ...props.modelValue,
-    type: newType,
-    title: newType,
+    type: newTypeId,
+    title: matched?.name ?? props.modelValue.title,
     clientVisible: matched ? matched.client_visible : props.modelValue.clientVisible,
   })
 }
@@ -58,8 +81,97 @@ function onToggleClientVisible(event: Event) {
   update('clientVisible', (event.target as HTMLInputElement).checked)
 }
 
-function onInputDescription(event: Event) {
-  update('description', (event.target as HTMLTextAreaElement).value)
+import { renderMarkdown } from '~/utils/markdown'
+
+// ─── Rich text editor (contenteditable ↔ markdown) ──────────
+const descEditorRef = ref<HTMLElement | null>(null)
+const lastEmittedDesc = ref(props.modelValue.description)
+const descCharCount = ref(0)
+
+// HTML → markdown (for storing/sending to the API)
+function nodeToMd(node: Node): string {
+  if (node.nodeType === Node.TEXT_NODE) return node.textContent ?? ''
+  if (!(node instanceof HTMLElement)) return ''
+  const inner = Array.from(node.childNodes).map(nodeToMd).join('')
+  switch (node.tagName) {
+    case 'B':
+    case 'STRONG': return `**${inner}**`
+    case 'I':
+    case 'EM': return `*${inner}*`
+    case 'S':
+    case 'STRIKE':
+    case 'DEL': return `~~${inner}~~`
+    case 'A': {
+      const href = node.getAttribute('href') || ''
+      return `[${inner || href}](${href})`
+    }
+    case 'BR': return '\n'
+    case 'UL':
+      return Array.from(node.children)
+        .map(li => `- ${nodeToMd(li).trim()}\n`)
+        .join('')
+    case 'OL':
+      return Array.from(node.children)
+        .map((li, i) => `${i + 1}. ${nodeToMd(li).trim()}\n`)
+        .join('')
+    case 'DIV':
+    case 'P': return inner ? `${inner}\n` : '\n'
+    case 'LI': return `${inner}\n`
+    default: return inner
+  }
+}
+
+function htmlToMarkdown(root: HTMLElement): string {
+  return Array.from(root.childNodes)
+    .map(nodeToMd)
+    .join('')
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(/[ \t]+$/gm, '')
+    .trimEnd()
+}
+
+function syncDescEditor() {
+  const el = descEditorRef.value
+  if (!el) return
+  el.innerHTML = renderMarkdown(props.modelValue.description)
+  descCharCount.value = (el.innerText || '').length
+  lastEmittedDesc.value = props.modelValue.description
+}
+
+function onDescInput() {
+  const el = descEditorRef.value
+  if (!el) return
+  descCharCount.value = (el.innerText || '').length
+  const md = htmlToMarkdown(el)
+  lastEmittedDesc.value = md
+  update('description', md)
+}
+
+// Re-render only when description changed externally (e.g. loading data,
+// section type switch) — never while the user is typing.
+watch(() => props.modelValue.description, (val) => {
+  if (val !== lastEmittedDesc.value) syncDescEditor()
+})
+
+onMounted(syncDescEditor)
+
+// Toolbar actions — execCommand keeps working on the retained selection
+// because buttons use @mousedown.prevent (editor never loses focus).
+function execFormat(cmd: string, value?: string) {
+  descEditorRef.value?.focus()
+  document.execCommand(cmd, false, value)
+  onDescInput()
+}
+
+const mdBold = () => execFormat('bold')
+const mdItalic = () => execFormat('italic')
+const mdStrike = () => execFormat('strikeThrough')
+const mdBullet = () => execFormat('insertUnorderedList')
+const mdOrdered = () => execFormat('insertOrderedList')
+
+function mdLink() {
+  const url = window.prompt('Link URL', 'https://')
+  if (url) execFormat('createLink', url)
 }
 
 function onInputNotes(event: Event) {
@@ -70,6 +182,16 @@ function onInputNotes(event: Event) {
 <template>
   <div class="form-card section-card" :class="{ 'section-card--collapsed': collapsed }">
     <div class="form-card__header" @click="collapsed = !collapsed">
+      <span
+        class="drag-handle"
+        draggable="true"
+        :title="t('post_orders.drag_to_reorder')"
+        @click.stop
+        @dragstart="emit('dragstart')"
+        @dragend="emit('dragend')"
+      >
+        <Icon name="lucide:grip-vertical" :size="16" />
+      </span>
       <Icon name="lucide:layers" :size="18" />
       <h3 class="form-card__title">
         <span class="section-card__index">{{ t('post_orders.section_label', { n: String(index + 1) }) }}</span>
@@ -119,10 +241,13 @@ function onInputNotes(event: Event) {
           class="field__select"
           @change="onTypeChange($event)"
         >
-          <option v-for="st in sectionTypes" :key="st.type_id" :value="st.name">
-            {{ st.name }}
+          <option v-for="st in sectionTypes" :key="st.type_id" :value="st.type_id">
+            {{ st.name }}{{ st.active === false ? ' (inactive)' : '' }}
           </option>
         </select>
+        <span v-if="modelValue.inactiveType" class="field__inactive-hint">
+          {{ t('post_orders.inactive_section_type') }}
+        </span>
       </div>
 
       <!-- Section Title -->
@@ -168,43 +293,53 @@ function onInputNotes(event: Event) {
         </label>
         <div class="rich-editor">
           <div class="rich-editor__toolbar">
-            <button type="button" class="toolbar-btn" title="Bold"><Icon name="lucide:bold" :size="14" /></button>
-            <button type="button" class="toolbar-btn" title="Italic"><Icon name="lucide:italic" :size="14" /></button>
-            <button type="button" class="toolbar-btn" title="Underline"><Icon name="lucide:underline" :size="14" /></button>
+            <button type="button" class="toolbar-btn" title="Bold" @mousedown.prevent="mdBold"><Icon name="lucide:bold" :size="14" /></button>
+            <button type="button" class="toolbar-btn" title="Italic" @mousedown.prevent="mdItalic"><Icon name="lucide:italic" :size="14" /></button>
+            <button type="button" class="toolbar-btn" title="Strikethrough" @mousedown.prevent="mdStrike"><Icon name="lucide:strikethrough" :size="14" /></button>
             <div class="toolbar-sep" />
-            <button type="button" class="toolbar-btn" title="Bullet List"><Icon name="lucide:list" :size="14" /></button>
-            <button type="button" class="toolbar-btn" title="Numbered List"><Icon name="lucide:list-ordered" :size="14" /></button>
+            <button type="button" class="toolbar-btn" title="Bullet List" @mousedown.prevent="mdBullet"><Icon name="lucide:list" :size="14" /></button>
+            <button type="button" class="toolbar-btn" title="Numbered List" @mousedown.prevent="mdOrdered"><Icon name="lucide:list-ordered" :size="14" /></button>
             <div class="toolbar-sep" />
-            <button type="button" class="toolbar-btn" title="Link"><Icon name="lucide:link" :size="14" /></button>
+            <button type="button" class="toolbar-btn" title="Link" @mousedown.prevent="mdLink"><Icon name="lucide:link" :size="14" /></button>
           </div>
-          <textarea
-            :value="modelValue.description"
-            class="rich-editor__textarea"
-            maxlength="10000"
-            :placeholder="t('post_orders.field_description_placeholder')"
-            rows="6"
-            @input="onInputDescription($event)"
+          <div
+            ref="descEditorRef"
+            class="rich-editor__textarea rich-editor__content"
+            contenteditable="true"
+            :data-placeholder="t('post_orders.field_description_placeholder')"
+            @input="onDescInput"
           />
-          <div class="rich-editor__count">{{ modelValue.description.length }} / 10,000</div>
+          <div class="rich-editor__count">{{ descCharCount }} / 10,000</div>
         </div>
       </div>
 
       <!-- Attachments -->
       <div class="field field--full">
+        <div v-if="modelValue.existingAttachments.length" class="existing-attachments">
+          <div v-for="att in modelValue.existingAttachments" :key="att.url" class="existing-attachment">
+            <Icon name="lucide:paperclip" :size="14" />
+            <a :href="att.url" target="_blank" rel="noopener" class="existing-attachment__name">{{ attachmentName(att.url) }}</a>
+            <button type="button" class="existing-attachment__remove" :title="t('common.remove')" @click="removeExistingAttachment(att.url)">
+              <Icon name="lucide:x" :size="12" />
+            </button>
+          </div>
+        </div>
         <FileUpload
+          ref="fileUploadRef"
           :model-value="modelValue.attachments"
           accept=".pdf,.jpg,.jpeg,.png,.mp4"
-          :max-files="5"
+          :max-files="5 - modelValue.existingAttachments.length"
           :max-size-mb="20"
-          :call-api="false"
-          :label="t('post_orders.field_attachments')"
+          :max-video-seconds="60"
+          :call-api="true"
+          :label="`${t('post_orders.field_attachments')} (${modelValue.existingAttachments.length + modelValue.attachments.length} / 5)`"
           :hint="t('post_orders.field_attachments_hint')"
           @update:model-value="update('attachments', $event)"
         />
       </div>
 
       <!-- Internal Notes -->
-      <div class="field field--full">
+      <div class="field field--full field--notes">
         <label class="field__label">{{ t('post_orders.field_notes') }}</label>
         <textarea
           :value="modelValue.notes"
@@ -410,6 +545,98 @@ function onInputNotes(event: Event) {
 .toolbar-btn:hover { background: var(--color-bg-overlay); color: var(--color-text-primary); }
 
 .toolbar-sep { width: 1px; height: 18px; background: var(--color-border); margin: 0 var(--space-1); }
+
+.rich-editor__content {
+  min-height: 140px;
+  padding: var(--space-3);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
+  overflow-y: auto;
+  line-height: 1.6;
+  outline: none;
+}
+
+.rich-editor__content:empty::before {
+  content: attr(data-placeholder);
+  color: var(--color-text-muted);
+  pointer-events: none;
+}
+
+.rich-editor__content :deep(p) { margin: 0 0 var(--space-2); }
+.rich-editor__content :deep(p:last-child) { margin-bottom: 0; }
+.rich-editor__content :deep(div) { margin: 0; }
+.rich-editor__content :deep(ul),
+.rich-editor__content :deep(ol) { margin: 0 0 var(--space-2); padding-left: var(--space-5); }
+.rich-editor__content :deep(a) { color: var(--color-accent); }
+.rich-editor__content :deep(del) { color: var(--color-text-muted); }
+
+.field__inactive-hint {
+  font-size: var(--font-size-xs);
+  color: var(--color-warn, #f59e0b);
+}
+
+.existing-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.existing-attachment {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-elevated);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+}
+
+.existing-attachment__name {
+  color: var(--color-accent);
+  text-decoration: none;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.existing-attachment__name:hover { text-decoration: underline; }
+
+.existing-attachment__remove {
+  display: inline-flex;
+  align-items: center;
+  background: transparent;
+  border: none;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  padding: 0;
+}
+
+.existing-attachment__remove:hover { color: var(--color-critical); }
+
+/* ── Drag handle ── */
+.drag-handle {
+  display: inline-flex;
+  align-items: center;
+  color: var(--color-text-muted);
+  cursor: grab;
+  padding: 0 var(--space-1);
+}
+
+.drag-handle:active { cursor: grabbing; }
+.drag-handle:hover { color: var(--color-text-primary); }
+
+/* ── Internal notes — visually distinguished ── */
+.field--notes .field__textarea {
+  background: rgba(245, 158, 11, 0.07);
+  border-color: rgba(245, 158, 11, 0.35);
+}
+
+.field--notes .field__label {
+  color: var(--color-warn, #f59e0b);
+}
 
 .rich-editor__textarea {
   width: 100%;

@@ -448,7 +448,7 @@ const workspaceMarkers = computed(() => visibleItems.value.map(item => ({
   points: item.points?.map(toGeoPoint),
   zoneType: item.type === 'zone' ? item.zoneType : undefined,
 })))
-const googleMapKey = computed(() => `${selectedCommunityId.value}:${workspaceMarkers.value.map(item => `${item.id}:${item.lat}:${item.lng}`).join('|')}`)
+const googleMapKey = computed(() => `${selectedCommunityId.value}:${mapBase.value}`)
 const drawingGeoPoints = computed(() => pendingPoints.value
   .filter((point): point is MapPoint & GeoPoint => point.lat != null && point.lng != null)
   .map(point => ({ lat: point.lat, lng: point.lng })))

@@ -808,5 +808,6 @@ onMounted(() => {
   border: 1px solid var(--color-border);
   background: var(--color-bg-base);
   color: var(--color-text-base);
+  margin: 0px
 }
 </style>

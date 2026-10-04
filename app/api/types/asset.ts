@@ -196,7 +196,7 @@ export interface DeleteAssetRequest {
 // Posts list
 export interface GetPostsListRequest {
   '#request': 'Asset/get_posts_list'
-  community_id: number
+  community_id?: number
   include_inactive?: boolean
   search_text?: string
   sort_by?: 'name' | 'priority' | 'created_on' | string

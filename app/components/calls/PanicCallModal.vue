@@ -2,8 +2,13 @@
 import { callApi } from '~/api/call'
 import FileUpload from '~/components/FileUpload.vue'
 import { officerApi } from '~/api/officer'
+import { residentApi } from '~/api/resident'
+import { trackingApi } from '~/api/tracking'
+import { ApiError } from '~/api/base'
 import type { Call } from '~/api/types/call'
 import type { Officer } from '~/api/types/officer'
+import type { Resident } from '~/api/types/resident'
+import type { GetOfficerLocationResponse } from '~/api/types/tracking'
 
 const props = defineProps<{
   show: boolean
@@ -35,6 +40,15 @@ const resolveError = ref('')
 const safetyConfirmed = ref(false)
 const photoUploadRef = ref<InstanceType<typeof FileUpload> | null>(null)
 const videoUploadRef = ref<InstanceType<typeof FileUpload> | null>(null)
+const officerLocation = ref<GetOfficerLocationResponse | null>(null)
+const isLoadingLocation = ref(false)
+const locationError = ref('')
+type ContactInfo = (Resident & { type: 'resident' }) | (Officer & { type: 'officer' })
+const contactInfo = ref<ContactInfo | null>(null)
+const showContactModal = ref(false)
+const isLoadingContact = ref(false)
+const contactError = ref('')
+const mapRef = ref<{ fitToVisibleMarkers: () => void } | null>(null)
 let requestId = 0
 
 const isActive = computed(() => panicCall.value?.status === 'new' || panicCall.value?.status === 'accepted')
@@ -49,6 +63,32 @@ const locationMarkers = computed(() => hasCoordinates.value && panicCall.value ?
   status: 'active' as const,
 }] : [])
 
+const officerLocationMarker = computed(() => {
+  if (!officerLocation.value) return []
+  const officer = officerLocation.value
+  const name = `${officer.first_name || ''} ${officer.last_name || ''}`.trim()
+  return [{
+    lat: Number(officer.location.latitude),
+    lng: Number(officer.location.longitude),
+    status: 'blue' as const,
+    label: name || officer.officer_id,
+    initials: name.split(' ').map((n: string) => n.charAt(0).toUpperCase()).join('').slice(0, 2) || '—',
+    lastUpdate: officer.location.recorded_on,
+  }]
+})
+
+const mapMarkers = computed(() => [...locationMarkers.value, ...officerLocationMarker.value])
+
+const mapCenter = computed(() => {
+  if (!hasCoordinates.value || !panicCall.value) return { lat: 0, lng: 0 }
+  const lat1 = Number(panicCall.value.latitude)
+  const lng1 = Number(panicCall.value.longitude)
+  if (!officerLocation.value) return { lat: lat1, lng: lng1 }
+  const lat2 = Number(officerLocation.value.location.latitude)
+  const lng2 = Number(officerLocation.value.location.longitude)
+  return { lat: (lat1 + lat2) / 2, lng: (lng1 + lng2) / 2 }
+})
+
 function formatDateTime(value: string | null | undefined): string {
   if (!value) return '—'
   const date = new Date(value.replace(' ', 'T'))
@@ -60,6 +100,11 @@ async function loadPanicCall() {
   isLoading.value = true
   errorMessage.value = ''
   panicCall.value = null
+  officerLocation.value = null
+  contactInfo.value = null
+  locationError.value = ''
+  contactError.value = ''
+  showContactModal.value = false
   try {
     if (props.callId) {
       const response = await callApi.getCall(props.callId, { showLoading: false })
@@ -85,6 +130,73 @@ async function loadPanicCall() {
 
 function handleClose() {
   emit('close')
+}
+
+async function handleViewLiveLocation() {
+  if (!panicCall.value?.officer_user_id) {
+    locationError.value = 'No officer assigned to this panic call.'
+    return
+  }
+  locationError.value = ''
+  isLoadingLocation.value = true
+  try {
+    const response = await trackingApi.getOfficerLocation(panicCall.value.officer_user_id, { showLoading: false })
+    if (response.rc === 0 && response.location) {
+      officerLocation.value = response as unknown as GetOfficerLocationResponse
+      await nextTick()
+      mapRef.value?.fitToVisibleMarkers()
+    } else {
+      locationError.value = response.message || 'Unable to load officer location.'
+    }
+  } catch (error) {
+    locationError.value = error instanceof Error ? error.message : 'Unable to load officer location.'
+  } finally {
+    isLoadingLocation.value = false
+  }
+}
+
+async function handleCorrespondUser() {
+  if (!panicCall.value?.resident_user_id) {
+    contactError.value = 'Contact information is not available.'
+    showContactModal.value = true
+    return
+  }
+  contactError.value = ''
+  isLoadingContact.value = true
+  showContactModal.value = true
+  contactInfo.value = null
+  const userId = panicCall.value.resident_user_id
+  try {
+    const residentResponse = await residentApi.getResident(userId, { showLoading: false })
+    if (residentResponse.resident) {
+      contactInfo.value = { ...residentResponse.resident, type: 'resident' }
+    } else {
+      contactError.value = residentResponse.message || 'Unable to load contact information.'
+    }
+  } catch (error) {
+    if (error instanceof ApiError && Number(error.rc) === 540) {
+      try {
+        const officerResponse = await officerApi.getOfficer(userId)
+        if (officerResponse.rc === 0 && officerResponse.officer) {
+          contactInfo.value = { ...officerResponse.officer, type: 'officer' }
+        } else {
+          contactError.value = officerResponse.message || 'Unable to load contact information.'
+        }
+      } catch (officerError) {
+        contactError.value = officerError instanceof Error ? officerError.message : 'Unable to load contact information.'
+      }
+    } else {
+      contactError.value = error instanceof Error ? error.message : 'Unable to load contact information.'
+    }
+  } finally {
+    isLoadingContact.value = false
+  }
+}
+
+function closeContactModal() {
+  showContactModal.value = false
+  contactInfo.value = null
+  contactError.value = ''
 }
 
 async function handleAssign() {
@@ -156,7 +268,7 @@ async function submitResolve() {
   }
 }
 
-watch(() => [props.show, props.callId] as const, ([show]) => {
+watch(() => props.show, (show: boolean) => {
   if (show) loadPanicCall()
 })
 </script>
@@ -202,11 +314,14 @@ watch(() => [props.show, props.callId] as const, ([show]) => {
               <div class="info-item full-width"><label>{{ t('calls.live_location') }}</label><span class="live-location"><Icon name="lucide:radio" :size="14" class="live-icon" />{{ liveLocationLabel }}</span></div>
               <div v-if="hasCoordinates" class="info-item full-width"><label>{{ t('calls.coordinates') }}</label><span>{{ panicCall.latitude }}, {{ panicCall.longitude }}</span></div>
             </div>
+            <p v-if="locationError" class="action-error">{{ locationError }}</p>
+            <p v-else-if="isLoadingLocation" class="action-loading"><Icon name="lucide:loader-2" :size="14" class="spin" /> Loading officer location…</p>
             <GoogleMap
+              ref="mapRef"
               v-if="hasCoordinates"
-              :center="{ lat: Number(panicCall.latitude), lng: Number(panicCall.longitude) }"
-              :markers="locationMarkers"
-              :zoom="15"
+              :center="mapCenter"
+              :markers="mapMarkers"
+              :zoom="officerLocation ? 14 : 15"
               height="180px"
             />
           </div>
@@ -232,8 +347,8 @@ watch(() => [props.show, props.callId] as const, ([show]) => {
           <div class="panic-actions">
             <button v-if="panicCall.status === 'new' && !panicCall.officer_user_id" class="action-btn assign-btn" @click="handleAssign"><Icon name="lucide:user-plus" :size="18" />{{ t('calls.assign_to_officer') }}</button>
             <button v-if="canResolve" class="action-btn resolve-btn" @click="openResolveModal"><Icon name="lucide:check-circle" :size="18" />{{ t('calls.resolve_panic') }}</button>
-            <button class="action-btn communicate-btn"><Icon name="lucide:phone" :size="18" />{{ t('calls.correspond_user') }}</button>
-            <button class="action-btn live-location-btn"><Icon name="lucide:navigation" :size="18" />{{ t('calls.view_live_location') }}</button>
+            <button class="action-btn communicate-btn" @click="handleCorrespondUser"><Icon name="lucide:phone" :size="18" />{{ t('calls.correspond_user') }}</button>
+            <button class="action-btn live-location-btn" :disabled="isLoadingLocation" @click="handleViewLiveLocation"><Icon name="lucide:navigation" :size="18" />{{ isLoadingLocation ? 'Loading…' : t('calls.view_live_location') }}</button>
           </div>
         </div>
       </div>
@@ -289,6 +404,34 @@ watch(() => [props.show, props.callId] as const, ([show]) => {
       <p v-if="assignError" class="assign-error">{{ assignError }}</p>
     </div>
   </AppModal>
+
+  <AppModal
+    :show="showContactModal"
+    :title="t('calls.correspond_user')"
+    :cancel-text="t('common.close')"
+    ok-text=""
+    max-width="400px"
+    @close="closeContactModal"
+    @cancel="closeContactModal"
+  >
+    <div class="contact-modal">
+      <div v-if="isLoadingContact" class="contact-loading"><Icon name="lucide:loader-2" :size="20" class="spin" />{{ t('common.loading') }}</div>
+      <div v-else-if="contactError" class="contact-error">{{ contactError }}</div>
+      <div v-else-if="contactInfo" class="contact-info">
+        <div class="contact-name">{{ [contactInfo.first_name, contactInfo.last_name].filter(Boolean).join(' ') }}</div>
+        <div class="contact-type">{{ contactInfo.type === 'officer' ? 'Officer' : 'Resident' }}</div>
+        <div v-if="contactInfo.phone_num" class="contact-row">
+          <Icon name="lucide:phone" :size="16" />
+          <a :href="`tel:${contactInfo.phone_num}`">{{ contactInfo.phone_num }}</a>
+        </div>
+        <div v-if="contactInfo.email" class="contact-row">
+          <Icon name="lucide:mail" :size="16" />
+          <a :href="`mailto:${contactInfo.email}`">{{ contactInfo.email }}</a>
+        </div>
+        <div v-if="!contactInfo.phone_num && !contactInfo.email" class="contact-empty">No contact information available.</div>
+      </div>
+    </div>
+  </AppModal>
 </template>
 
 <style scoped>
@@ -304,6 +447,17 @@ watch(() => [props.show, props.callId] as const, ([show]) => {
 .resolve-label { display: flex; flex-direction: column; gap: var(--space-2); color: var(--color-text-secondary); font-size: var(--font-size-sm); }
 .resolve-textarea { width: 100%; resize: vertical; padding: var(--space-2); border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-bg-base); color: var(--color-text-primary); font: inherit; }
 .resolve-btn { border-color: var(--color-ok); color: var(--color-ok); }
+.action-error { color: var(--color-critical); font-size: var(--font-size-sm); margin-top: var(--space-2); }
+.action-loading { display: inline-flex; align-items: center; gap: var(--space-2); color: var(--color-text-secondary); font-size: var(--font-size-sm); margin-top: var(--space-2); }
+.contact-modal { display: flex; flex-direction: column; gap: var(--space-3); min-height: 120px; }
+.contact-loading { display: flex; align-items: center; justify-content: center; gap: var(--space-2); color: var(--color-text-muted); }
+.contact-error { color: var(--color-critical); text-align: center; }
+.contact-name { font-size: var(--font-size-lg); font-weight: 600; color: var(--color-text-primary); }
+.contact-type { color: var(--color-text-muted); font-size: var(--font-size-xs); text-transform: capitalize; margin-top: 2px; }
+.contact-row { display: flex; align-items: center; gap: var(--space-2); color: var(--color-text-secondary); }
+.contact-row a { color: var(--color-accent); text-decoration: none; }
+.contact-row a:hover { text-decoration: underline; }
+.contact-empty { color: var(--color-text-muted); font-size: var(--font-size-sm); }
 .panic-state { display: flex; min-height: 180px; align-items: center; justify-content: center; gap: var(--space-2); color: var(--color-text-muted); }
 .panic-state--error { flex-direction: column; color: var(--color-critical); }
 .panic-call-content { display: flex; flex-direction: column; gap: var(--space-4); }
