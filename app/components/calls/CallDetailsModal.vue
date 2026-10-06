@@ -229,9 +229,16 @@ function getCategoryInfo(category: ApiCall['category']): CallCategory {
   return map[category]
 }
 
+function formatServiceTypeName(value: string | null): string {
+  if (!value) return ''
+  return value
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, char => char.toUpperCase())
+}
+
 function mapCall(apiCall: ApiCall): Call {
   const category = getCategoryInfo(apiCall.category)
-  const serviceName = apiCall.service_type || category.label
+  const serviceName = formatServiceTypeName(apiCall.service_type) || category.label
   const serviceIcon = apiCall.category === 'concierge_service' ? 'lucide:bell-concierge' : category.icon
   const scheduledDateTime = apiCall.scheduled_date
     ? `${apiCall.scheduled_date}${apiCall.scheduled_time_from ? ' ' + apiCall.scheduled_time_from : ''}`
@@ -284,7 +291,7 @@ async function fetchCallDetails() {
   }
 }
 
-watch(() => props.show, (show) => {
+watch(() => props.show, (show: boolean) => {
   if (show && props.call) {
     fetchedCall.value = null
     fetchCallDetails()

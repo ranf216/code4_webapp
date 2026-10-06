@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import type { PostOrder } from '~/api/types/postOrder'
+
 interface PostDetail {
   id: string
   type: 'post'
@@ -21,6 +23,7 @@ interface PostDetail {
 
 const props = defineProps<{
   post: PostDetail
+  postOrder?: PostOrder | null
 }>()
 
 const emit = defineEmits<{
@@ -134,6 +137,34 @@ const miniMapMarkers = computed(() => props.post.location.lat != null && props.p
     </div>
 
     <div class="drawer-section">
+      <h4 class="section-title">Post Order</h4>
+      <div v-if="postOrder" class="detail-rows">
+        <div class="detail-row">
+          <span class="detail-label">Status</span>
+          <Badge type="postOrderStatus" :value="postOrder.status" />
+        </div>
+        <div class="detail-row">
+          <span class="detail-label">Version</span>
+          <span class="detail-value">v{{ postOrder.version }}</span>
+        </div>
+        <div class="detail-row">
+          <span class="detail-label">Post Order</span>
+          <NuxtLink :to="`/post-orders/${postOrder.post_order_id}`" class="detail-link">
+            PO-{{ postOrder.post_order_id }}
+            <Icon name="lucide:external-link" :size="12" />
+          </NuxtLink>
+        </div>
+      </div>
+      <div v-else class="post-order-empty">
+        <span class="empty-requirements">No post order linked to this post.</span>
+        <NuxtLink to="/post-orders/new" class="detail-link">
+          <Icon name="lucide:plus" :size="12" />
+          Create Post Order
+        </NuxtLink>
+      </div>
+    </div>
+
+    <div class="drawer-section">
       <h4 class="section-title">Lifecycle</h4>
       <div class="detail-rows">
         <div class="detail-row"><span class="detail-label">Created by</span><span class="detail-value">{{ post.createdBy || '—' }}</span></div>
@@ -184,5 +215,8 @@ const miniMapMarkers = computed(() => props.post.location.lat != null && props.p
 .requirement-tags { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: var(--space-1); }
 .requirement-tag { padding: 2px var(--space-2); color: var(--color-text-primary); background: var(--color-bg-overlay); border: 1px solid var(--color-border); border-radius: var(--radius-full); font-size: var(--font-size-xs); }
 .drawer-actions { justify-content: flex-end; flex-wrap: wrap; gap: var(--space-2); margin-top: auto; padding-top: var(--space-3); border-top: 1px solid var(--color-border); }
+.detail-link { display: inline-flex; align-items: center; gap: 4px; color: var(--color-accent); font-size: var(--font-size-sm); text-decoration: none; }
+.detail-link:hover { text-decoration: underline; }
+.post-order-empty { display: flex; flex-direction: column; gap: var(--space-2); }
 .mono { font-family: monospace; }
 </style>

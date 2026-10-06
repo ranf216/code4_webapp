@@ -20,6 +20,7 @@ import type {
   PublishShiftRequest,
   RemoveOfficerRequest,
   ShiftConflictResponse,
+  UnassignPostRequest,
   UpdateRecurringShiftsRequest,
   UpdateShiftRequest,
   UpdateShiftSettingsRequest,
@@ -129,6 +130,16 @@ export class ShiftApi extends BaseApiClient {
   ): Promise<ApiResponse<AssignPostResponse>> {
     return this.request<AssignPostResponse>({
       '#request': 'Shift/assign_post',
+      ...params,
+    }, options)
+  }
+
+  async unassignPost(
+    params: Omit<UnassignPostRequest, '#request'>,
+    options?: RequestOptions,
+  ): Promise<ApiResponse<void>> {
+    return this.request<void>({
+      '#request': 'Shift/unassign_post',
       ...params,
     }, options)
   }

@@ -17,6 +17,7 @@ interface Props {
   accept?: string
   maxFiles?: number
   maxSizeMb?: number
+  maxVideoSeconds?: number
   callApi?: boolean
 
   label?: string
@@ -28,6 +29,7 @@ const props = withDefaults(defineProps<Props>(), {
   accept: '.pdf,.jpg,.jpeg,.png,.mp4',
   maxFiles: 5,
   maxSizeMb: 20,
+  maxVideoSeconds: 0,
   callApi: false,
   label: '',
   hint: '',
@@ -67,6 +69,50 @@ function formatSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
+function checkVideoDuration(file: File, objectUrl: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const video = document.createElement('video')
+    video.preload = 'metadata'
+    video.onloadedmetadata = () => {
+      URL.revokeObjectURL(objectUrl)
+      resolve(!props.maxVideoSeconds || video.duration <= props.maxVideoSeconds)
+    }
+    video.onerror = () => {
+      URL.revokeObjectURL(objectUrl)
+      resolve(true)
+    }
+    video.src = objectUrl
+  })
+}
+
+async function addFile(file: File) {
+  const id = crypto.randomUUID()
+  const isVideo = file.type.startsWith('video/')
+
+  if (isVideo) {
+    const url = URL.createObjectURL(file)
+    const ok = await checkVideoDuration(file, url)
+    if (!ok) {
+      alert(`"${file.name}" exceeds the ${props.maxVideoSeconds}-second video limit.`)
+      return
+    }
+    videoPreviews.value[id] = URL.createObjectURL(file)
+  }
+
+  if (file.type.startsWith('image/')) {
+    imagePreviews.value[id] = URL.createObjectURL(file)
+  }
+
+  attachedFiles.value.push({
+    id,
+    file,
+    fileId: null,
+    status: 'pending',
+    errorMsg: null,
+    progress: 0,
+  })
+}
+
 function onFileInputChange(event: Event) {
   const input = event.target as HTMLInputElement
   if (!input.files) return
@@ -79,22 +125,7 @@ function onFileInputChange(event: Event) {
       continue
     }
 
-    const id = crypto.randomUUID()
-    attachedFiles.value.push({
-      id,
-      file,
-      fileId: null,
-      status: 'pending',
-      errorMsg: null,
-      progress: 0,
-    })
-
-    if (file.type.startsWith('image/')) {
-      imagePreviews.value[id] = URL.createObjectURL(file)
-    }
-    if (file.type.startsWith('video/')) {
-      videoPreviews.value[id] = URL.createObjectURL(file)
-    }
+    addFile(file)
   }
 
   input.value = ''

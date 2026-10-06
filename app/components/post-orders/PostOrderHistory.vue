@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useTranslation } from '~/composables/useI18n'
+import { utcToLocal } from '~/utils/dateTime'
 
 export interface HistoryEntry {
+  versionId: number
   version: string
   versionType: 'major' | 'minor'
   publishedBy: string
@@ -23,22 +25,13 @@ const { t } = useTranslation()
 
 const collapsed = ref(false)
 
-function formatDateTime(iso: string) {
-  return new Date(iso).toLocaleString('en-US', {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
+function formatDateTime(utc: string) {
+  return utcToLocal(utc).format('MMM D, YYYY HH:mm')
 }
 
 function formatDate(iso: string) {
-  return new Date(iso).toLocaleDateString('en-US', {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-  })
+  if (!iso) return '—'
+  return utcToLocal(iso).format('MMM D, YYYY')
 }
 </script>
 
@@ -240,8 +233,8 @@ function formatDate(iso: string) {
 }
 
 .type-badge--minor {
-  background: rgba(34, 197, 94, 0.15);
-  color: #22c55e;
+  background: var(--color-bg-overlay);
+  color: var(--color-text-muted);
 }
 
 .type-badge--major {

@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { shiftApi } from '~/api/shift'
+import { trackingApi } from '~/api/tracking'
 import type { Shift as ApiShift, ShiftCheckin, ShiftDetails } from '~/api/types/shift'
+import type { LiveTrackingOfficer } from '~/api/types/tracking'
 
 interface MonitorOfficer {
   id: string
@@ -25,6 +27,7 @@ interface MonitorShift {
 
 const { t } = useTranslation()
 const monitorShifts = ref<MonitorShift[]>([])
+const trackingOfficers = ref<LiveTrackingOfficer[]>([])
 const isLoading = ref(false)
 const errorMessage = ref('')
 const lastUpdated = ref<Date | null>(null)
@@ -56,10 +59,26 @@ function elapsedTime(shift: ApiShift): string {
   return `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, '0')}m`
 }
 
+function timeToMinutes(value: string): number {
+  const [hours, minutes] = value.split(':').map(Number)
+  return (hours ?? 0) * 60 + (minutes ?? 0)
+}
+
+function isShiftInProgress(shift: ApiShift): boolean {
+  const now = new Date()
+  const currentMinutes = now.getHours() * 60 + now.getMinutes()
+  const startMinutes = timeToMinutes(shift.start_time)
+  const endMinutes = timeToMinutes(shift.end_time)
+  if (shift.is_overnight) {
+    return currentMinutes >= startMinutes || currentMinutes <= endMinutes
+  }
+  return currentMinutes >= startMinutes && currentMinutes <= endMinutes
+}
+
 function buildMonitorShift(shift: ApiShift, details: ShiftDetails | null): MonitorShift {
   const checkins: ShiftCheckin[] = details?.checkins || []
   const checkinByOfficer = new Map(checkins.map(checkin => [checkin.officer_id, checkin]))
-  const officers = (details?.officers || shift.officers || []).map(officer => {
+  let officers = (details?.officers || shift.officers || []).map(officer => {
     const checkin = checkinByOfficer.get(officer.officer_id)
     return {
       id: officer.officer_id,
@@ -68,6 +87,15 @@ function buildMonitorShift(shift: ApiShift, details: ShiftDetails | null): Monit
       checkInOn: checkin?.check_in_on || null,
     }
   })
+  if (!officers.length) {
+    const shiftTrackingOfficers = trackingOfficers.value.filter(o => o.shift_id === shift.shift_id)
+    officers = shiftTrackingOfficers.map(officer => ({
+      id: officer.officer_id,
+      name: [officer.first_name, officer.last_name].filter(Boolean).join(' ') || officer.officer_id,
+      checkedIn: officer.is_checked_in,
+      checkInOn: null,
+    }))
+  }
   const checkedInIds = new Set(officers.filter(officer => officer.checkedIn).map(officer => officer.id))
   const posts = (details?.posts || shift.posts || []).map(post => ({
     id: post.post_id,
@@ -83,14 +111,23 @@ async function loadActiveShifts() {
   errorMessage.value = ''
   try {
     const date = todayString()
-    const response = await shiftApi.getShiftsCalendar({
-      date_from: date,
-      date_to: date,
-      status: 'active',
-    }, { showLoading: false })
-    const activeShifts: ApiShift[] = (response.shifts || []) as ApiShift[]
-    const details = await Promise.all(activeShifts.map((shift: ApiShift) => shiftApi.getShift(shift.shift_id, { showLoading: false }).then(result => result.shift).catch(() => null)))
-    monitorShifts.value = activeShifts.map((shift: ApiShift, index: number) => buildMonitorShift(shift, details[index] || null))
+    const [activeResponse, publishedResponse, trackingResponse] = await Promise.all([
+      shiftApi.getShiftsCalendar({ date_from: date, date_to: date, status: 'active' }, { showLoading: false }),
+      shiftApi.getShiftsCalendar({ date_from: date, date_to: date, status: 'published' }, { showLoading: false }),
+      trackingApi.getLiveTracking({}, { showLoading: false }),
+    ])
+    const activeShifts: ApiShift[] = (activeResponse.shifts || []) as ApiShift[]
+    const publishedShifts: ApiShift[] = (publishedResponse.shifts || []) as ApiShift[]
+    trackingOfficers.value = trackingResponse.officers || []
+    const shiftMap = new Map<number, ApiShift>()
+    activeShifts.forEach((shift: ApiShift) => shiftMap.set(shift.shift_id, shift))
+    publishedShifts.forEach((shift: ApiShift) => {
+      if (!shiftMap.has(shift.shift_id)) shiftMap.set(shift.shift_id, shift)
+    })
+    const inProgressShifts = Array.from(shiftMap.values()).filter(isShiftInProgress)
+    const details = await Promise.all(inProgressShifts.map((shift: ApiShift) =>
+      shiftApi.getShift(shift.shift_id, { showLoading: false }).then(result => result.shift).catch(() => null)))
+    monitorShifts.value = inProgressShifts.map((shift: ApiShift, index: number) => buildMonitorShift(shift, details[index] || null))
     lastUpdated.value = new Date()
   } catch (error) {
     console.error('Failed to load live shift monitor:', error)

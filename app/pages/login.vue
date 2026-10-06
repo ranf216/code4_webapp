@@ -354,6 +354,8 @@ watch(() => auth.error.value, (newError: string | null) => {
 .input-icon {
   position: absolute;
   left: var(--space-3);
+  top: 50%;
+  transform: translateY(-50%);
   color: var(--color-text-muted);
   pointer-events: none;
   flex-shrink: 0;
@@ -361,6 +363,8 @@ watch(() => auth.error.value, (newError: string | null) => {
 .input-icon-right {
   position: absolute;
   right: var(--space-3);
+  top: 50%;
+  transform: translateY(-50%);
   color: var(--color-text-muted);
   background: none;
   border: none;
@@ -369,6 +373,7 @@ watch(() => auth.error.value, (newError: string | null) => {
   align-items: center;
   padding: 0;
   transition: color var(--transition-base);
+  margin: 0;
 }
 .input-icon-right:hover {
   color: var(--color-text-primary);

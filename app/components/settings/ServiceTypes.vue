@@ -249,7 +249,7 @@ function handleCancelMaintenanceTypeAdd() {
                   <td class="col-actions">
                     <div class="types-column__actions-cell">
                       <button class="btn-icon" @click="handleEditServiceType(type)"><Icon name="lucide:pencil" :size="14" /></button>
-                      <button class="btn-icon btn-icon--danger" @click="handleDeleteServiceType(type.id)"><Icon name="lucide:trash-2" :size="14" /></button>
+                      <button class="btn-icon btn-icon--danger" @click="handleDeleteServiceType(type.id)"><Icon name="lucide:trash-2" :size="16" /></button>
                     </div>
                   </td>
                 </template>
@@ -297,7 +297,7 @@ function handleCancelMaintenanceTypeAdd() {
                   <td class="col-actions">
                     <div class="types-column__actions-cell">
                       <button class="btn-icon" @click="handleEditMaintenanceType(type)"><Icon name="lucide:pencil" :size="14" /></button>
-                      <button class="btn-icon btn-icon--danger" @click="handleDeleteMaintenanceType(type.id)"><Icon name="lucide:trash-2" :size="14" /></button>
+                      <button class="btn-icon btn-icon--danger" @click="handleDeleteMaintenanceType(type.id)"><Icon name="lucide:trash-2" :size="16" /></button>
                     </div>
                   </td>
                 </template>
@@ -459,7 +459,7 @@ function handleCancelMaintenanceTypeAdd() {
   transition: all 0.2s ease;
 }
 .btn-icon--danger {
-  margin-top: 9px
+  margin-top: 10px
 }
 .btn-icon:hover { background: var(--color-surface); color: var(--color-text-primary); }
 .btn-icon--danger:hover { background: rgba(239, 68, 68, 0.1); color: #ef4444; }

@@ -631,7 +631,7 @@ async function loadPostsForCommunity(communityId: number) {
 async function assignPost(officerId: string) {
   const shiftId = selectedShift.value?.apiId
   const postId = postSelections.value[officerId]
-  if (!shiftId || !postId || isAssigningPost.value) return
+  if (!shiftId || !postId || isAssigningPost.value || isUnassigningPost.value) return
   isAssigningPost.value = true
   try {
     const response = await shiftApi.assignPost({
@@ -647,6 +647,27 @@ async function assignPost(officerId: string) {
     shiftFormError.value = error instanceof Error ? error.message : t('shifts.assign_post_failed')
   } finally {
     isAssigningPost.value = false
+  }
+}
+
+const isUnassigningPost = ref(false)
+
+async function unassignPost(officerId: string, postId: number) {
+  const shiftId = selectedShift.value?.apiId
+  if (!shiftId || isAssigningPost.value || isUnassigningPost.value) return
+  isUnassigningPost.value = true
+  try {
+    await shiftApi.unassignPost({
+      shift_id: shiftId,
+      officer_id: officerId,
+      post_id: postId,
+    }, { showLoading: false })
+    await reloadSelectedShift()
+    await loadCalendar()
+  } catch (error) {
+    shiftFormError.value = error instanceof Error ? error.message : t('shifts.unassign_post_failed')
+  } finally {
+    isUnassigningPost.value = false
   }
 }
 
@@ -1115,16 +1136,26 @@ function toggleStatus(status: ShiftStatus) {
                     <div class="assigned-posts">
                       <span v-for="assignment in assignedPostsForOfficer(officer.user_id)" :key="assignment.postId" class="assigned-post-chip">
                         {{ assignment.postName }}
+                        <button
+                          v-if="canAssignPosts"
+                          type="button"
+                          class="assigned-post-remove"
+                          :title="t('shifts.unassign_post')"
+                          :disabled="isAssigningPost || isUnassigningPost"
+                          @click="unassignPost(officer.user_id, assignment.postId)"
+                        >
+                          <Icon name="lucide:x" :size="12" />
+                        </button>
                       </span>
                       <span v-if="!assignedPostsForOfficer(officer.user_id).length" class="form-hint">{{ t('shifts.no_post_assigned') }}</span>
                     </div>
                     <div v-if="canAssignPosts" class="post-assignment-controls">
-                      <select v-model="postSelections[officer.user_id]" class="form-input post-picker" :disabled="isLoadingPosts || isAssigningPost">
+                      <select v-model="postSelections[officer.user_id]" class="form-input post-picker" :disabled="isLoadingPosts || isAssigningPost || isUnassigningPost">
                         <option value="">{{ isLoadingPosts ? t('common.loading') : t('shifts.select_post') }}</option>
                         <option v-for="post in availablePosts" :key="post.post_id" :value="post.post_id">{{ post.name }}</option>
                       </select>
-                      <button type="button" class="btn btn--primary btn--small post-assign-button" :disabled="!postSelections[officer.user_id] || isAssigningPost" @click="assignPost(officer.user_id)">
-                        {{ isAssigningPost ? t('shifts.assigning_post') : t('shifts.assign_post') }}
+                      <button type="button" class="btn btn--primary btn--small post-assign-button" :disabled="!postSelections[officer.user_id] || isAssigningPost || isUnassigningPost" @click="assignPost(officer.user_id)">
+                        {{ isUnassigningPost ? t('shifts.unassigning_post') : isAssigningPost ? t('shifts.assigning_post') : t('shifts.assign_post') }}
                       </button>
                     </div>
                     <div v-if="postWarnings[officer.user_id]" class="post-eligibility-warning">
@@ -2158,11 +2189,36 @@ function toggleStatus(status: ShiftStatus) {
 }
 
 .assigned-post-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
   padding: 2px var(--space-2);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
   color: var(--color-text-secondary);
   font-size: var(--font-size-xs);
+}
+
+.assigned-post-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  background: transparent;
+  border: none;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  margin-left: 8px;
+  margin-top: 0px;
+}
+
+.assigned-post-remove:hover {
+  color: var(--color-critical);
+}
+
+.assigned-post-remove:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .post-assignment-controls {

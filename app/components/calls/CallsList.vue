@@ -126,9 +126,16 @@ function getCategoryInfo(category: ApiCall['category']): CallCategory {
   return map[category]
 }
 
+function formatServiceTypeName(value: string | null): string {
+  if (!value) return ''
+  return value
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, char => char.toUpperCase())
+}
+
 function mapCall(apiCall: ApiCall): Call {
   const category = getCategoryInfo(apiCall.category)
-  const serviceName = apiCall.service_type || category.label
+  const serviceName = formatServiceTypeName(apiCall.service_type) || category.label
   return {
     id: apiCall.call_id.toString(),
     displayId: `CL-${apiCall.call_id}`,

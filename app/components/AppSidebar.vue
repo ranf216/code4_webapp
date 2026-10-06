@@ -242,6 +242,12 @@ function closePanicModal() {
   overflow-x: hidden;
   position: sticky;
   top: 0;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.sidebar::-webkit-scrollbar {
+  display: none;
 }
 
 /* Brand */

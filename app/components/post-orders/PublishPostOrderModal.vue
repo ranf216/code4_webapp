@@ -26,9 +26,14 @@ const changeSummary = ref('')
 const effectiveDate = ref(new Date().toISOString().slice(0, 10))
 const notifyOfficers = ref(true)
 
+// First publish always produces v1.0 regardless of the selected type
+const isFirstPublish = computed(() =>
+  !props.currentVersion || props.currentVersion === '0.0'
+)
+
 const nextVersion = computed(() => {
-  const base = props.currentVersion ?? '1.0'
-  const [major, minor] = base.split('.').map(Number)
+  if (isFirstPublish.value) return '1.0'
+  const [major, minor] = (props.currentVersion ?? '1.0').split('.').map(Number)
   if (versionType.value === 'major') return `${(major ?? 1) + 1}.0`
   return `${major ?? 1}.${(minor ?? 0) + 1}`
 })
@@ -86,6 +91,9 @@ function handleClose() {
             <span class="pf-radio__badge pf-radio__badge--major">v{{ nextVersion }}</span>
           </label>
         </div>
+        <p v-if="isFirstPublish" class="pf-note">
+          {{ t('post_orders.publish_first_version_hint') }}
+        </p>
       </div>
 
       <!-- Change Summary -->
@@ -186,6 +194,12 @@ function handleClose() {
 .required {
   color: var(--color-critical);
   margin-left: 2px;
+}
+
+.pf-note {
+  margin: 0;
+  font-size: var(--font-size-xs);
+  color: var(--color-warn, #f59e0b);
 }
 
 /* ── Radio group ── */

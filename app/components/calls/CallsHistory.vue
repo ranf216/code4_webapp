@@ -133,9 +133,16 @@ function getClosedDateTime(apiCall: ApiCall): string | undefined {
   return undefined
 }
 
+function formatServiceTypeName(value: string | null): string {
+  if (!value) return ''
+  return value
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, char => char.toUpperCase())
+}
+
 function mapHistoryCall(apiCall: ApiCall): HistoryCall {
   const category = getCategoryInfo(apiCall.category)
-  const serviceName = apiCall.service_type || category.label
+  const serviceName = formatServiceTypeName(apiCall.service_type) || category.label
   const scheduledDateTime = apiCall.scheduled_date
     ? `${apiCall.scheduled_date}${apiCall.scheduled_time_from ? ' ' + apiCall.scheduled_time_from : ''}`
     : null
