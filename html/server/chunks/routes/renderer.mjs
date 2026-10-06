@@ -1,10 +1,12 @@
-import { u as useRuntimeConfig, e as encodePath, j as joinRelativeURL, d as defineRenderHandler, g as getQuery, c as createError, a as destr, b as getRouteRules, r as relative, f as joinURL, h as getResponseStatusText, i as getResponseStatus, k as useNitroApp } from '../nitro/nitro.mjs';
-import { createHead as createHead$1, propsToString, renderSSRHead } from 'unhead/server';
-import { isRef, toValue } from 'vue';
-import { DeprecationsPlugin } from 'unhead/legacy';
-import { PromisesPlugin, TemplateParamsPlugin, AliasSortingPlugin } from 'unhead/plugins';
+import { j as joinRelativeURL, u as useRuntimeConfig, a as appRootTag, b as appRootAttrs, c as appSpaLoaderTag, d as appSpaLoaderAttrs, w as writeEarlyHints, e as createError, f as useNitroApp, g as getRouteRules, h as createHead, N as NUXT_PRERENDER_NO_SSR_ROUTES, i as unheadOptions, k as appId, l as getQuery, m as appHead, n as destr, o as NUXT_SSR_STREAMING, r as renderSSRHeadOptions, p as appTeleportAttrs, q as NUXT_NO_SCRIPTS_PATTERNS, s as relative, t as joinURL, v as appTeleportTag, x as NUXT_PAGE_PATTERNS, y as defineRenderHandler, z as toRequestEvent, A as setResponseHeader } from '../nitro/nitro.mjs';
+import { defineDiagnostics, createConsoleReporter } from 'nostics';
+import { renderToString } from 'vue/server-renderer';
 import { createRenderer, getRequestDependencies, getPreloadLinks, getPrefetchLinks } from 'vue-bundle-renderer/runtime';
+import { propsToString, renderSSRHead } from 'unhead/server';
 import { stringify, uneval } from 'devalue';
+import 'vue';
+import 'unhead/legacy';
+import 'unhead/plugins';
 import 'node:http';
 import 'node:https';
 import 'node:events';
@@ -13,73 +15,6 @@ import 'node:fs';
 import 'node:path';
 import 'node:crypto';
 import 'node:url';
-
-const NUXT_RUNTIME_PAYLOAD_EXTRACTION = false;
-const NUXT_SSR_STREAMING = false;
-
-const headSymbol = "usehead";
-// @__NO_SIDE_EFFECTS__
-function vueInstall(head) {
-  const plugin = {
-    install(app) {
-      app.config.globalProperties.$unhead = head;
-      app.config.globalProperties.$head = head;
-      app.provide(headSymbol, head);
-    }
-  };
-  return plugin.install;
-}
-
-const VueResolver = /* @__PURE__ */ Object.assign(
-  (_, value) => isRef(value) ? toValue(value) : value,
-  // identity for plain non-reactive values, so the SSR default init entry
-  // keeps its precomputed fast path (see unhead/server createHead)
-  { _static: true }
-);
-
-// @__NO_SIDE_EFFECTS__
-function createHead(options = {}) {
-  const head = createHead$1({
-    ...options,
-    propResolvers: [VueResolver]
-  });
-  head.install = vueInstall(head);
-  return head;
-}
-
-const legacyPlugins = [DeprecationsPlugin, PromisesPlugin, TemplateParamsPlugin, AliasSortingPlugin];
-
-const unheadOptions = {
-  disableDefaults: true,
-  plugins: legacyPlugins,
-};
-
-function encodeEventPath(path) {
-	const queryIndex = path.indexOf("?");
-	if (queryIndex === -1) return encodePath(path);
-	return encodePath(path.slice(0, queryIndex)) + path.slice(queryIndex);
-}
-function createSSRContext(event) {
-	const url = encodeEventPath(event.path);
-	const ssrContext = {
-		url,
-		event,
-		runtimeConfig: useRuntimeConfig(event),
-		noSSR: true,
-		head: createHead(unheadOptions),
-		error: false,
-		nuxt: void 0,
-		payload: {},
-		["~payloadReducers"]: Object.create(null),
-		modules: /* @__PURE__ */ new Set()
-	};
-	return ssrContext;
-}
-function setSSRError(ssrContext, error) {
-	ssrContext.error = true;
-	ssrContext.payload = { error };
-	ssrContext.url = error.url;
-}
 
 function buildAssetsDir() {
 	return useRuntimeConfig().app.buildAssetsDir;
@@ -93,7 +28,28 @@ function publicAssetsURL(...path) {
 	return path.length ? joinRelativeURL(publicBase, ...path) : publicBase;
 }
 
-//#region src/runtime/utils/renderer/cache.ts
+//#region src/runtime/utils/response.ts
+/**
+* The response the renderer builds, keeping its body as the renderer produced it.
+*
+* A real `Response` turns every body into a `ReadableStream`, which would send a rendered
+* document as a chunked stream where nitro sends the string it was given. The renderer only
+* reads the fields below back, so this describes just those.
+*/
+var NodeRenderResponse = class {
+	body;
+	status;
+	statusText;
+	headers;
+	constructor(body, init) {
+		this.body = body;
+		this.status = init?.status || 200;
+		this.statusText = init?.statusText || "";
+		this.headers = init?.headers instanceof Headers ? init.headers : new Headers(init?.headers);
+	}
+};
+
+//#region src/runtime/server/renderer/cache.ts
 function lazyCachedFunction(fn) {
 	let res = null;
 	return () => {
@@ -105,67 +61,215 @@ function lazyCachedFunction(fn) {
 	};
 }
 
-const appHead = {"meta":[{"name":"viewport","content":"width=device-width, initial-scale=1"},{"charset":"utf-8"}],"link":[{"rel":"preload","href":"/fonts/Geist-Variable.woff2","as":"font","type":"font/woff2","crossorigin":"anonymous"},{"rel":"stylesheet","href":"/map/maptool.min.css","type":"text/css"}],"style":[],"script":[{"src":"/map/maptool.min.js","type":"text/javascript"}],"noscript":[],"title":"Code4Axis"};
+/**
+* E8xxx
+* SSR rendering diagnostics, sharing the range with the server runtime that
+* hosts the renderer.
+*/
+const docsBase = (code) => `https://nuxt.com/docs/4.x/errors/${code.replace("NUXT_", "").toLowerCase()}`;
+const rendererDiagnostics = /* #__PURE__ */ defineDiagnostics({
+	docsBase,
+	reporters: [/* @__PURE__ */ createConsoleReporter(void 0)],
+	codes: {
+		NUXT_E8001: {
+			why: (p) => `\`render:html\` mutated \`body\`/\`bodyAppend\` while streaming (\`${p.path}\`). These fields are silently dropped because the body is about to stream.`,
+			fix: "Use the `render:html:close` hook instead.",
+			docs: false
+		},
+		NUXT_E8002: {
+			why: (p) => `SSR streaming committed the response before render completed (\`${p.path}\`). The following mutations did not reach the client and were dropped:\n  - ${p.mutations}`,
+			fix: (p) => `Move the mutation into a plugin (which runs before the shell is flushed), or opt this route out of streaming with \`routeRules: { '${p.path}': { streaming: false } }\` or the \`render:route\` hook.`,
+			docs: false
+		},
+		NUXT_E8004: {
+			why: "The server bundle is not available.",
+			fix: "Ensure the Nuxt build completed successfully and the server entry was emitted by your builder.",
+			docs: false
+		},
+		NUXT_E8006: {
+			why: (p) => `The payload for \`${p.path}\` is ${p.size}, which will increase the page size and slow down hydration.${p.keys ? ` Largest payload keys:\n  - ${p.keys}` : ""}`,
+			fix: "Use the `pick` or `transform` options of `useAsyncData`/`useFetch` to strip out data the client does not need.",
+			docs: false
+		},
+		NUXT_E8007: {
+			why: (p) => `\`${p.path}\` relies on client-side JavaScript, but \`features.noScripts: 'production'\` will strip scripts from this route in production:\n  - ${p.reasons}`,
+			fix: "Remove the client-side dependency from this route, or scope script stripping with the `noScripts` route rule instead of enabling it globally."
+		},
+		NUXT_E8009: {
+			why: (p) => `A page error interrupted the stream for \`${p.path}\`, and ${p.what} also failed while rendering the error response.\n  ${p.cause}`,
+			fix: "Fix the page error first. If it keeps happening, report the failure below - the browser will show a blank or partial page instead of the error page."
+		}
+	}
+});
 
-const appRootTag = "div";
-
-const appRootAttrs = {"id":"__nuxt"};
-
-const appTeleportTag = "div";
-
-const appTeleportAttrs = {"id":"teleports"};
-
-const appSpaLoaderTag = "div";
-
-const appSpaLoaderAttrs = {"id":"__nuxt-loader"};
-
-const appId = "nuxt-app";
-
-//#region src/runtime/utils/renderer/build-files.ts
-globalThis.__buildAssetsURL = buildAssetsURL;
-globalThis.__publicAssetsURL = publicAssetsURL;
+//#region src/runtime/server/renderer/build-files.ts
 const APP_ROOT_OPEN_TAG = `<${appRootTag}${propsToString(appRootAttrs)}>`;
 const APP_ROOT_CLOSE_TAG = `</${appRootTag}>`;
+const getServerEntry = () => import('../virtual/entry.mjs').then((r) => r.default || r);
 const getPrecomputedDependencies = () => import('../virtual/precomputed.mjs').then((r) => "default" in r ? r.default : r).then((r) => typeof r === "function" ? r() : r);
-const getSPARenderer = lazyCachedFunction(async () => {
-	const precomputed = await getPrecomputedDependencies();
-	const spaTemplate = await import('../virtual/_virtual_spa-template.mjs').then((r) => r.template).catch(() => "").then((r) => {
-		{
-			const APP_SPA_LOADER_OPEN_TAG = `<${appSpaLoaderTag}${propsToString(appSpaLoaderAttrs)}>`;
-			const APP_SPA_LOADER_CLOSE_TAG = `</${appSpaLoaderTag}>`;
-			return APP_ROOT_OPEN_TAG + APP_ROOT_CLOSE_TAG + (r ? APP_SPA_LOADER_OPEN_TAG + r + APP_SPA_LOADER_CLOSE_TAG : "");
+/** Load the build artifacts for a set of renderer options, caching each of them on the returned object. */
+function createBuildFiles(options) {
+	const buildAssetsURL = (...path) => options.buildAssetsURL(...path);
+	const getSSRRenderer = lazyCachedFunction(async () => {
+		const createSSRApp = await getServerEntry();
+		if (!createSSRApp) throw rendererDiagnostics.NUXT_E8004();
+		const precomputed = await getPrecomputedDependencies();
+		const renderer = createRenderer(createSSRApp, {
+			precomputed,
+			manifest: void 0,
+			renderToString: renderToString$1,
+			buildAssetsURL
+		});
+		async function renderToString$1(input, context) {
+			const html = await renderToString(input, context);
+			return APP_ROOT_OPEN_TAG + html + APP_ROOT_CLOSE_TAG;
 		}
+		return renderer;
 	});
-	const renderer = createRenderer(() => () => {}, {
-		precomputed,
-		manifest: void 0,
-		renderToString: () => spaTemplate,
-		buildAssetsURL
-	});
-	const result = await renderer.renderToString({});
-	const renderToString = (ssrContext) => {
-		const config = useRuntimeConfig(ssrContext.event);
-		ssrContext.modules ||= /* @__PURE__ */ new Set();
-		ssrContext.payload.serverRendered = false;
-		ssrContext.config = {
-			public: config.public,
-			app: config.app
+	const getSPARenderer = lazyCachedFunction(async () => {
+		const precomputed = await getPrecomputedDependencies();
+		const template = renderSPATemplate();
+		const renderer = createRenderer(() => () => {}, {
+			precomputed,
+			manifest: void 0,
+			renderToString: () => template,
+			buildAssetsURL
+		});
+		const result = await renderer.renderToString({});
+		const renderToString = (ssrContext) => {
+			const config = ssrContext.runtimeConfig;
+			ssrContext.modules ||= /* @__PURE__ */ new Set();
+			ssrContext.payload.serverRendered = false;
+			ssrContext.config = {
+				public: config.public,
+				app: config.app
+			};
+			return Promise.resolve(result);
 		};
-		return Promise.resolve(result);
-	};
+		return {
+			rendererContext: renderer.rendererContext,
+			renderToString
+		};
+	});
 	return {
-		rendererContext: renderer.rendererContext,
-		renderToString
+		getRenderer: (ssrContext) => getSPARenderer() ,
+		getSSRRenderer,
+		getServerApp: lazyCachedFunction(getServerEntry)
 	};
-});
-function getRenderer(ssrContext) {
-	return getSPARenderer() ;
+}
+function renderSPATemplate() {
+	{
+		`<${appSpaLoaderTag}${propsToString(appSpaLoaderAttrs)}>`;
+		return APP_ROOT_OPEN_TAG + APP_ROOT_CLOSE_TAG + ("");
+	}
+}
+
+//#region src/runtime/server/renderer/instance.ts
+/**
+* Create the renderer state for a set of options.
+*
+* Called by `createNuxtRenderer()`; call it directly only to render against the same
+* artifacts as a renderer created elsewhere (an island handler sharing the server bundle
+* loaded for page renders), and pass the result to `createNuxtRenderer()`.
+*/
+function createRendererInstance(options) {
+	return {
+		options,
+		...createBuildFiles(options)
+	};
+}
+
+//#region src/runtime/server/renderer/runtime.ts
+/** The event to pass to application code and to the render hooks. */
+function appEvent(event) {
+	return event["~app"] ?? event;
+}
+function getRequestState(event) {
+	return event.context.nuxt;
+}
+
+//#region src/runtime/utils/renderer/options.ts
+globalThis.__buildAssetsURL = buildAssetsURL;
+globalThis.__publicAssetsURL = publicAssetsURL;
+/** The capabilities a nitropack v2 host provides to the Nuxt renderer. */
+const rendererOptions = {
+	runtimeConfig: (event) => useRuntimeConfig(appEvent(event)),
+	buildAssetsURL,
+	publicAssetsURL,
+	getRouteRules: (event) => getRouteRules(appEvent(event)),
+	hooks: () => useNitroApp().hooks,
+	createResponse: (body, init) => new NodeRenderResponse(body, init),
+	createError: (init) => createError({
+		statusCode: init.status,
+		statusMessage: init.statusText,
+		message: init.statusText,
+		data: init.data
+	}),
+	writeEarlyHints: (event, hints) => writeEarlyHints(appEvent(event), hints.link),
+	onRenderSuccess: void 0,
+	prerender: void 0
+};
+/**
+* The renderer the page and island handlers share, so that both render against a single
+* load of the server bundle and its manifest.
+*/
+const rendererInstance = createRendererInstance(rendererOptions);
+
+//#region src/runtime/server/renderer/url.ts
+/**
+* The fragment of a request URL, avoiding the lazy URL parse that reading `hash` triggers when
+* there is none. A fragment is never sent over the wire, so it can only appear on a URL the
+* server constructed itself.
+*/
+function urlHash(url) {
+	return url.href.includes("#") ? url.hash : "";
+}
+
+//#region src/runtime/server/renderer/app.ts
+new Set(NUXT_PRERENDER_NO_SSR_ROUTES);
+function createServerHead() {
+	return createHead(unheadOptions);
+}
+function createSSRContext(options, event) {
+	const url = event.url.pathname + event.url.search + urlHash(event.url);
+	const ssrContext = {
+		url,
+		event: appEvent(event),
+		runtimeConfig: options.runtimeConfig(event),
+		noSSR: true,
+		head: createServerHead(),
+		error: false,
+		nuxt: void 0,
+		payload: {},
+		["~payloadReducers"]: Object.create(null),
+		modules: /* @__PURE__ */ new Set()
+	};
+	return ssrContext;
+}
+/**
+* Turn the response the renderer assembled into a web-standard `Response`, carrying the
+* headers queued on the event alongside the ones the response names for itself.
+*/
+function returnRenderResponse(options, event, response) {
+	const headers = new Headers(event.res.headers);
+	for (const name in response.headers) headers.set(name, response.headers[name]);
+	return options.createResponse(response.body ?? null, {
+		status: response.statusCode ?? event.res.status,
+		statusText: response.statusMessage ?? event.res.statusText,
+		headers
+	});
+}
+function setSSRError(ssrContext, error) {
+	ssrContext.error = true;
+	ssrContext.payload = { error };
+	ssrContext.url = error.url;
 }
 
 function renderPayloadJsonScript(opts) {
+	const contents = opts.data ? encodeForwardSlashes(stringify(opts.data, opts.ssrContext["~payloadReducers"])) : "";
 	const payload = {
 		"type": "application/json",
-		"innerHTML": opts.data ? encodeForwardSlashes(stringify(opts.data, opts.ssrContext["~payloadReducers"])) : "",
+		"innerHTML": contents,
 		"data-nuxt-data": appId,
 		"data-ssr": false
 	};
@@ -183,29 +287,44 @@ function encodeForwardSlashes(str) {
 	return str.replaceAll("/", "\\u002F");
 }
 
-const renderSSRHeadOptions = {"omitLineBreaks":true};
+const entryFileName = "CQUCkc2d.js";
 
-const entryFileName = "Db5jo7Zy.js";
-
-//#region src/runtime/handlers/renderer.ts
-globalThis.__buildAssetsURL = buildAssetsURL;
-globalThis.__publicAssetsURL = publicAssetsURL;
+//#region src/runtime/server/renderer/index.ts
 const HAS_APP_TELEPORTS = !!(appTeleportAttrs.id);
 const APP_TELEPORT_OPEN_TAG = HAS_APP_TELEPORTS ? `<${appTeleportTag}${propsToString(appTeleportAttrs)}>` : "";
 const APP_TELEPORT_CLOSE_TAG = HAS_APP_TELEPORTS ? `</${appTeleportTag}>` : "";
-let entryPath;
-const handler = defineRenderHandler((event) => {
-	const ssrError = event.path.startsWith("/__nuxt_error") ? getQuery(event) : null;
-	if (ssrError && !("__unenv__" in event.node.req)) throw createError({
-		status: 404,
-		statusText: "Page Not Found: /__nuxt_error",
-		message: "Page Not Found: /__nuxt_error"
-	});
-	return renderRoute(event, ssrError);
-});
-async function renderRoute(event, ssrError) {
-	const nitroApp = useNitroApp();
-	const ssrContext = createSSRContext(event);
+/**
+* Create a Nuxt SSR renderer, returning a web-standard handler for the requests a Nuxt
+* app serves from its pages.
+*
+* Everything the renderer reads belongs to the renderer it was created for, so a bundle
+* may create as many as it needs. Pass an instance from `createRendererInstance()` to
+* render against the artifacts already loaded for another renderer.
+*/
+function createNuxtRenderer(optionsOrInstance) {
+	const instance = "getRenderer" in optionsOrInstance ? optionsOrInstance : createRendererInstance(optionsOrInstance);
+	return { fetch: (event) => fetch(instance, event) };
+}
+function fetch(instance, event) {
+	const runtime = instance.options;
+	const isErrorRoute = event.url.pathname.startsWith("/__nuxt_error");
+	if (isErrorRoute && !getRequestState(event)?.["~rendering-error"]) {
+		return Promise.reject(runtime.createError({
+			status: 404,
+			statusText: "Page Not Found: /__nuxt_error"
+		}));
+	}
+	const ssrError = isErrorRoute ? getQuery(event.url.href) : null;
+	const render = () => renderRoute(instance, event, ssrError).then((response) => returnRenderResponse(runtime, event, response));
+	const rendering = render();
+	return rendering;
+}
+async function renderRoute(instance, event, ssrError) {
+	const runtime = instance.options;
+	const hooks = runtime.hooks();
+	const hookEvent = appEvent(event);
+	runtime.prerender?.payloadCache;
+	const ssrContext = createSSRContext(runtime, event);
 	ssrContext.head.push(appHead);
 	if (ssrError) {
 		const status = ssrError.status || ssrError.statusCode;
@@ -215,16 +334,17 @@ async function renderRoute(event, ssrError) {
 		} catch {}
 		setSSRError(ssrContext, ssrError);
 	}
-	const routeOptions = getRouteRules(event);
-	if (routeOptions.ssr === false) ssrContext.noSSR = true;
-	!ssrContext.noSSR && (NUXT_RUNTIME_PAYLOAD_EXTRACTION);
-	const renderer = await getRenderer();
+	const routeOptions = runtime.getRouteRules(event);
+	const NO_SCRIPTS = !!routeOptions.noScripts;
+	if (routeOptions.ssr === false && true) ssrContext.noSSR = true;
+	!ssrContext.noSSR && !ssrError && false;
+	const renderer = await instance.getRenderer(ssrContext);
 	const canStream = NUXT_SSR_STREAMING;
 	const renderRouteContext = {
 		canStream,
 		prefersStream: false
 	};
-	await nitroApp.hooks.callHook("render:route", renderRouteContext, { event });
+	await hooks.callHook("render:route", renderRouteContext, { event: hookEvent });
 	const _rendered = await (renderer.renderToString(ssrContext)).catch(async (error) => {
 		if ((ssrContext["~renderResponse"] || ssrContext._renderResponse) && error.message === "skipping render") return {};
 		const _err = !ssrError && ssrContext.payload?.error || error;
@@ -238,18 +358,10 @@ async function renderRoute(event, ssrError) {
 	});
 	if (ssrContext["~renderResponse"] || ssrContext._renderResponse) return ssrContext["~renderResponse"] || ssrContext._renderResponse;
 	if (ssrContext.payload?.error && !ssrError) throw ssrContext.payload.error;
-	const NO_SCRIPTS = routeOptions.noScripts;
 	const { styles, scripts } = getRequestDependencies(ssrContext, renderer.rendererContext);
+	pushNoScriptsHints(ssrContext, NO_SCRIPTS);
 	if (!NO_SCRIPTS) {
-		let path = entryPath;
-		if (!path) {
-			path = buildAssetsURL(entryFileName);
-			if (ssrContext.runtimeConfig.app.cdnURL || /^(?:\/|\.+\/)/.test(path)) entryPath = path;
-			else {
-				path = relative(event.path.replace(/\/[^/]+$/, "/"), joinURL("/", path));
-				if (!/^(?:\/|\.+\/)/.test(path)) path = `./${path}`;
-			}
-		}
+		const path = entryImportMapPath(instance, event, ssrContext);
 		ssrContext.head.push({ script: [{
 			type: "importmap",
 			innerHTML: { imports: { "#entry": path } }
@@ -257,6 +369,7 @@ async function renderRoute(event, ssrError) {
 	}
 	if (inlinedStyles.length) ssrContext.head.push({ style: inlinedStyles });
 	const link = [];
+	const inlinedHrefs = [];
 	for (const resource of Object.values(styles)) {
 		link.push({
 			rel: "stylesheet",
@@ -265,25 +378,27 @@ async function renderRoute(event, ssrError) {
 		});
 	}
 	if (link.length) ssrContext.head.push({ link });
-	if (!NO_SCRIPTS) {
-		const dependencyOptions = ssrContext["~lazyHydratedModules"]?.size ? { exclude: ssrContext["~lazyHydratedModules"] } : void 0;
-		const excludeHrefs = new Set(link.map((l) => l.href));
-		for (const id of ssrContext["~neverHydratedModules"] ?? []) {
-			const file = renderer.rendererContext.manifest?.[id]?.file;
-			if (file) excludeHrefs.add(renderer.rendererContext.buildAssetsURL(file));
-		}
-		const hints = [];
-		for (const l of getPreloadLinks(ssrContext, renderer.rendererContext, dependencyOptions)) if (!excludeHrefs.has(l.href)) hints.push(l);
-		for (const l of getPrefetchLinks(ssrContext, renderer.rendererContext, dependencyOptions)) if (!excludeHrefs.has(l.href)) hints.push(l);
-		ssrContext.head.push({ link: hints });
-		ssrContext.head.push({ script: renderPayloadJsonScript({
-			ssrContext,
-			data: stripInlineOnlyPayloadFields(ssrContext.payload)
-		})   }, {
-			tagPosition: "bodyClose",
-			tagPriority: "high"
-		});
+	const dependencyOptions = {
+		exclude: ssrContext["~lazyHydratedModules"]?.size ? ssrContext["~lazyHydratedModules"] : void 0,
+		scripts: !NO_SCRIPTS
+	};
+	const excludeHrefs = new Set(link.map((l) => l.href));
+	for (const href of inlinedHrefs) excludeHrefs.add(href);
+	for (const id of ssrContext["~neverHydratedModules"] ?? []) {
+		const file = renderer.rendererContext.manifest?.[id]?.file;
+		if (file) excludeHrefs.add(renderer.rendererContext.buildAssetsURL(file));
 	}
+	const hints = [];
+	for (const l of getPreloadLinks(ssrContext, renderer.rendererContext, dependencyOptions)) if (!excludeHrefs.has(l.href)) hints.push(l);
+	for (const l of getPrefetchLinks(ssrContext, renderer.rendererContext, dependencyOptions)) if (!excludeHrefs.has(l.href)) hints.push(l);
+	if (hints.length) ssrContext.head.push({ link: hints });
+	if (!NO_SCRIPTS) ssrContext.head.push({ script: renderPayloadJsonScript({
+		ssrContext,
+		data: stripInlineOnlyPayloadFields(ssrContext.payload)
+	})   }, {
+		tagPosition: "bodyClose",
+		tagPriority: "high"
+	});
 	if (!routeOptions.noScripts) {
 		const tagPosition = "head";
 		ssrContext.head.push({ script: Object.values(scripts).map((resource) => ({
@@ -303,16 +418,62 @@ async function renderRoute(event, ssrError) {
 		body: [_rendered.html, APP_TELEPORT_OPEN_TAG + (HAS_APP_TELEPORTS ? joinTags([ssrContext.teleports?.[`#${appTeleportAttrs.id}`]]) : "") + APP_TELEPORT_CLOSE_TAG],
 		bodyAppend: [bodyTags]
 	};
-	await nitroApp.hooks.callHook("render:html", htmlContext, { event });
+	await hooks.callHook("render:html", htmlContext, { event: hookEvent });
 	return {
 		body: renderHTMLDocument(htmlContext),
-		statusCode: getResponseStatus(event),
-		statusMessage: getResponseStatusText(event),
+		statusCode: event.res.status,
+		statusMessage: event.res.statusText,
 		headers: {
 			"content-type": "text/html;charset=utf-8",
 			"x-powered-by": "Nuxt"
 		}
 	};
+}
+/**
+* Routes served without scripts navigate with full-page loads. This emits the
+* declarative navigation hints that speed those up, on both the pages served
+* without scripts (a blanket rule over same-origin links) and scripted pages
+* that may link to them (rules scoped to the `noScripts` route patterns):
+*
+* - speculation rules, so supporting browsers prefetch and prerender the
+*   target ahead of the navigation;
+* - when view transitions are enabled, an opt-in to same-origin cross-document
+*   view transitions, animating the navigation without a client runtime (the
+*   client-side `startViewTransition` plugin is not shipped).
+*
+* Both tags are declarative and execute no JavaScript.
+*/
+function pushNoScriptsHints(ssrContext, noScripts) {
+	if (noScripts) pushSpeculationRulesScript(ssrContext, NUXT_PAGE_PATTERNS.length ? NUXT_PAGE_PATTERNS : ["/*"]);
+	else if (NUXT_NO_SCRIPTS_PATTERNS.length) pushSpeculationRulesScript(ssrContext, NUXT_NO_SCRIPTS_PATTERNS);
+	else return;
+}
+const entryPaths = /* @__PURE__ */ new WeakMap();
+/** URL of the hashed entry chunk, which `#entry` is pinned to so chunk hashes stay stable across it. */
+function entryImportMapPath(instance, event, ssrContext) {
+	const cached = entryPaths.get(instance);
+	if (cached) return cached;
+	const url = instance.options.buildAssetsURL(entryFileName);
+	if (ssrContext.runtimeConfig.app.cdnURL || /^(?:\/|\.+\/)/.test(url)) {
+		entryPaths.set(instance, url);
+		return url;
+	}
+	const path = relative(event.url.pathname.replace(/\/[^/]+$/, "/"), joinURL("/", url));
+	return /^(?:\/|\.+\/)/.test(path) ? path : `./${path}`;
+}
+function pushSpeculationRulesScript(ssrContext, patterns) {
+	const rules = patterns.map((href_matches) => ({
+		where: { href_matches },
+		eagerness: "moderate"
+	}));
+	ssrContext.head.push({ script: [{
+		tagPosition: "head",
+		type: "speculationrules",
+		innerHTML: {
+			prefetch: rules,
+			prerender: rules
+		}
+	}] });
 }
 function normalizeChunks(chunks) {
 	const result = [];
@@ -337,6 +498,20 @@ function stripInlineOnlyPayloadFields(payload) {
 	const { prefetchLinks: _, ...rest } = payload;
 	return rest;
 }
+
+const renderer = createNuxtRenderer(rendererInstance);
+const handler = defineRenderHandler(async (event) => {
+	const response = await renderer.fetch(toRequestEvent(event));
+	for (const [name, value] of response.headers) {
+		if (name === "set-cookie") continue;
+		setResponseHeader(event, name, value);
+	}
+	return {
+		body: response.body,
+		statusCode: response.status,
+		statusMessage: response.statusText || void 0
+	};
+});
 
 export { handler as default };
 //# sourceMappingURL=renderer.mjs.map
