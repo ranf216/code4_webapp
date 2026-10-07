@@ -1,63 +1,37 @@
 <script setup lang="ts">
-import { ref, computed, reactive } from 'vue'
+import { ref, computed, reactive, onMounted } from 'vue'
+import AppButton from '~/components/AppButton.vue'
+import { poiApi } from '~/api/poi'
+import { communityApi } from '~/api/community'
+import { useFileApi } from '~/composables/useFileApi'
+import { useToastStore } from '~/stores/toast'
+import type { PoiGender, PoiRecord, PoiRecordType, PoiThreatLevel, PoiMetadataResponse } from '~/api/types/poi'
+import type { Community } from '~/api/community'
 
-type RecordType = 'poi' | 'trespass' | 'metro_red_card'
-
-interface POIRecord {
-  id?: string
-  recordType: RecordType | ''
-  status: string
-  firstName: string
-  lastName: string
-  aliases: string
-  dateOfBirth: string
-  gender: string
-  physicalDescription: string
-  summary: string
-  internalNotes: string
-  sites: string[]
-  threatLevel: string
-  relatedIncidentIds: string
-  incidentHistorySummary: string
-  watchLevelReviewDate: string
-  associatedIndividuals: string
-  trespassNoticeNumber: string
-  trespassIssuingAuthority: string
-  propertyAreaCovered: string
-  trespassIssueDate: string
-  trespassExpiryDate: string
-  trespassRenewalReminder: number | null
-  lawEnforcementContact: string
-  conditions: string
-  redCardNumber: string
-  metroIssuingAuthority: string
-  metroIssueDate: string
-  metroExpiryDate: string
-  metroLines: string
-  metroRenewalReminder: number | null
-  existingPhotos?: string[]
+interface PhotoItem {
+  key: string
+  fileId: number | string | null
+  url: string
+  file?: File
 }
 
 interface POIFormData {
-  // Common
-  recordType: RecordType | ''
+  recordType: PoiRecordType | ''
   status: string
   firstName: string
   lastName: string
   aliases: string
   dateOfBirth: string
-  gender: string
+  gender: PoiGender | ''
   physicalDescription: string
   summary: string
   internalNotes: string
-  sites: string[]
-  threatLevel: string
+  sites: number[]
+  threatLevel: PoiThreatLevel | ''
   relatedIncidentIds: string
-  // POI only
   incidentHistorySummary: string
   watchLevelReviewDate: string
   associatedIndividuals: string
-  // Trespass only
   trespassNoticeNumber: string
   trespassIssuingAuthority: string
   propertyAreaCovered: string
@@ -66,7 +40,6 @@ interface POIFormData {
   trespassRenewalReminder: number | null
   lawEnforcementContact: string
   conditions: string
-  // Metro Red Card only
   redCardNumber: string
   metroIssuingAuthority: string
   metroIssueDate: string
@@ -77,55 +50,93 @@ interface POIFormData {
 
 const props = defineProps<{
   mode: 'create' | 'edit'
-  record?: POIRecord
+  record?: PoiRecord
 }>()
 
 const { t } = useTranslation()
 const router = useRouter()
+const toastStore = useToastStore()
+const { uploadFile } = useFileApi()
 
 const isSubmitting = ref(false)
-const photoFiles = ref<File[]>([])
-const photoPreviewUrls = ref<string[]>([...(props.record?.existingPhotos ?? [])])
+const isLoading = ref(false)
+const loadError = ref('')
+const metadata = ref<Partial<PoiMetadataResponse>>({})
+const communities = ref<Community[]>([])
+const photos = ref<PhotoItem[]>([])
+const photosDirty = ref(false)
 const trespassDocFile = ref<File | null>(null)
 const metroCardFile = ref<File | null>(null)
-const exportFiles = ref<File[]>([])
+const replaceTrespassDoc = ref(false)
+const replaceMetroCard = ref(false)
 
 const isEdit = computed(() => props.mode === 'edit')
 const pageTitle = computed(() => isEdit.value ? t('poi.form_title_edit') : t('poi.form_title_create'))
+const isEditable = computed(() => !props.record || props.record.status === 'draft' || props.record.status === 'active')
+
+function capitalizeFirst(value: string): string {
+  if (!value) return value
+  return value.charAt(0).toUpperCase() + value.slice(1)
+}
+
+const genderOptions = computed<{ value: PoiGender | ''; label: string }[]>(() => {
+  const genders = metadata.value.genders
+  if (genders && typeof genders === 'object') {
+    return Object.entries(genders).map(([key, val]) => ({
+      value: key as PoiGender,
+      label: capitalizeFirst((val as any).name?.en ?? key),
+    }))
+  }
+  return [
+    { value: 'male', label: capitalizeFirst(t('poi.gender_male')) },
+    { value: 'female', label: capitalizeFirst(t('poi.gender_female')) },
+    { value: 'unknown', label: capitalizeFirst(t('poi.gender_unknown')) },
+  ]
+})
+
+function formatDateInput(dateStr: string | null | undefined): string {
+  if (!dateStr) return ''
+  const d = new Date(dateStr)
+  if (Number.isNaN(d.getTime())) return dateStr
+  const year = d.getFullYear()
+  const month = `${d.getMonth() + 1}`.padStart(2, '0')
+  const day = `${d.getDate()}`.padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
 
 function buildInitialForm(): POIFormData {
   const r = props.record
   return {
-    recordType: r?.recordType ?? '',
+    recordType: r?.record_type ?? '',
     status: r?.status ?? 'draft',
-    firstName: r?.firstName ?? '',
-    lastName: r?.lastName ?? '',
-    aliases: r?.aliases ?? '',
-    dateOfBirth: r?.dateOfBirth ?? '',
+    firstName: r?.first_name ?? '',
+    lastName: r?.last_name ?? '',
+    aliases: r?.known_aliases ?? '',
+    dateOfBirth: formatDateInput(r?.date_of_birth),
     gender: r?.gender ?? '',
-    physicalDescription: r?.physicalDescription ?? '',
+    physicalDescription: r?.physical_description ?? '',
     summary: r?.summary ?? '',
-    internalNotes: r?.internalNotes ?? '',
-    sites: r?.sites ? [...r.sites] : [],
-    threatLevel: r?.threatLevel ?? '',
-    relatedIncidentIds: r?.relatedIncidentIds ?? '',
-    incidentHistorySummary: r?.incidentHistorySummary ?? '',
-    watchLevelReviewDate: r?.watchLevelReviewDate ?? '',
-    associatedIndividuals: r?.associatedIndividuals ?? '',
-    trespassNoticeNumber: r?.trespassNoticeNumber ?? '',
-    trespassIssuingAuthority: r?.trespassIssuingAuthority ?? '',
-    propertyAreaCovered: r?.propertyAreaCovered ?? '',
-    trespassIssueDate: r?.trespassIssueDate ?? '',
-    trespassExpiryDate: r?.trespassExpiryDate ?? '',
-    trespassRenewalReminder: r?.trespassRenewalReminder ?? 14,
-    lawEnforcementContact: r?.lawEnforcementContact ?? '',
+    internalNotes: r?.internal_notes ?? '',
+    sites: r?.sites ? r.sites.map(s => s.community_id) : [],
+    threatLevel: r?.threat_level ?? '',
+    relatedIncidentIds: r?.related_incidents ? r.related_incidents.map(i => i.call_id).join(', ') : '',
+    incidentHistorySummary: r?.incident_history_summary ?? '',
+    watchLevelReviewDate: formatDateInput(r?.watch_level_review_date),
+    associatedIndividuals: r?.associated_individuals ?? '',
+    trespassNoticeNumber: r?.trespass_notice_number ?? '',
+    trespassIssuingAuthority: r?.record_type === 'trespass' ? (r?.issuing_authority ?? '') : '',
+    propertyAreaCovered: r?.property_area_covered ?? '',
+    trespassIssueDate: formatDateInput(r?.issue_date),
+    trespassExpiryDate: formatDateInput(r?.expiry_date),
+    trespassRenewalReminder: r?.renewal_reminder_days ?? 14,
+    lawEnforcementContact: r?.law_enforcement_contact ?? '',
     conditions: r?.conditions ?? '',
-    redCardNumber: r?.redCardNumber ?? '',
-    metroIssuingAuthority: r?.metroIssuingAuthority ?? '',
-    metroIssueDate: r?.metroIssueDate ?? '',
-    metroExpiryDate: r?.metroExpiryDate ?? '',
-    metroLines: r?.metroLines ?? '',
-    metroRenewalReminder: r?.metroRenewalReminder ?? 14,
+    redCardNumber: r?.red_card_number ?? '',
+    metroIssuingAuthority: r?.record_type === 'metro_red_card' ? (r?.issuing_authority ?? '') : '',
+    metroIssueDate: formatDateInput(r?.issue_date),
+    metroExpiryDate: formatDateInput(r?.expiry_date),
+    metroLines: r?.lines ?? '',
+    metroRenewalReminder: r?.renewal_reminder_days ?? 14,
   }
 }
 
@@ -133,30 +144,95 @@ const form = reactive<POIFormData>(buildInitialForm())
 
 const errors = reactive<Partial<Record<keyof POIFormData, string>>>({})
 const photoError = ref('')
+const trespassDocError = ref('')
 
 const isPOI = computed(() => form.recordType === 'poi')
 const isTrespass = computed(() => form.recordType === 'trespass')
 const isMetro = computed(() => form.recordType === 'metro_red_card')
 const hasType = computed(() => form.recordType !== '')
 
-// ── Photo upload ──
+const existingTrespassDocUrl = computed(() => props.record?.notice_document ?? '')
+const existingMetroCardUrl = computed(() => props.record?.card_document ?? '')
+
+onMounted(async () => {
+  isLoading.value = true
+  loadError.value = ''
+  try {
+    const [metaRes, commRes] = await Promise.all([
+      poiApi.getPoiMetadata({ showLoading: false }),
+      communityApi.getCommunities({ include_inactive: false }, { showLoading: false }),
+    ])
+    metadata.value = (metaRes as any) ?? {}
+    communities.value = commRes.communities ?? []
+  } catch (err) {
+    loadError.value = err instanceof Error ? err.message : 'Failed to load form data'
+    toastStore.error(loadError.value)
+  } finally {
+    isLoading.value = false
+  }
+
+  if (props.record?.photos?.length) {
+    const sorted = [...props.record.photos].sort((a, b) => a.sort_order - b.sort_order)
+    photos.value = sorted.map((p, idx) => ({
+      key: `existing-${p.photo_id}-${idx}`,
+      fileId: p.photo_id,
+      url: p.url,
+    }))
+  }
+})
+
+function communityName(id: number): string {
+  return communities.value.find(c => c.community_id === id)?.name ?? String(id)
+}
+
+function toggleSite(id: number) {
+  const idx = form.sites.indexOf(id)
+  if (idx === -1) form.sites.push(id)
+  else form.sites.splice(idx, 1)
+}
+
+// ── Photos ──
 function handlePhotoUpload(event: Event) {
   const input = event.target as HTMLInputElement
   if (!input.files) return
   const newFiles = Array.from(input.files)
   for (const file of newFiles) {
-    if (photoFiles.value.length >= 10) break
+    if (photos.value.length >= 10) break
     if (file.size > 5 * 1024 * 1024) continue
-    photoFiles.value.push(file)
-    photoPreviewUrls.value.push(URL.createObjectURL(file))
+    photos.value.push({
+      key: `new-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      fileId: null,
+      url: URL.createObjectURL(file),
+      file,
+    })
+    photosDirty.value = true
   }
   input.value = ''
 }
 
 function removePhoto(index: number) {
-  URL.revokeObjectURL(photoPreviewUrls.value[index] ?? '')
-  photoFiles.value.splice(index, 1)
-  photoPreviewUrls.value.splice(index, 1)
+  const item = photos.value[index]
+  if (!item) return
+  if (item.file) URL.revokeObjectURL(item.url)
+  photos.value.splice(index, 1)
+  photosDirty.value = true
+}
+
+let dragIndex = -1
+function onPhotoDragStart(index: number) {
+  dragIndex = index
+}
+function onPhotoDragOver(index: number) {
+  if (dragIndex === -1 || dragIndex === index) return
+  const moved = photos.value.splice(dragIndex, 1)[0]
+  if (moved) {
+    photos.value.splice(index, 0, moved)
+    dragIndex = index
+    photosDirty.value = true
+  }
+}
+function onPhotoDragEnd() {
+  dragIndex = -1
 }
 
 function handleTrespassDoc(event: Event) {
@@ -174,13 +250,13 @@ function validate(): boolean {
   const e = errors as Record<string, string>
   Object.keys(e).forEach(k => delete e[k])
 
-  if (!form.recordType) e.recordType = t('validation.required')
+  if (!isEdit.value && !form.recordType) e.recordType = t('validation.required')
   if (!form.firstName.trim()) e.firstName = t('validation.required')
   if (!form.lastName.trim()) e.lastName = t('validation.required')
   if (!form.threatLevel) e.threatLevel = t('validation.required')
   if (!form.summary.trim()) e.summary = t('validation.required')
   if (form.sites.length === 0) e.sites = t('validation.required')
-  if (photoFiles.value.length === 0) photoError.value = t('validation.required')
+  if (photos.value.length === 0) photoError.value = t('validation.required')
   else photoError.value = ''
 
   if (isTrespass.value) {
@@ -189,6 +265,9 @@ function validate(): boolean {
     if (!form.propertyAreaCovered.trim()) e.propertyAreaCovered = t('validation.required')
     if (!form.trespassIssueDate) e.trespassIssueDate = t('validation.required')
     if (!form.trespassExpiryDate) e.trespassExpiryDate = t('validation.required')
+    const hasExistingDoc = isEdit.value && props.record?.notice_document && !replaceTrespassDoc.value
+    if (!hasExistingDoc && !trespassDocFile.value) trespassDocError.value = t('validation.required')
+    else trespassDocError.value = ''
   }
 
   if (isMetro.value) {
@@ -198,41 +277,183 @@ function validate(): boolean {
     if (!form.metroExpiryDate) e.metroExpiryDate = t('validation.required')
   }
 
-  return Object.keys(errors).length === 0 && !photoError.value
+  return Object.keys(errors).length === 0 && !photoError.value && !trespassDocError.value
+}
+
+function parseIncidentIds(): number[] {
+  return form.relatedIncidentIds
+    .split(',')
+    .map(s => s.trim())
+    .filter(Boolean)
+    .map(Number)
+    .filter(n => !Number.isNaN(n))
+}
+
+async function uploadDoc(file: File | null): Promise<number | string | null> {
+  if (!file) return null
+  return uploadFile(file)
+}
+
+async function resolvePhotoFileIds(): Promise<(number | string)[]> {
+  const ids: (number | string)[] = []
+  for (const photo of photos.value) {
+    if (photo.file) {
+      const id = await uploadFile(photo.file)
+      if (id) ids.push(id)
+    } else if (photo.fileId) {
+      ids.push(photo.fileId)
+    }
+  }
+  return ids
+}
+
+async function submitForm(publish: boolean) {
+  if (!validate()) return
+  if (!isEditable.value) {
+    toastStore.error('This record cannot be edited in its current status.')
+    return
+  }
+
+  isSubmitting.value = true
+  try {
+    const photoFileIds = await resolvePhotoFileIds()
+    if (photos.value.length > 0 && photoFileIds.length === 0) {
+      photoError.value = t('poi.photo_upload_failed')
+      isSubmitting.value = false
+      return
+    }
+
+    const relatedIds = parseIncidentIds()
+    const basePayload = {
+      first_name: form.firstName.trim(),
+      last_name: form.lastName.trim(),
+      known_aliases: form.aliases.trim() || undefined,
+      date_of_birth: form.dateOfBirth || undefined,
+      gender: form.gender || undefined,
+      physical_description: form.physicalDescription.trim() || undefined,
+      threat_level: form.threatLevel as PoiThreatLevel,
+      summary: form.summary.trim(),
+      internal_notes: form.internalNotes.trim() || undefined,
+      community_ids: form.sites,
+      photo_file_ids: photoFileIds,
+      related_incident_ids: relatedIds.length ? relatedIds : undefined,
+    }
+
+    if (!isEdit.value) {
+      if (!form.recordType) return
+      const createPayload: any = {
+        ...basePayload,
+        record_type: form.recordType as PoiRecordType,
+        publish,
+      }
+      if (isPOI.value) {
+        Object.assign(createPayload, {
+          incident_history_summary: form.incidentHistorySummary.trim() || undefined,
+          watch_level_review_date: form.watchLevelReviewDate || undefined,
+          associated_individuals: form.associatedIndividuals.trim() || undefined,
+        })
+      }
+      if (isTrespass.value) {
+        const noticeDocId = await uploadDoc(trespassDocFile.value)
+        const payload: any = {
+          trespass_notice_number: form.trespassNoticeNumber.trim(),
+          issuing_authority: form.trespassIssuingAuthority.trim(),
+          property_area_covered: form.propertyAreaCovered.trim(),
+          issue_date: form.trespassIssueDate,
+          expiry_date: form.trespassExpiryDate,
+          renewal_reminder_days: form.trespassRenewalReminder ?? -1,
+          law_enforcement_contact: form.lawEnforcementContact.trim() || undefined,
+          conditions: form.conditions.trim() || undefined,
+        }
+        if (noticeDocId) payload.notice_document_file_id = noticeDocId as number
+        Object.assign(createPayload, payload)
+      }
+      if (isMetro.value) {
+        const cardDocId = await uploadDoc(metroCardFile.value)
+        const payload: any = {
+          red_card_number: form.redCardNumber.trim(),
+          issuing_authority: form.metroIssuingAuthority.trim(),
+          issue_date: form.metroIssueDate,
+          expiry_date: form.metroExpiryDate,
+          lines: form.metroLines.trim() || undefined,
+          renewal_reminder_days: form.metroRenewalReminder ?? -1,
+        }
+        if (cardDocId) payload.card_document_file_id = cardDocId as number
+        Object.assign(createPayload, payload)
+      }
+      await poiApi.createPoiRecord(createPayload)
+      toastStore.success(publish ? t('poi.create_publish_success') : t('poi.create_draft_success'))
+    } else {
+      if (!props.record) return
+      const updatePayload: any = {
+        record_id: props.record.record_id,
+        ...basePayload,
+      }
+      if (!photosDirty.value) {
+        delete updatePayload.photo_file_ids
+      }
+      if (isPOI.value) {
+        Object.assign(updatePayload, {
+          incident_history_summary: form.incidentHistorySummary.trim() || null,
+          watch_level_review_date: form.watchLevelReviewDate || null,
+          associated_individuals: form.associatedIndividuals.trim() || null,
+        })
+      }
+      if (isTrespass.value) {
+        const noticeDocId = await uploadDoc(trespassDocFile.value)
+        const payload: any = {
+          trespass_notice_number: form.trespassNoticeNumber.trim(),
+          issuing_authority: form.trespassIssuingAuthority.trim(),
+          property_area_covered: form.propertyAreaCovered.trim(),
+          issue_date: form.trespassIssueDate,
+          expiry_date: form.trespassExpiryDate,
+          renewal_reminder_days: form.trespassRenewalReminder ?? -1,
+          law_enforcement_contact: form.lawEnforcementContact.trim() || null,
+          conditions: form.conditions.trim() || null,
+        }
+        if (replaceTrespassDoc.value || trespassDocFile.value) {
+          if (noticeDocId) payload.notice_document_file_id = noticeDocId as number
+        }
+        Object.assign(updatePayload, payload)
+      }
+      if (isMetro.value) {
+        const cardDocId = await uploadDoc(metroCardFile.value)
+        const payload: any = {
+          red_card_number: form.redCardNumber.trim(),
+          issuing_authority: form.metroIssuingAuthority.trim(),
+          issue_date: form.metroIssueDate,
+          expiry_date: form.metroExpiryDate,
+          lines: form.metroLines.trim() || null,
+          renewal_reminder_days: form.metroRenewalReminder ?? -1,
+        }
+        if (replaceMetroCard.value || metroCardFile.value) {
+          if (cardDocId) payload.card_document_file_id = cardDocId as number
+        }
+        Object.assign(updatePayload, payload)
+      }
+      await poiApi.updatePoiRecord(updatePayload)
+      toastStore.success(t('poi.update_success'))
+    }
+
+    router.push('/poi')
+  } catch (err) {
+    console.error('Failed to save POI record:', err)
+    toastStore.error(err instanceof Error ? err.message : 'Failed to save record')
+  } finally {
+    isSubmitting.value = false
+  }
 }
 
 function handleSaveDraft() {
-  form.status = 'draft'
-  submitForm()
+  submitForm(false)
 }
 
 function handlePublish() {
-  form.status = 'active'
-  if (!validate()) return
-  submitForm()
-}
-
-function submitForm() {
-  isSubmitting.value = true
-  const action = isEdit.value ? 'update' : 'create'
-  console.log(`[POIForm] ${action}`, props.record?.id ?? 'new', form)
-  setTimeout(() => {
-    isSubmitting.value = false
-    router.push('/poi')
-  }, 800)
+  submitForm(true)
 }
 
 function handleCancel() {
   router.push('/poi')
-}
-
-// Demo sites list
-const availableSites = ['Central Hub', 'North Gate', 'South Plaza', 'Metro Station A', 'Metro Station B', 'West Wing', 'East Block']
-
-function toggleSite(site: string) {
-  const idx = form.sites.indexOf(site)
-  if (idx === -1) form.sites.push(site)
-  else form.sites.splice(idx, 1)
 }
 </script>
 
@@ -260,7 +481,8 @@ function toggleSite(site: string) {
           <div class="type-selector">
             <button
               class="type-option"
-              :class="{ 'type-option--active': form.recordType === 'poi' }"
+              :class="{ 'type-option--active': form.recordType === 'poi', 'type-option--disabled': isEdit }"
+              :disabled="isEdit"
               @click="form.recordType = 'poi'"
             >
               <Icon name="lucide:user-search" :size="20" />
@@ -269,7 +491,8 @@ function toggleSite(site: string) {
             </button>
             <button
               class="type-option"
-              :class="{ 'type-option--active': form.recordType === 'trespass' }"
+              :class="{ 'type-option--active': form.recordType === 'trespass', 'type-option--disabled': isEdit }"
+              :disabled="isEdit"
               @click="form.recordType = 'trespass'"
             >
               <Icon name="lucide:ban" :size="20" />
@@ -278,7 +501,8 @@ function toggleSite(site: string) {
             </button>
             <button
               class="type-option"
-              :class="{ 'type-option--active': form.recordType === 'metro_red_card' }"
+              :class="{ 'type-option--active': form.recordType === 'metro_red_card', 'type-option--disabled': isEdit }"
+              :disabled="isEdit"
               @click="form.recordType = 'metro_red_card'"
             >
               <Icon name="lucide:train-front" :size="20" />
@@ -317,9 +541,7 @@ function toggleSite(site: string) {
                 <label class="form-field__label">{{ t('poi.field_gender') }}</label>
                 <select v-model="form.gender" class="form-field__select">
                   <option value="">{{ t('common.select') }}</option>
-                  <option value="male">{{ t('poi.gender_male') }}</option>
-                  <option value="female">{{ t('poi.gender_female') }}</option>
-                  <option value="unknown">{{ t('poi.gender_unknown') }}</option>
+                  <option v-for="opt in genderOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
                 </select>
               </div>
               <div class="form-field form-field--full">
@@ -351,7 +573,7 @@ function toggleSite(site: string) {
                     class="threat-btn"
                     :class="[`threat-btn--${lvl}`, { 'threat-btn--active': form.threatLevel === lvl }]"
                     type="button"
-                    @click="form.threatLevel = lvl"
+                    @click="form.threatLevel = lvl as PoiThreatLevel"
                   >
                     {{ t(`poi.threat_${lvl}`) }}
                   </button>
@@ -362,16 +584,17 @@ function toggleSite(site: string) {
                 <label class="form-field__label">{{ t('poi.field_sites') }} <span class="req">*</span></label>
                 <div class="sites-selector">
                   <button
-                    v-for="site in availableSites"
-                    :key="site"
+                    v-for="community in communities"
+                    :key="community.community_id"
                     type="button"
                     class="site-chip"
-                    :class="{ 'site-chip--active': form.sites.includes(site) }"
-                    @click="toggleSite(site)"
+                    :class="{ 'site-chip--active': form.sites.includes(community.community_id) }"
+                    @click="toggleSite(community.community_id)"
                   >
-                    {{ site }}
+                    {{ community.name }}
                   </button>
                 </div>
+                <span v-if="form.sites.length" class="field-hint">{{ form.sites.length }} selected</span>
                 <span v-if="errors.sites" class="field-error">{{ errors.sites }}</span>
               </div>
             </div>
@@ -383,27 +606,34 @@ function toggleSite(site: string) {
           <div class="form-section__header">
             <Icon name="lucide:image" :size="16" />
             <h2 class="form-section__title">{{ t('poi.section_photos') }}</h2>
-            <span class="section-badge">{{ photoFiles.length }}/10</span>
+            <span class="section-badge">{{ photos.length }}/10</span>
           </div>
           <div class="form-section__body">
             <div class="photo-grid">
               <div
-                v-for="(url, idx) in photoPreviewUrls"
-                :key="idx"
+                v-for="(photo, idx) in photos"
+                :key="photo.key"
                 class="photo-item"
+                draggable="true"
+                :class="{ 'photo-item--primary': idx === 0 }"
+                @dragstart="onPhotoDragStart(idx)"
+                @dragover.prevent="onPhotoDragOver(idx)"
+                @dragend="onPhotoDragEnd"
               >
-                <img :src="url" :alt="`Photo ${idx + 1}`" class="photo-item__img" />
+                <img :src="photo.url" :alt="`Photo ${idx + 1}`" class="photo-item__img" />
+                <span v-if="idx === 0" class="photo-item__primary-badge">{{ t('poi.photo_primary') }}</span>
                 <button class="photo-item__remove" type="button" @click="removePhoto(idx)">
                   <Icon name="lucide:x" :size="12" />
                 </button>
               </div>
-              <label v-if="photoFiles.length < 10" class="photo-add">
+              <label v-if="photos.length < 10" class="photo-add">
                 <Icon name="lucide:plus" :size="20" />
                 <span>{{ t('poi.add_photo') }}</span>
                 <input type="file" accept="image/*" multiple class="hidden-input" @change="handlePhotoUpload" />
               </label>
             </div>
             <p class="field-hint">{{ t('poi.photo_hint') }}</p>
+            <p class="field-hint">{{ t('poi.photo_drag_hint') }}</p>
             <span v-if="photoError" class="field-error">{{ photoError }}</span>
           </div>
         </div>
@@ -516,14 +746,22 @@ function toggleSite(site: string) {
               </div>
               <div class="form-field form-field--full">
                 <label class="form-field__label">{{ t('poi.field_notice_document') }} <span class="req">*</span></label>
-                <div class="file-upload-area">
+                <div v-if="props.record?.notice_document && !replaceTrespassDoc && !trespassDocFile" class="file-preview">
+                  <a :href="props.record.notice_document" target="_blank" class="file-preview__link">{{ t('poi.current_document') }}</a>
+                  <button type="button" class="file-preview__replace" @click="replaceTrespassDoc = true">
+                    <Icon name="lucide:rotate-ccw" :size="14" />
+                    {{ t('poi.replace_document') }}
+                  </button>
+                </div>
+                <div v-else class="file-upload-area">
                   <label class="file-upload-btn">
                     <Icon name="lucide:upload" :size="16" />
                     <span>{{ trespassDocFile ? trespassDocFile.name : t('poi.upload_pdf') }}</span>
-                    <input type="file" accept=".pdf" class="hidden-input" @change="handleTrespassDoc" />
+                    <input type="file" accept=".pdf,image/*" class="hidden-input" @change="handleTrespassDoc" />
                   </label>
                 </div>
                 <p class="field-hint">{{ t('poi.notice_doc_hint') }}</p>
+                <span v-if="trespassDocError" class="field-error">{{ trespassDocError }}</span>
               </div>
             </div>
           </div>
@@ -571,7 +809,14 @@ function toggleSite(site: string) {
               </div>
               <div class="form-field form-field--full">
                 <label class="form-field__label">{{ t('poi.field_card_document') }}</label>
-                <div class="file-upload-area">
+                <div v-if="props.record?.card_document && !replaceMetroCard && !metroCardFile" class="file-preview">
+                  <a :href="props.record.card_document" target="_blank" class="file-preview__link">{{ t('poi.current_document') }}</a>
+                  <button type="button" class="file-preview__replace" @click="replaceMetroCard = true">
+                    <Icon name="lucide:rotate-ccw" :size="14" />
+                    {{ t('poi.replace_document') }}
+                  </button>
+                </div>
+                <div v-else class="file-upload-area">
                   <label class="file-upload-btn">
                     <Icon name="lucide:upload" :size="16" />
                     <span>{{ metroCardFile ? metroCardFile.name : t('poi.upload_card_doc') }}</span>
@@ -586,19 +831,25 @@ function toggleSite(site: string) {
 
         <!-- ── Footer Actions ── -->
         <div class="poi-form__footer">
-          <button type="button" class="btn-cancel" @click="handleCancel">
-            {{ t('common.cancel') }}
-          </button>
+          <AppButton :text="t('common.cancel')" type="secondary" size="sm" :disabled="isSubmitting" @click="handleCancel" />
           <div class="footer-actions-right">
-            <button v-if="!isEdit" type="button" class="btn-draft" :disabled="isSubmitting" @click="handleSaveDraft">
-              <Icon name="lucide:save" :size="15" />
-              {{ t('poi.save_draft') }}
-            </button>
-            <button type="button" class="btn-publish" :disabled="isSubmitting" @click="handlePublish">
-              <Icon v-if="isSubmitting" name="lucide:loader-2" :size="15" class="spin" />
-              <Icon v-else :name="isEdit ? 'lucide:save' : 'lucide:send'" :size="15" />
-              {{ isEdit ? t('poi.save_changes') : t('poi.publish') }}
-            </button>
+            <AppButton
+              v-if="!isEdit"
+              :text="t('poi.save_draft')"
+              icon="lucide:save"
+              type="secondary"
+              size="sm"
+              :loading="isSubmitting"
+              @click="handleSaveDraft"
+            />
+            <AppButton
+              :text="isEdit ? t('poi.save_changes') : t('poi.publish')"
+              :icon="isEdit ? 'lucide:save' : 'lucide:send'"
+              type="primary"
+              size="sm"
+              :loading="isSubmitting"
+              @click="handlePublish"
+            />
           </div>
         </div>
       </template>
@@ -804,8 +1055,18 @@ function toggleSite(site: string) {
   text-align: center;
   transition: all var(--transition-base);
 }
-.type-option:hover { border-color: var(--color-accent); color: var(--color-text-primary); }
+.type-option:hover:not(:disabled) { border-color: var(--color-accent); color: var(--color-text-primary); }
 .type-option--active { border-color: var(--color-accent); background: rgba(var(--color-accent-rgb, 17 150 173), 0.08); color: var(--color-text-primary); }
+.type-option:disabled,
+.type-option--disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.type-option:disabled:hover,
+.type-option--disabled:hover {
+  border-color: var(--color-border);
+  color: var(--color-text-secondary);
+}
 
 .type-option__label { font-size: var(--font-size-sm); font-weight: 600; }
 .type-option__desc  { font-size: var(--font-size-xs); color: var(--color-text-muted); line-height: 1.4; }
@@ -871,12 +1132,30 @@ function toggleSite(site: string) {
   border-radius: var(--radius-md);
   overflow: hidden;
   border: 1px solid var(--color-border);
+  cursor: grab;
+}
+.photo-item--primary {
+  border: 2px solid var(--color-accent);
+  box-shadow: 0 0 0 2px rgba(var(--color-accent-rgb, 17 150 173), 0.15);
 }
 
 .photo-item__img {
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+
+.photo-item__primary-badge {
+  position: absolute;
+  bottom: 4px;
+  left: 4px;
+  padding: 1px 4px;
+  background: var(--color-accent);
+  color: #000;
+  font-size: 9px;
+  font-weight: 700;
+  border-radius: var(--radius-sm);
+  text-transform: uppercase;
 }
 
 .photo-item__remove {
@@ -913,6 +1192,35 @@ function toggleSite(site: string) {
 .photo-add:hover { border-color: var(--color-accent); color: var(--color-accent); }
 
 /* ── File upload ── */
+.file-preview {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.file-preview__link {
+  font-size: var(--font-size-sm);
+  color: var(--color-accent);
+  text-decoration: none;
+}
+.file-preview__link:hover { text-decoration: underline; }
+
+.file-preview__replace {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+  transition: all var(--transition-base);
+}
+.file-preview__replace:hover { border-color: var(--color-accent); color: var(--color-accent); }
+
 .file-upload-area {
   display: inline-flex;
 }
@@ -970,56 +1278,4 @@ function toggleSite(site: string) {
   gap: var(--space-3);
 }
 
-.btn-cancel {
-  padding: var(--space-2) var(--space-4);
-  background: transparent;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  color: var(--color-text-secondary);
-  font-size: var(--font-size-sm);
-  cursor: pointer;
-  transition: all var(--transition-base);
-}
-.btn-cancel:hover { border-color: var(--color-text-secondary); color: var(--color-text-primary); }
-
-.btn-draft {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-2) var(--space-4);
-  background: var(--color-bg-elevated);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  color: var(--color-text-secondary);
-  font-size: var(--font-size-sm);
-  font-weight: 500;
-  cursor: pointer;
-  transition: all var(--transition-base);
-}
-.btn-draft:hover { border-color: var(--color-accent); color: var(--color-accent); }
-.btn-draft:disabled { opacity: 0.5; cursor: not-allowed; }
-
-.btn-publish {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-2) var(--space-5);
-  background: var(--color-accent);
-  border: none;
-  border-radius: var(--radius-md);
-  color: white;
-  font-size: var(--font-size-sm);
-  font-weight: 500;
-  cursor: pointer;
-  transition: opacity var(--transition-base);
-}
-.btn-publish:hover { opacity: 0.88; }
-.btn-publish:disabled { opacity: 0.5; cursor: not-allowed; }
-
-/* ── Spin ── */
-.spin { animation: spin 1s linear infinite; }
-@keyframes spin {
-  from { transform: rotate(0deg); }
-  to   { transform: rotate(360deg); }
-}
 </style>

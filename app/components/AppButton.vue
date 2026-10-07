@@ -1,14 +1,20 @@
 <script setup lang="ts">
+import { computed } from 'vue'
+
 const props = withDefaults(defineProps<{
   text: string
   icon?: string
   type?: 'primary' | 'secondary' | 'danger' | 'ghost'
   size?: 'sm' | 'md' | 'lg'
   disabled?: boolean
+  loading?: boolean
+  iconOnly?: boolean
 }>(), {
   type: 'primary',
   size: 'md',
   disabled: false,
+  loading: false,
+  iconOnly: false,
 })
 
 const emit = defineEmits<{
@@ -16,21 +22,42 @@ const emit = defineEmits<{
 }>()
 
 function handleClick() {
-  if (!props.disabled) {
+  if (!props.disabled && !props.loading) {
     emit('click')
   }
 }
+
+const iconSize = computed(() => {
+  if (props.size === 'sm') return 14
+  if (props.size === 'lg') return 20
+  return 16
+})
 </script>
 
 <template>
   <button
     class="app-button"
-    :class="[`app-button--${type}`, `app-button--${size}`]"
-    :disabled="disabled"
+    :class="[
+      `app-button--${type}`,
+      `app-button--${size}`,
+      { 'app-button--icon-only': iconOnly },
+      { 'app-button--loading': loading },
+    ]"
+    :disabled="disabled || loading"
     @click="handleClick"
   >
-    <Icon v-if="icon" :name="icon" :size="size === 'sm' ? 14 : size === 'lg' ? 20 : 16" />
-    <span>{{ text }}</span>
+    <Icon
+      v-if="loading"
+      name="lucide:loader-2"
+      :size="iconSize"
+      class="spin"
+    />
+    <Icon
+      v-else-if="icon"
+      :name="icon"
+      :size="iconSize"
+    />
+    <span v-if="!iconOnly">{{ text }}</span>
   </button>
 </template>
 
@@ -110,5 +137,23 @@ function handleClick() {
 .app-button--ghost:hover:not(:disabled) {
   background: var(--color-bg-overlay);
   color: var(--color-text-primary);
+}
+
+.app-button--icon-only {
+  padding: 0;
+  width: v-bind('size === "sm" ? "28px" : size === "lg" ? "48px" : "40px"');
+}
+
+.app-button--loading {
+  cursor: wait;
+}
+
+.spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 </style>

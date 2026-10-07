@@ -1,122 +1,65 @@
 <script setup lang="ts">
-import { useAuthStore } from '~/stores/auth'
-
-type RecordType = 'poi' | 'trespass' | 'metro_red_card'
-type ThreatLevel = 'low' | 'medium' | 'high' | 'critical'
-type RecordStatus = 'draft' | 'active' | 'expired' | 'inactive' | 'archived'
-
-interface VersionEntry {
-  version: number
-  changedBy: string
-  changedAt: string
-  summary: string
-}
-
-interface POIRecord {
-  id: string
-  type: RecordType
-  firstName: string
-  lastName: string
-  aliases?: string
-  dateOfBirth?: string
-  gender?: string
-  physicalDescription?: string
-  summary: string
-  internalNotes?: string
-  photos: string[]
-  sites: string[]
-  threatLevel: ThreatLevel
-  status: RecordStatus
-  relatedIncidentIds?: string
-  expiryDate?: string
-  issueDate?: string
-  lastUpdated: string
-  createdAt: string
-  createdBy: string
-  // POI only
-  incidentHistorySummary?: string
-  watchLevelReviewDate?: string
-  associatedIndividuals?: string
-  // Trespass only
-  trespassNoticeNumber?: string
-  trespassIssuingAuthority?: string
-  propertyAreaCovered?: string
-  trespassRenewalReminder?: number
-  lawEnforcementContact?: string
-  conditions?: string
-  // Metro only
-  redCardNumber?: string
-  metroIssuingAuthority?: string
-  metroLines?: string
-  metroRenewalReminder?: number
-}
+import { ref, computed, onMounted } from 'vue'
+import AppButton from '~/components/AppButton.vue'
+import AppDialogModal from '~/components/AppDialogModal.vue'
+import Badge from '~/components/Badge.vue'
+import { poiApi } from '~/api/poi'
+import { useToastStore } from '~/stores/toast'
+import { utcToLocal } from '~/utils/dateTime'
+import type { PoiRecord } from '~/api/types/poi'
 
 const { t } = useTranslation()
 const router = useRouter()
 const route = useRoute()
-const authStore = useAuthStore()
+const toastStore = useToastStore()
 
-const isAdmin = computed(() => authStore.isAdmin)
+const recordId = computed(() => {
+  const id = Number(route.params.id)
+  return Number.isNaN(id) ? 0 : id
+})
 
 const loading = ref(true)
-const record = ref<POIRecord | null>(null)
-const showVersionHistory = ref(false)
+const loadError = ref('')
+const record = ref<PoiRecord | null>(null)
+
+const lightboxOpen = ref(false)
+const lightboxIndex = ref(0)
+
 const showInactiveModal = ref(false)
 const inactiveReason = ref('')
 const inactiveReasonError = ref('')
 const isInactivating = ref(false)
-const inactiveSuccess = ref(false)
-const lightboxOpen = ref(false)
-const lightboxIndex = ref(0)
-const showExportModal = ref(false)
+
+const showArchiveModal = ref(false)
+const isArchiving = ref(false)
+
+const isPublishing = ref(false)
 const isExporting = ref(false)
-const exportSuccess = ref(false)
-const exportLog = ref<{ exportedBy: string; exportedAt: string }[]>([])
 
-const DEMO_RECORD: POIRecord = {
-  id: String(route.params.id),
-  type: 'trespass',
-  firstName: 'Jane',
-  lastName: 'Smith',
-  aliases: 'Jenny S, J. Smith',
-  dateOfBirth: '1988-04-15',
-  gender: 'female',
-  physicalDescription: 'Approximately 165cm, medium build, dark brown hair, usually wears glasses.',
-  summary: 'Subject issued formal trespass notice following repeated unauthorised access to South Plaza. Officers should detain and contact law enforcement if found on property.',
-  internalNotes: 'Second offence. Previously warned in Jan 2026. Law enforcement case reference: CASE-2026-0491.',
-  photos: [
-    'https://picsum.photos/seed/ti002a/400/400',
-    'https://picsum.photos/seed/ti002b/400/400',
-    'https://picsum.photos/seed/ti002c/400/400',
-  ],
-  sites: ['South Plaza', 'Central Hub'],
-  threatLevel: 'medium',
-  status: 'active',
-  relatedIncidentIds: 'INC-2026-041, INC-2026-088',
-  issueDate: '2026-04-01',
-  expiryDate: '2026-07-15',
-  trespassNoticeNumber: 'TN-2026-0192',
-  trespassIssuingAuthority: 'City Security Authority',
-  propertyAreaCovered: 'South Plaza levels G-3, Central Hub main entrance',
-  trespassRenewalReminder: 14,
-  lawEnforcementContact: 'Sgt. R. Thompson — City Police, ph: 0400 000 111',
-  conditions: 'Subject is not to enter or remain on property. Officers have authority to detain pending police arrival.',
-  lastUpdated: '2026-06-18T08:15:00Z',
-  createdAt: '2026-04-01T10:00:00Z',
-  createdBy: 'Manager A. Johnson',
-}
+const canEdit = computed(() => record.value?.status === 'draft' || record.value?.status === 'active')
+const canPublish = computed(() => record.value?.status === 'draft')
+const canInactivate = computed(() => record.value?.status === 'active')
+const canArchive = computed(() => record.value?.status === 'expired' || record.value?.status === 'inactive')
 
-const DEMO_VERSIONS: VersionEntry[] = [
-  { version: 3, changedBy: 'A. Johnson', changedAt: '2026-06-18T08:15:00Z', summary: 'Updated summary and conditions text.' },
-  { version: 2, changedBy: 'A. Johnson', changedAt: '2026-05-10T14:30:00Z', summary: 'Added related incident INC-2026-088.' },
-  { version: 1, changedBy: 'A. Johnson', changedAt: '2026-04-01T10:00:00Z', summary: 'Record created and published.' },
-]
+const photoUrls = computed(() => record.value?.photos?.map(p => p.url) ?? [])
 
-onMounted(() => {
-  setTimeout(() => {
-    record.value = DEMO_RECORD
+onMounted(async () => {
+  if (!recordId.value) {
+    loadError.value = t('poi.record_not_found')
     loading.value = false
-  }, 300)
+    return
+  }
+  loading.value = true
+  try {
+    const response = await poiApi.getPoiRecord(recordId.value)
+    record.value = response.record
+  } catch (err) {
+    console.error('Failed to load POI record:', err)
+    loadError.value = err instanceof Error ? err.message : 'Failed to load record'
+    toastStore.error(loadError.value)
+  } finally {
+    loading.value = false
+  }
 })
 
 function goBack() {
@@ -124,31 +67,80 @@ function goBack() {
 }
 
 function goEdit() {
-  router.push(`/poi/${route.params.id}/edit`)
+  router.push(`/poi/${recordId.value}/edit`)
 }
 
-function formatDate(iso?: string) {
-  if (!iso) return '—'
-  return new Date(iso).toLocaleDateString('en-AU', { day: '2-digit', month: 'short', year: 'numeric' })
+function formatDate(value: string | null | undefined): string {
+  if (!value) return '—'
+  const local = utcToLocal(value)
+  return local.isValid() ? local.format('DD MMM YYYY') : '—'
 }
 
-function formatDateTime(iso: string) {
-  return new Date(iso).toLocaleString('en-AU', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+function formatDateTime(value: string | null | undefined): string {
+  if (!value) return '—'
+  const local = utcToLocal(value)
+  return local.isValid() ? local.format('DD MMM YYYY HH:mm') : '—'
 }
 
-function isExpiringSoon(iso?: string): boolean {
-  if (!iso) return false
-  const diff = new Date(iso).getTime() - Date.now()
-  return diff > 0 && diff < 14 * 24 * 60 * 60 * 1000
+function parseLocalDate(dateStr: string): Date {
+  return new Date(`${dateStr}T00:00:00`)
 }
 
-function isExpired(iso?: string): boolean {
-  if (!iso) return false
-  return new Date(iso).getTime() < Date.now()
+function isExpired(dateStr: string | null | undefined): boolean {
+  if (!dateStr) return false
+  return parseLocalDate(dateStr).getTime() < new Date().setHours(0, 0, 0, 0)
 }
 
-function getInitials(r: POIRecord) {
-  return ((r.firstName[0] ?? '') + (r.lastName[0] ?? '')).toUpperCase()
+function isExpiringSoon(dateStr: string | null | undefined): boolean {
+  if (!dateStr || isExpired(dateStr)) return false
+  const soon = new Date()
+  soon.setDate(soon.getDate() + 14)
+  soon.setHours(0, 0, 0, 0)
+  return parseLocalDate(dateStr).getTime() <= soon.getTime()
+}
+
+function getInitials(r: PoiRecord): string {
+  return ((r.first_name[0] ?? '') + (r.last_name[0] ?? '')).toUpperCase()
+}
+
+const historyEntries = computed(() => {
+  const entries: { label: string; value: string }[] = []
+  if (!record.value) return entries
+  if (record.value.created_by_name && record.value.created_on) {
+    entries.push({
+      label: t('poi.history_created'),
+      value: `${record.value.created_by_name} — ${formatDateTime(record.value.created_on)}`,
+    })
+  }
+  if (record.value.approved_by_name && record.value.approved_on) {
+    entries.push({
+      label: t('poi.history_approved'),
+      value: `${record.value.approved_by_name} — ${formatDateTime(record.value.approved_on)}`,
+    })
+  }
+  if (record.value.last_update) {
+    entries.push({
+      label: t('poi.history_updated'),
+      value: formatDateTime(record.value.last_update),
+    })
+  }
+  return entries
+})
+
+async function handlePublish() {
+  if (!record.value) return
+  isPublishing.value = true
+  try {
+    await poiApi.publishPoiRecord(record.value.record_id)
+    toastStore.success(t('poi.publish_success'))
+    const refreshed = await poiApi.getPoiRecord(record.value.record_id)
+    record.value = refreshed.record
+  } catch (err) {
+    console.error('Failed to publish POI record:', err)
+    toastStore.error(err instanceof Error ? err.message : 'Failed to publish record')
+  } finally {
+    isPublishing.value = false
+  }
 }
 
 function openInactiveModal() {
@@ -157,40 +149,83 @@ function openInactiveModal() {
   showInactiveModal.value = true
 }
 
-function confirmInactive() {
+function closeInactiveModal() {
+  showInactiveModal.value = false
+  inactiveReason.value = ''
+  inactiveReasonError.value = ''
+}
+
+async function confirmInactive() {
   if (!inactiveReason.value.trim()) {
     inactiveReasonError.value = t('validation.required')
     return
   }
+  if (!record.value) return
   isInactivating.value = true
-  console.log('[POIDetail] Inactive record', route.params.id, 'reason:', inactiveReason.value)
-  setTimeout(() => {
-    if (record.value) {
-      record.value = { ...record.value, status: 'inactive' }
-    }
+  try {
+    await poiApi.inactivatePoiRecord(record.value.record_id, inactiveReason.value.trim())
+    toastStore.success(t('poi.modal_inactive_success'))
+    closeInactiveModal()
+    const refreshed = await poiApi.getPoiRecord(record.value.record_id)
+    record.value = refreshed.record
+  } catch (err) {
+    console.error('Failed to inactivate POI record:', err)
+    toastStore.error(err instanceof Error ? err.message : 'Failed to inactivate record')
+  } finally {
     isInactivating.value = false
-    inactiveSuccess.value = true
-    showInactiveModal.value = false
-    setTimeout(() => { inactiveSuccess.value = false }, 4000)
-  }, 600)
+  }
 }
 
-function handleExport() {
-  showExportModal.value = true
+function openArchiveModal() {
+  showArchiveModal.value = true
 }
 
-function confirmExport() {
+function closeArchiveModal() {
+  showArchiveModal.value = false
+}
+
+async function confirmArchive() {
+  if (!record.value) return
+  isArchiving.value = true
+  try {
+    await poiApi.archivePoiRecord(record.value.record_id)
+    toastStore.success(t('poi.archive_success'))
+    closeArchiveModal()
+    const refreshed = await poiApi.getPoiRecord(record.value.record_id)
+    record.value = refreshed.record
+  } catch (err) {
+    console.error('Failed to archive POI record:', err)
+    toastStore.error(err instanceof Error ? err.message : 'Failed to archive record')
+  } finally {
+    isArchiving.value = false
+  }
+}
+
+async function handleExport() {
+  if (!record.value) return
   isExporting.value = true
-  const adminName = authStore.user ? `${authStore.user.first_name} ${authStore.user.last_name}`.trim() : 'Admin'
-  const exportedAt = new Date().toISOString()
-  console.log('[POIDetail] Export PDF', route.params.id, { exportedBy: adminName, exportedAt })
-  setTimeout(() => {
-    exportLog.value.unshift({ exportedBy: adminName, exportedAt })
+  try {
+    const response = await poiApi.exportPoiRecord(record.value.record_id)
+    if (response.file_url) {
+      window.open(response.file_url, '_blank')
+    }
+    toastStore.success(t('poi.export_success'))
+  } catch (err) {
+    console.error('Failed to export POI record:', err)
+    toastStore.error(err instanceof Error ? err.message : 'Failed to export record')
+  } finally {
     isExporting.value = false
-    showExportModal.value = false
-    exportSuccess.value = true
-    setTimeout(() => { exportSuccess.value = false }, 4000)
-  }, 800)
+  }
+}
+
+function nextLightbox() {
+  if (!photoUrls.value.length) return
+  lightboxIndex.value = (lightboxIndex.value + 1) % photoUrls.value.length
+}
+
+function prevLightbox() {
+  if (!photoUrls.value.length) return
+  lightboxIndex.value = (lightboxIndex.value - 1 + photoUrls.value.length) % photoUrls.value.length
 }
 </script>
 
@@ -210,80 +245,92 @@ function confirmExport() {
         <div class="poi-detail__breadcrumb">
           <span class="breadcrumb-link" @click="goBack">{{ t('poi.title') }}</span>
           <Icon name="lucide:chevron-right" :size="14" class="breadcrumb-sep" />
-          <span>{{ record.firstName }} {{ record.lastName }}</span>
+          <span>{{ record.first_name }} {{ record.last_name }}</span>
         </div>
         <div class="poi-detail__header-actions">
-          <button
-            v-if="record.status === 'active'"
-            class="btn-secondary btn-danger"
+          <AppButton
+            v-if="canPublish"
+            :text="t('poi.publish')"
+            icon="lucide:send"
+            type="secondary"
+            size="sm"
+            :loading="isPublishing"
+            @click="handlePublish"
+          />
+          <AppButton
+            v-if="canInactivate"
+            :text="t('poi.action_inactive')"
+            icon="lucide:ban"
+            type="danger"
+            size="sm"
+            :loading="isInactivating"
             @click="openInactiveModal"
-          >
-            <Icon name="lucide:ban" :size="15" />
-            {{ t('poi.action_inactive') }}
-          </button>
-          <button v-if="isAdmin" class="btn-secondary" @click="handleExport">
-            <Icon name="lucide:download" :size="15" />
-            {{ t('poi.action_export') }}
-          </button>
-          <button class="btn-primary" @click="goEdit">
-            <Icon name="lucide:pencil" :size="15" />
-            {{ t('common.edit') }}
-          </button>
+          />
+          <AppButton
+            v-if="canArchive"
+            :text="t('poi.action_archive')"
+            icon="lucide:archive"
+            type="danger"
+            size="sm"
+            :loading="isArchiving"
+            @click="openArchiveModal"
+          />
+          <AppButton
+            :text="t('poi.action_export')"
+            icon="lucide:download"
+            type="secondary"
+            size="sm"
+            :loading="isExporting"
+            @click="handleExport"
+          />
+          <AppButton
+            v-if="canEdit"
+            :text="t('common.edit')"
+            icon="lucide:pencil"
+            type="primary"
+            size="sm"
+            @click="goEdit"
+          />
         </div>
       </div>
 
-      <!-- ── Banners ── -->
-      <div v-if="inactiveSuccess" class="status-banner status-banner--ok">
-        <Icon name="lucide:check-circle-2" :size="16" />
-        {{ t('poi.modal_inactive_success') }}
-      </div>
-      <div v-if="exportSuccess" class="status-banner status-banner--info">
-        <Icon name="lucide:file-check" :size="16" />
-        {{ t('poi.export_success') }}
-      </div>
-
-      <!-- ── Hero card ── -->
+      <!-- ── Body ── -->
       <div class="poi-detail__body">
+        <!-- Hero -->
         <div class="hero-card">
           <div class="hero-card__left">
-            <div v-if="record.photos.length" class="hero-avatar hero-avatar--photo">
-              <img :src="record.photos[0]" :alt="record.firstName" />
+            <div v-if="photoUrls.length" class="hero-avatar hero-avatar--photo">
+              <img :src="photoUrls[0]" :alt="record.first_name" />
             </div>
             <div v-else class="hero-avatar hero-avatar--initials">
               {{ getInitials(record) }}
             </div>
           </div>
           <div class="hero-card__info">
-            <div class="hero-card__name">{{ record.firstName }} {{ record.lastName }}</div>
-            <div v-if="record.aliases" class="hero-card__aliases">aka {{ record.aliases }}</div>
+            <div class="hero-card__name">{{ record.first_name }} {{ record.last_name }}</div>
+            <div v-if="record.known_aliases" class="hero-card__aliases">aka {{ record.known_aliases }}</div>
             <div class="hero-card__badges">
-              <span class="type-badge" :class="`type-badge--${record.type}`">
-                {{ record.type === 'poi' ? t('poi.type_poi') : record.type === 'trespass' ? t('poi.type_trespass') : t('poi.type_metro') }}
-              </span>
-              <span class="threat-badge" :class="`threat-badge--${record.threatLevel}`">
-                {{ t(`poi.threat_${record.threatLevel}`) }}
-              </span>
-              <span class="status-badge" :class="`status-badge--${record.status}`">
-                {{ t(`poi.status_${record.status}`) }}
-              </span>
+              <Badge type="poiType" :value="record.record_type" />
+              <Badge type="poiThreat" :value="record.threat_level" />
+              <Badge type="poiStatus" :value="record.status" />
             </div>
             <div class="hero-card__meta">
-              <span><strong>{{ t('poi.col_id') }}:</strong> {{ record.id }}</span>
-              <span><strong>{{ t('poi.col_updated') }}:</strong> {{ formatDateTime(record.lastUpdated) }}</span>
-              <span><strong>{{ t('poi.detail_created_by') }}:</strong> {{ record.createdBy }}, {{ formatDate(record.createdAt) }}</span>
+              <span><strong>{{ t('poi.col_id') }}:</strong> {{ record.record_id }}</span>
+              <span><strong>{{ t('poi.col_updated') }}:</strong> {{ formatDateTime(record.last_update) }}</span>
+              <span v-if="record.created_by_name"><strong>{{ t('poi.detail_created_by') }}:</strong> {{ record.created_by_name }}, {{ formatDate(record.created_on) }}</span>
             </div>
           </div>
         </div>
 
-        <!-- ── Photos strip ── -->
-        <div v-if="record.photos.length" class="section-card">
+        <!-- Photos strip -->
+        <div v-if="photoUrls.length" class="section-card">
           <div class="section-card__header">
             <Icon name="lucide:image" :size="15" />
             <h3 class="section-card__title">{{ t('poi.section_photos') }}</h3>
           </div>
           <div class="photo-strip">
             <button
-              v-for="(url, idx) in record.photos"
+              v-for="(url, idx) in photoUrls"
               :key="idx"
               class="photo-thumb"
               @click="lightboxIndex = idx; lightboxOpen = true"
@@ -293,9 +340,8 @@ function confirmExport() {
           </div>
         </div>
 
-        <!-- ── 2-column detail layout ── -->
+        <!-- Columns -->
         <div class="detail-columns">
-          <!-- Left column -->
           <div class="detail-col">
             <!-- Basic Info -->
             <div class="section-card">
@@ -306,7 +352,7 @@ function confirmExport() {
               <div class="kv-grid">
                 <div class="kv-row">
                   <span class="kv-label">{{ t('poi.field_dob') }}</span>
-                  <span class="kv-value">{{ formatDate(record.dateOfBirth) }}</span>
+                  <span class="kv-value">{{ formatDate(record.date_of_birth) }}</span>
                 </div>
                 <div class="kv-row">
                   <span class="kv-label">{{ t('poi.field_gender') }}</span>
@@ -314,11 +360,11 @@ function confirmExport() {
                 </div>
                 <div class="kv-row">
                   <span class="kv-label">{{ t('poi.field_aliases') }}</span>
-                  <span class="kv-value">{{ record.aliases || '—' }}</span>
+                  <span class="kv-value">{{ record.known_aliases || '—' }}</span>
                 </div>
                 <div class="kv-row kv-row--full">
                   <span class="kv-label">{{ t('poi.field_physical_desc') }}</span>
-                  <span class="kv-value">{{ record.physicalDescription || '—' }}</span>
+                  <span class="kv-value">{{ record.physical_description || '—' }}</span>
                 </div>
               </div>
             </div>
@@ -331,25 +377,38 @@ function confirmExport() {
               </div>
               <div class="kv-grid">
                 <div class="kv-row kv-row--full">
+                  <span class="kv-label">{{ t('poi.field_threat_level') }}</span>
+                  <span class="kv-value"><Badge type="poiThreat" :value="record.threat_level" /></span>
+                </div>
+                <div class="kv-row kv-row--full">
                   <span class="kv-label">{{ t('poi.field_summary') }}</span>
                   <span class="kv-value kv-value--paragraph">{{ record.summary }}</span>
                 </div>
-                <div v-if="record.internalNotes" class="kv-row kv-row--full">
+                <div v-if="record.internal_notes" class="kv-row kv-row--full">
                   <span class="kv-label kv-label--internal">
                     <Icon name="lucide:lock" :size="11" />
                     {{ t('poi.field_internal_notes') }}
                   </span>
-                  <span class="kv-value kv-value--paragraph kv-value--internal">{{ record.internalNotes }}</span>
+                  <span class="kv-value kv-value--paragraph kv-value--internal">{{ record.internal_notes }}</span>
                 </div>
-                <div v-if="record.relatedIncidentIds" class="kv-row kv-row--full">
+                <div v-if="record.related_incidents?.length" class="kv-row kv-row--full">
                   <span class="kv-label">{{ t('poi.field_related_incidents') }}</span>
-                  <span class="kv-value">{{ record.relatedIncidentIds }}</span>
+                  <div class="kv-value related-incidents">
+                    <NuxtLink
+                      v-for="incident in record.related_incidents"
+                      :key="incident.incident_link_id"
+                      :to="`/calls?call_id=${incident.call_id}`"
+                      class="related-incident-link"
+                    >
+                      #{{ incident.call_id }}
+                    </NuxtLink>
+                  </div>
                 </div>
               </div>
             </div>
 
             <!-- Trespass Details -->
-            <div v-if="record.type === 'trespass'" class="section-card section-card--trespass">
+            <div v-if="record.record_type === 'trespass'" class="section-card section-card--trespass">
               <div class="section-card__header">
                 <Icon name="lucide:ban" :size="15" />
                 <h3 class="section-card__title">{{ t('poi.section_trespass_details') }}</h3>
@@ -357,33 +416,33 @@ function confirmExport() {
               <div class="kv-grid">
                 <div class="kv-row">
                   <span class="kv-label">{{ t('poi.field_notice_number') }}</span>
-                  <span class="kv-value kv-value--mono">{{ record.trespassNoticeNumber || '—' }}</span>
+                  <span class="kv-value kv-value--mono">{{ record.trespass_notice_number || '—' }}</span>
                 </div>
                 <div class="kv-row">
                   <span class="kv-label">{{ t('poi.field_issuing_authority') }}</span>
-                  <span class="kv-value">{{ record.trespassIssuingAuthority || '—' }}</span>
+                  <span class="kv-value">{{ record.issuing_authority || '—' }}</span>
                 </div>
                 <div class="kv-row">
                   <span class="kv-label">{{ t('poi.field_issue_date') }}</span>
-                  <span class="kv-value">{{ formatDate(record.issueDate) }}</span>
+                  <span class="kv-value">{{ formatDate(record.issue_date) }}</span>
                 </div>
                 <div class="kv-row">
                   <span class="kv-label">{{ t('poi.field_expiry_date') }}</span>
                   <span
                     class="kv-value"
                     :class="{
-                      'kv-value--warning': isExpiringSoon(record.expiryDate),
-                      'kv-value--danger': isExpired(record.expiryDate),
+                      'kv-value--warning': isExpiringSoon(record.expiry_date),
+                      'kv-value--danger': isExpired(record.expiry_date),
                     }"
                   >
-                    {{ formatDate(record.expiryDate) }}
-                    <span v-if="isExpiringSoon(record.expiryDate)" class="expiry-pill expiry-pill--warning">Expiring soon</span>
-                    <span v-if="isExpired(record.expiryDate)" class="expiry-pill expiry-pill--danger">Expired</span>
+                    {{ formatDate(record.expiry_date) }}
+                    <span v-if="isExpiringSoon(record.expiry_date)" class="expiry-pill expiry-pill--warning">Expiring soon</span>
+                    <span v-if="isExpired(record.expiry_date)" class="expiry-pill expiry-pill--danger">Expired</span>
                   </span>
                 </div>
                 <div class="kv-row kv-row--full">
                   <span class="kv-label">{{ t('poi.field_property_area') }}</span>
-                  <span class="kv-value">{{ record.propertyAreaCovered || '—' }}</span>
+                  <span class="kv-value">{{ record.property_area_covered || '—' }}</span>
                 </div>
                 <div class="kv-row kv-row--full">
                   <span class="kv-label">{{ t('poi.field_conditions') }}</span>
@@ -391,17 +450,21 @@ function confirmExport() {
                 </div>
                 <div class="kv-row">
                   <span class="kv-label">{{ t('poi.field_law_enforcement') }}</span>
-                  <span class="kv-value">{{ record.lawEnforcementContact || '—' }}</span>
+                  <span class="kv-value">{{ record.law_enforcement_contact || '—' }}</span>
                 </div>
                 <div class="kv-row">
                   <span class="kv-label">{{ t('poi.field_renewal_reminder') }}</span>
-                  <span class="kv-value">{{ record.trespassRenewalReminder }} {{ t('poi.days_before_expiry') }}</span>
+                  <span class="kv-value">{{ record.renewal_reminder_days ?? '—' }} {{ t('poi.days_before_expiry') }}</span>
+                </div>
+                <div v-if="record.notice_document" class="kv-row kv-row--full">
+                  <span class="kv-label">{{ t('poi.field_notice_document') }}</span>
+                  <a :href="record.notice_document" target="_blank" class="document-link">{{ t('poi.current_document') }}</a>
                 </div>
               </div>
             </div>
 
             <!-- POI Details -->
-            <div v-if="record.type === 'poi'" class="section-card section-card--poi">
+            <div v-if="record.record_type === 'poi'" class="section-card section-card--poi">
               <div class="section-card__header">
                 <Icon name="lucide:user-search" :size="15" />
                 <h3 class="section-card__title">{{ t('poi.section_poi_details') }}</h3>
@@ -409,21 +472,21 @@ function confirmExport() {
               <div class="kv-grid">
                 <div class="kv-row">
                   <span class="kv-label">{{ t('poi.field_watch_review_date') }}</span>
-                  <span class="kv-value">{{ formatDate(record.watchLevelReviewDate) }}</span>
+                  <span class="kv-value">{{ formatDate(record.watch_level_review_date) }}</span>
                 </div>
                 <div class="kv-row kv-row--full">
                   <span class="kv-label">{{ t('poi.field_associated_individuals') }}</span>
-                  <span class="kv-value">{{ record.associatedIndividuals || '—' }}</span>
+                  <span class="kv-value">{{ record.associated_individuals || '—' }}</span>
                 </div>
                 <div class="kv-row kv-row--full">
                   <span class="kv-label">{{ t('poi.field_incident_history') }}</span>
-                  <span class="kv-value kv-value--paragraph">{{ record.incidentHistorySummary || '—' }}</span>
+                  <span class="kv-value kv-value--paragraph">{{ record.incident_history_summary || '—' }}</span>
                 </div>
               </div>
             </div>
 
             <!-- Metro Details -->
-            <div v-if="record.type === 'metro_red_card'" class="section-card section-card--metro">
+            <div v-if="record.record_type === 'metro_red_card'" class="section-card section-card--metro">
               <div class="section-card__header">
                 <Icon name="lucide:train-front" :size="15" />
                 <h3 class="section-card__title">{{ t('poi.section_metro_details') }}</h3>
@@ -431,35 +494,41 @@ function confirmExport() {
               <div class="kv-grid">
                 <div class="kv-row">
                   <span class="kv-label">{{ t('poi.field_red_card_number') }}</span>
-                  <span class="kv-value kv-value--mono">{{ record.redCardNumber || '—' }}</span>
+                  <span class="kv-value kv-value--mono">{{ record.red_card_number || '—' }}</span>
                 </div>
                 <div class="kv-row">
                   <span class="kv-label">{{ t('poi.field_issuing_authority') }}</span>
-                  <span class="kv-value">{{ record.metroIssuingAuthority || '—' }}</span>
+                  <span class="kv-value">{{ record.issuing_authority || '—' }}</span>
                 </div>
                 <div class="kv-row">
                   <span class="kv-label">{{ t('poi.field_issue_date') }}</span>
-                  <span class="kv-value">{{ formatDate(record.issueDate) }}</span>
+                  <span class="kv-value">{{ formatDate(record.issue_date) }}</span>
                 </div>
                 <div class="kv-row">
                   <span class="kv-label">{{ t('poi.field_expiry_date') }}</span>
                   <span
                     class="kv-value"
                     :class="{
-                      'kv-value--warning': isExpiringSoon(record.expiryDate),
-                      'kv-value--danger': isExpired(record.expiryDate),
+                      'kv-value--warning': isExpiringSoon(record.expiry_date),
+                      'kv-value--danger': isExpired(record.expiry_date),
                     }"
                   >
-                    {{ formatDate(record.expiryDate) }}
+                    {{ formatDate(record.expiry_date) }}
+                    <span v-if="isExpiringSoon(record.expiry_date)" class="expiry-pill expiry-pill--warning">Expiring soon</span>
+                    <span v-if="isExpired(record.expiry_date)" class="expiry-pill expiry-pill--danger">Expired</span>
                   </span>
                 </div>
                 <div class="kv-row kv-row--full">
                   <span class="kv-label">{{ t('poi.field_metro_lines') }}</span>
-                  <span class="kv-value">{{ record.metroLines || '—' }}</span>
+                  <span class="kv-value">{{ record.lines || '—' }}</span>
                 </div>
                 <div class="kv-row">
                   <span class="kv-label">{{ t('poi.field_renewal_reminder') }}</span>
-                  <span class="kv-value">{{ record.metroRenewalReminder }} {{ t('poi.days_before_expiry') }}</span>
+                  <span class="kv-value">{{ record.renewal_reminder_days ?? '—' }} {{ t('poi.days_before_expiry') }}</span>
+                </div>
+                <div v-if="record.card_document" class="kv-row kv-row--full">
+                  <span class="kv-label">{{ t('poi.field_card_document') }}</span>
+                  <a :href="record.card_document" target="_blank" class="document-link">{{ t('poi.current_document') }}</a>
                 </div>
               </div>
             </div>
@@ -476,52 +545,30 @@ function confirmExport() {
               <div class="kv-grid">
                 <div class="kv-row kv-row--full">
                   <span class="kv-label">{{ t('poi.field_threat_level') }}</span>
-                  <span class="threat-badge" :class="`threat-badge--${record.threatLevel}`">
-                    {{ t(`poi.threat_${record.threatLevel}`) }}
-                  </span>
+                  <span class="kv-value"><Badge type="poiThreat" :value="record.threat_level" /></span>
                 </div>
                 <div class="kv-row kv-row--full">
                   <span class="kv-label">{{ t('poi.field_sites') }}</span>
                   <div class="site-tags">
-                    <span v-for="site in record.sites" :key="site" class="site-tag">{{ site }}</span>
+                    <span v-for="site in record.sites" :key="site.site_id" class="site-tag">{{ site.community_name }}</span>
                   </div>
                 </div>
               </div>
             </div>
 
-            <!-- Export Log (admin only) -->
-              <div v-if="isAdmin && exportLog.length" class="section-card">
-                <div class="section-card__header">
-                  <Icon name="lucide:clipboard-list" :size="15" />
-                  <h3 class="section-card__title">{{ t('poi.export_log') }}</h3>
-                </div>
-                <div class="version-list">
-                  <div v-for="(entry, i) in exportLog" :key="i" class="version-row">
-                    <div class="version-row__top">
-                      <Icon name="lucide:download" :size="12" class="export-log-icon" />
-                      <span class="version-by">{{ entry.exportedBy }}</span>
-                      <span class="version-at">{{ formatDateTime(entry.exportedAt) }}</span>
-                    </div>
-                    <p class="version-summary">PDF exported — CONFIDENTIAL</p>
-                  </div>
-                </div>
-              </div>
-
-            <!-- Version History -->
+            <!-- Record History -->
             <div class="section-card">
-              <div class="section-card__header section-card__header--clickable" @click="showVersionHistory = !showVersionHistory">
+              <div class="section-card__header">
                 <Icon name="lucide:history" :size="15" />
-                <h3 class="section-card__title">{{ t('poi.version_history') }}</h3>
-                <Icon :name="showVersionHistory ? 'lucide:chevron-up' : 'lucide:chevron-down'" :size="15" class="collapse-icon" />
+                <h3 class="section-card__title">{{ t('poi.record_history') }}</h3>
               </div>
-              <div v-if="showVersionHistory" class="version-list">
-                <div v-for="entry in DEMO_VERSIONS" :key="entry.version" class="version-row">
-                  <div class="version-row__top">
-                    <span class="version-badge">v{{ entry.version }}</span>
-                    <span class="version-by">{{ entry.changedBy }}</span>
-                    <span class="version-at">{{ formatDateTime(entry.changedAt) }}</span>
-                  </div>
-                  <p class="version-summary">{{ entry.summary }}</p>
+              <div class="kv-grid">
+                <div v-for="(entry, idx) in historyEntries" :key="idx" class="kv-row kv-row--full">
+                  <span class="kv-label">{{ entry.label }}</span>
+                  <span class="kv-value">{{ entry.value }}</span>
+                </div>
+                <div v-if="!historyEntries.length" class="kv-row kv-row--full">
+                  <span class="kv-value">—</span>
                 </div>
               </div>
             </div>
@@ -533,89 +580,82 @@ function confirmExport() {
     <!-- Not found -->
     <div v-else class="poi-detail__not-found">
       <Icon name="lucide:shield-off" :size="36" class="not-found-icon" />
-      <p>Record not found.</p>
-      <button class="btn-secondary" @click="goBack">{{ t('common.back') }}</button>
+      <p>{{ loadError || t('poi.record_not_found') }}</p>
+      <AppButton :text="t('common.back')" type="secondary" size="sm" @click="goBack" />
     </div>
 
-    <!-- ── Export Confirmation Modal ── -->
-    <Teleport to="body">
-      <div v-if="showExportModal" class="modal-overlay" @click.self="showExportModal = false">
-        <div class="modal">
-          <div class="modal__header">
-            <Icon name="lucide:file-down" :size="18" class="modal__header-icon modal__header-icon--info" />
-            <h3 class="modal__title">{{ t('poi.modal_export_title') }}</h3>
-          </div>
-          <div class="modal__body">
-            <div class="export-info-block">
-              <div class="export-info-row">
-                <Icon name="lucide:shield-alert" :size="14" />
-                <span>{{ t('poi.modal_export_watermark') }}</span>
-              </div>
-              <div class="export-info-row">
-                <Icon name="lucide:image" :size="14" />
-                <span>{{ t('poi.modal_export_includes') }}</span>
-              </div>
-              <div class="export-info-row export-info-row--warn">
-                <Icon name="lucide:lock" :size="14" />
-                <span>{{ t('poi.modal_export_excludes') }}</span>
-              </div>
-              <div class="export-info-row">
-                <Icon name="lucide:clipboard-list" :size="14" />
-                <span>{{ t('poi.modal_export_logged') }}</span>
-              </div>
-            </div>
-          </div>
-          <div class="modal__footer">
-            <button class="btn-cancel" @click="showExportModal = false">{{ t('common.cancel') }}</button>
-            <button class="btn-export" :disabled="isExporting" @click="confirmExport">
-              <Icon v-if="isExporting" name="lucide:loader-2" :size="14" class="spin" />
-              <Icon v-else name="lucide:download" :size="14" />
-              {{ t('poi.modal_export_confirm') }}
-            </button>
-          </div>
-        </div>
+    <!-- Inactivate Modal -->
+    <AppDialogModal
+      :show="showInactiveModal"
+      :title="t('poi.modal_inactive_title')"
+      max-width="480px"
+      @close="closeInactiveModal"
+    >
+      <p class="modal__desc">{{ t('poi.modal_inactive_desc') }}</p>
+      <div class="form-field" :class="{ 'form-field--error': inactiveReasonError }">
+        <label class="form-field__label">
+          {{ t('poi.modal_inactive_reason') }} <span class="req">*</span>
+        </label>
+        <textarea
+          v-model="inactiveReason"
+          class="form-field__textarea"
+          rows="3"
+          :placeholder="t('poi.modal_inactive_reason_placeholder')"
+        />
+        <span v-if="inactiveReasonError" class="field-error">{{ inactiveReasonError }}</span>
       </div>
-    </Teleport>
+      <template #footer>
+        <AppButton :text="t('common.cancel')" type="secondary" size="sm" @click="closeInactiveModal" />
+        <AppButton
+          :text="t('poi.modal_inactive_confirm')"
+          icon="lucide:ban"
+          type="danger"
+          size="sm"
+          :loading="isInactivating"
+          @click="confirmInactive"
+        />
+      </template>
+    </AppDialogModal>
 
-    <!-- ── Inactive Confirmation Modal ── -->
-    <Teleport to="body">
-      <div v-if="showInactiveModal" class="modal-overlay" @click.self="showInactiveModal = false">
-        <div class="modal">
-          <div class="modal__header">
-            <Icon name="lucide:ban" :size="18" class="modal__header-icon modal__header-icon--danger" />
-            <h3 class="modal__title">{{ t('poi.modal_inactive_title') }}</h3>
-          </div>
-          <div class="modal__body">
-            <p class="modal__desc">{{ t('poi.modal_inactive_desc') }}</p>
-            <div class="form-field" :class="{ 'form-field--error': inactiveReasonError }">
-              <label class="form-field__label">{{ t('poi.modal_inactive_reason') }} <span class="req">*</span></label>
-              <textarea
-                v-model="inactiveReason"
-                class="form-field__textarea"
-                rows="3"
-                :placeholder="t('poi.modal_inactive_reason_placeholder')"
-              />
-              <span v-if="inactiveReasonError" class="field-error">{{ inactiveReasonError }}</span>
-            </div>
-          </div>
-          <div class="modal__footer">
-            <button class="btn-cancel" @click="showInactiveModal = false">{{ t('common.cancel') }}</button>
-            <button class="btn-danger-solid" :disabled="isInactivating" @click="confirmInactive">
-              <Icon v-if="isInactivating" name="lucide:loader-2" :size="14" class="spin" />
-              {{ t('poi.modal_inactive_confirm') }}
-            </button>
-          </div>
-        </div>
-      </div>
-    </Teleport>
+    <!-- Archive Modal -->
+    <AppDialogModal
+      :show="showArchiveModal"
+      :title="t('poi.modal_archive_title')"
+      max-width="480px"
+      @close="closeArchiveModal"
+    >
+      <p class="modal__desc">{{ t('poi.modal_archive_desc') }}</p>
+      <template #footer>
+        <AppButton :text="t('common.cancel')" type="secondary" size="sm" @click="closeArchiveModal" />
+        <AppButton
+          :text="t('poi.modal_archive_confirm')"
+          icon="lucide:archive"
+          type="danger"
+          size="sm"
+          :loading="isArchiving"
+          @click="confirmArchive"
+        />
+      </template>
+    </AppDialogModal>
 
-    <!-- ── Lightbox ── -->
-    <PhotoLightbox
-      v-if="lightboxOpen && record"
-      :photos="record.photos"
-      :start-index="lightboxIndex"
-      @close="lightboxOpen = false"
-    />
+    <!-- Lightbox -->
+    <div
+      v-if="lightboxOpen && photoUrls.length"
+      class="lightbox-overlay"
+      @click="lightboxOpen = false"
+    >
+      <button class="lightbox-close" @click.stop="lightboxOpen = false">
+        <Icon name="lucide:x" :size="24" />
+      </button>
+      <button v-if="photoUrls.length > 1" class="lightbox-nav lightbox-nav--prev" @click.stop="prevLightbox">
+        <Icon name="lucide:chevron-left" :size="32" />
+      </button>
+      <img :src="photoUrls[lightboxIndex]" class="lightbox-image" @click.stop />
+      <button v-if="photoUrls.length > 1" class="lightbox-nav lightbox-nav--next" @click.stop="nextLightbox">
+        <Icon name="lucide:chevron-right" :size="32" />
+      </button>
+      <div class="lightbox-counter">{{ lightboxIndex + 1 }} / {{ photoUrls.length }}</div>
+    </div>
   </div>
 </template>
 
@@ -634,6 +674,12 @@ function confirmExport() {
   justify-content: center;
   height: 100%;
   color: var(--color-text-muted);
+}
+
+.spin { animation: spin 1s linear infinite; }
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
 /* ── Page header ── */
@@ -679,54 +725,8 @@ function confirmExport() {
   display: flex;
   align-items: center;
   gap: var(--space-2);
+  flex-wrap: wrap;
 }
-
-/* ── Buttons ── */
-.btn-primary, .btn-secondary, .btn-cancel, .btn-danger-solid {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-2) var(--space-4);
-  border-radius: var(--radius-md);
-  font-size: var(--font-size-sm);
-  font-weight: 500;
-  cursor: pointer;
-  transition: all var(--transition-base);
-  white-space: nowrap;
-}
-.btn-primary {
-  background: var(--color-accent);
-  border: none;
-  color: white;
-}
-.btn-primary:hover { opacity: 0.88; }
-
-.btn-secondary {
-  background: transparent;
-  border: 1px solid var(--color-border);
-  color: var(--color-text-secondary);
-}
-.btn-secondary:hover { border-color: var(--color-accent); color: var(--color-accent); }
-
-.btn-danger {
-  border-color: var(--color-critical) !important;
-  color: var(--color-critical) !important;
-}
-.btn-danger:hover { background: rgba(239, 68, 68, 0.08) !important; }
-
-.btn-cancel {
-  background: transparent;
-  border: 1px solid var(--color-border);
-  color: var(--color-text-secondary);
-}
-.btn-cancel:hover { border-color: var(--color-text-secondary); color: var(--color-text-primary); }
-
-.btn-danger-solid {
-  background: var(--color-critical, #ef4444);
-  border: none;
-  color: white;
-}
-.btn-danger-solid:hover { opacity: 0.88; }
 
 /* ── Body ── */
 .poi-detail__body {
@@ -840,12 +840,6 @@ function confirmExport() {
   border-bottom: 1px solid var(--color-border);
 }
 
-.section-card__header--clickable {
-  cursor: pointer;
-  user-select: none;
-}
-.section-card__header--clickable:hover { background: var(--color-bg-overlay); }
-
 .section-card__title {
   font-size: var(--font-size-sm);
   font-weight: 600;
@@ -853,8 +847,6 @@ function confirmExport() {
   margin: 0;
   flex: 1;
 }
-
-.collapse-icon { color: var(--color-text-muted); margin-left: auto; }
 
 /* ── KV Grid ── */
 .kv-grid {
@@ -876,55 +868,78 @@ function confirmExport() {
   font-size: var(--font-size-xs);
   font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.03em;
   color: var(--color-text-muted);
-  display: flex;
-  align-items: center;
-  gap: 4px;
 }
 
-.kv-label--internal { color: var(--color-text-muted); }
+.kv-label--internal {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--color-critical);
+}
 
 .kv-value {
   font-size: var(--font-size-sm);
   color: var(--color-text-primary);
+  word-break: break-word;
 }
 
 .kv-value--paragraph {
-  line-height: 1.6;
-  color: var(--color-text-secondary);
+  line-height: 1.5;
+  white-space: pre-wrap;
 }
 
 .kv-value--internal {
   background: var(--color-bg-elevated);
-  border: 1px solid var(--color-border);
+  padding: var(--space-3);
   border-radius: var(--radius-md);
-  padding: var(--space-2) var(--space-3);
 }
 
-.kv-value--mono { font-family: monospace; }
+.kv-value--mono {
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
 
-.kv-value--warning { color: #ca8a04; font-weight: 600; }
-.kv-value--danger  { color: #ef4444; font-weight: 600; }
+.kv-value--warning { color: #ea580c; }
+.kv-value--danger { color: #dc2626; }
 
-/* ── Expiry pill ── */
 .expiry-pill {
-  display: inline-block;
+  display: inline-flex;
+  margin-left: var(--space-2);
   padding: 1px 6px;
   border-radius: var(--radius-full);
   font-size: var(--font-size-xs);
   font-weight: 600;
-  margin-left: var(--space-2);
 }
-.expiry-pill--warning { background: rgba(234,179,8,0.15); color: #ca8a04; }
-.expiry-pill--danger  { background: rgba(239,68,68,0.15); color: #ef4444; }
+.expiry-pill--warning { background: rgba(234, 179, 8, 0.15); color: #a16207; }
+.expiry-pill--danger { background: rgba(220, 38, 38, 0.15); color: #b91c1c; }
+
+.document-link {
+  font-size: var(--font-size-sm);
+  color: var(--color-accent);
+  text-decoration: none;
+}
+.document-link:hover { text-decoration: underline; }
+
+.related-incidents {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.related-incident-link {
+  font-size: var(--font-size-sm);
+  color: var(--color-accent);
+  text-decoration: none;
+}
+.related-incident-link:hover { text-decoration: underline; }
 
 /* ── Photo strip ── */
 .photo-strip {
   display: flex;
+  flex-wrap: wrap;
   gap: var(--space-3);
   padding: var(--space-4);
-  flex-wrap: wrap;
 }
 
 .photo-thumb {
@@ -933,271 +948,160 @@ function confirmExport() {
   border-radius: var(--radius-md);
   overflow: hidden;
   border: 1px solid var(--color-border);
-  cursor: pointer;
-  background: none;
+  background: transparent;
   padding: 0;
-  transition: opacity var(--transition-base);
+  cursor: pointer;
+  transition: border-color var(--transition-base);
 }
-.photo-thumb:hover { opacity: 0.85; }
-.photo-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.photo-thumb:hover { border-color: var(--color-accent); }
+.photo-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
 
 /* ── Site tags ── */
-.site-tags { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: 2px; }
-.site-tag {
-  padding: 3px var(--space-2);
-  background: var(--color-bg-elevated);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-full);
-  font-size: var(--font-size-xs);
-  color: var(--color-text-secondary);
-}
-
-/* ── Version History ── */
-.version-list {
-  padding: var(--space-3) var(--space-4);
+.site-tags {
   display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-}
-
-.version-row {
-  padding: var(--space-3);
-  background: var(--color-bg-elevated);
-  border-radius: var(--radius-md);
-  border: 1px solid var(--color-border);
-}
-
-.version-row__top {
-  display: flex;
-  align-items: center;
+  flex-wrap: wrap;
   gap: var(--space-2);
-  margin-bottom: var(--space-1);
 }
 
-.version-badge {
-  font-size: var(--font-size-sm);
-  font-weight: 700;
-  background: var(--color-accent);
-  color: white;
-  padding: 1px 6px;
-  border-radius: var(--radius-sm);
-}
-
-.version-by {
+.site-tag {
+  display: inline-flex;
+  padding: 2px var(--space-2);
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
   font-size: var(--font-size-xs);
-  font-weight: 600;
   color: var(--color-text-secondary);
-}
-
-.version-at {
-  font-size: var(--font-size-xs);
-  color: var(--color-text-muted);
-  margin-left: auto;
-}
-
-.version-summary {
-  font-size: var(--font-size-xs);
-  color: var(--color-text-muted);
-  margin: 0;
 }
 
 /* ── Not found ── */
 .poi-detail__not-found {
+  flex: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: var(--space-4);
-  height: 100%;
+  gap: var(--space-3);
   color: var(--color-text-muted);
 }
-.not-found-icon { opacity: 0.3; }
 
-/* ── Badges ── */
-.type-badge {
-  display: inline-block;
-  padding: 3px var(--space-2);
-  border-radius: var(--radius-sm);
-  font-size: var(--font-size-base);
-  font-weight: 600;
-}
-.type-badge--poi         { background: rgba(139,92,246,0.15); color: #8b5cf6; }
-.type-badge--trespass    { background: rgba(249,115,22,0.15); color: #f97316; }
-.type-badge--metro_red_card { background: rgba(239,68,68,0.15); color: #ef4444; }
-
-.threat-badge {
-  display: inline-block;
-  padding: 3px var(--space-2);
-  border-radius: var(--radius-sm);
-  font-size: var(--font-size-base);
-  font-weight: 600;
-}
-.threat-badge--low      { background: var(--color-bg-overlay); color: var(--color-text-muted); }
-.threat-badge--medium   { background: rgba(234,179,8,0.15); color: #ca8a04; }
-.threat-badge--high     { background: rgba(249,115,22,0.15); color: #ea580c; }
-.threat-badge--critical { background: rgba(239,68,68,0.15); color: #ef4444; }
-
-.status-badge {
-  display: inline-block;
-  padding: 3px var(--space-2);
-  border-radius: var(--radius-sm);
-  font-size: var(--font-size-base);
-  font-weight: 600;
-}
-.status-badge--draft    { background: var(--color-bg-overlay); color: var(--color-text-muted); }
-.status-badge--active   { background: rgba(34,197,94,0.15); color: #22c55e; }
-.status-badge--expired  { background: rgba(239,68,68,0.15); color: #ef4444; }
-.status-badge--inactive { background: rgba(139,92,246,0.12); color: #a78bfa; }
-.status-badge--archived { background: var(--color-bg-elevated); color: var(--color-text-muted); }
-
-/* ── Modal ── */
-.modal-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.6);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
+/* ── Modal body ── */
+.modal__desc {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  margin: 0 0 var(--space-4);
 }
 
-.modal {
-  background: var(--color-bg-surface);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg);
-  width: 440px;
-  max-width: calc(100vw - var(--space-8));
-}
-
-.modal__header {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-4) var(--space-5);
-  border-bottom: 1px solid var(--color-border);
-}
-
-.modal__header-icon--danger { color: var(--color-critical, #ef4444); }
-
-.modal__title {
-  font-size: var(--font-size-base);
-  font-weight: 600;
-  color: var(--color-text-primary);
-  margin: 0;
-}
-
-.modal__body {
-  padding: var(--space-5);
+.form-field {
   display: flex;
   flex-direction: column;
-  gap: var(--space-4);
+  gap: var(--space-2);
 }
 
-.modal__desc {
+.form-field--error .form-field__textarea {
+  border-color: var(--color-critical);
+}
+
+.form-field__label {
   font-size: var(--font-size-sm);
-  color: var(--color-text-secondary);
-  margin: 0;
+  font-weight: 500;
+  color: var(--color-text-primary);
 }
 
-.modal__footer {
-  display: flex;
-  justify-content: flex-end;
-  gap: var(--space-3);
-  padding: var(--space-4) var(--space-5);
-  border-top: 1px solid var(--color-border);
-}
-
-/* ── Form fields in modal ── */
-.form-field { display: flex; flex-direction: column; gap: var(--space-1); }
-.form-field__label { font-size: var(--font-size-sm); font-weight: 500; color: var(--color-text-secondary); }
 .form-field__textarea {
-  width: 100%;
-  box-sizing: border-box;
-  padding: var(--space-2) var(--space-3);
-  background: var(--color-bg-base);
+  padding: var(--space-3);
+  background: var(--color-bg-surface);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   color: var(--color-text-primary);
   font-size: var(--font-size-sm);
   outline: none;
   resize: vertical;
-  transition: border-color var(--transition-base);
 }
-.form-field__textarea:focus { border-color: var(--color-accent); }
-.form-field--error .form-field__textarea { border-color: var(--color-critical); }
-.field-error { font-size: var(--font-size-xs); color: var(--color-critical); }
+
+.field-error {
+  font-size: var(--font-size-xs);
+  color: var(--color-critical);
+}
+
 .req { color: var(--color-critical); }
 
-
-/* ── Status banners ── */
-.status-banner {
+/* ── Lightbox ── */
+.lightbox-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.92);
   display: flex;
   align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-3) var(--space-6);
-  border-bottom: 1px solid transparent;
-  font-size: var(--font-size-sm);
-  font-weight: 500;
-  flex-shrink: 0;
-}
-.status-banner--ok {
-  background: var(--color-ok-bg);
-  border-color: rgba(34, 197, 94, 0.25);
-  color: var(--color-ok);
-}
-.status-banner--info {
-  background: var(--color-info-bg);
-  border-color: rgba(50, 179, 230, 0.25);
-  color: var(--color-info);
+  justify-content: center;
+  z-index: 1100;
 }
 
-/* ── Export info block ── */
-.export-info-block {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-  padding: var(--space-3);
-  background: var(--color-bg-elevated);
-  border: 1px solid var(--color-border);
+.lightbox-image {
+  max-width: 90vw;
+  max-height: 85vh;
+  object-fit: contain;
   border-radius: var(--radius-md);
 }
-.export-info-row {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--space-2);
-  font-size: var(--font-size-sm);
-  color: var(--color-text-secondary);
-}
-.export-info-row--warn { color: var(--color-warn); }
 
-/* ── Export button ── */
-.btn-export {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-2) var(--space-4);
-  border-radius: var(--radius-md);
-  font-size: var(--font-size-sm);
-  font-weight: 500;
-  cursor: pointer;
-  background: var(--color-accent);
+.lightbox-close {
+  position: absolute;
+  top: var(--space-4);
+  right: var(--space-4);
+  background: transparent;
   border: none;
   color: white;
-  transition: opacity var(--transition-base);
+  cursor: pointer;
+  opacity: 0.8;
 }
-.btn-export:hover { opacity: 0.88; }
-.btn-export:disabled { opacity: 0.5; cursor: not-allowed; }
+.lightbox-close:hover { opacity: 1; }
 
-/* ── Export log icon ── */
-.export-log-icon { color: var(--color-info); }
+.lightbox-nav {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  background: rgba(255, 255, 255, 0.15);
+  border: none;
+  color: white;
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-full);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0.7;
+}
+.lightbox-nav:hover { opacity: 1; }
+.lightbox-nav--prev { left: var(--space-4); }
+.lightbox-nav--next { right: var(--space-4); }
 
-/* ── Modal header info icon ── */
-.modal__header-icon--info { color: var(--color-info); }
+.lightbox-counter {
+  position: absolute;
+  bottom: var(--space-4);
+  left: 50%;
+  transform: translateX(-50%);
+  color: white;
+  font-size: var(--font-size-sm);
+  opacity: 0.8;
+}
 
-/* ── Spin ── */
-.spin { animation: spin 1s linear infinite; }
-@keyframes spin {
-  from { transform: rotate(0deg); }
-  to   { transform: rotate(360deg); }
+/* Responsive */
+@media (max-width: 900px) {
+  .detail-columns { grid-template-columns: 1fr; }
+  .detail-col--sidebar { order: -1; }
+}
+
+@media (max-width: 640px) {
+  .poi-detail__page-header {
+    flex-wrap: wrap;
+  }
+  .poi-detail__header-actions {
+    width: 100%;
+    justify-content: flex-end;
+  }
 }
 </style>

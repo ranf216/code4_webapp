@@ -1,52 +1,59 @@
 <script setup lang="ts">
+import { poiApi } from '~/api/poi'
+import type { PoiRecord } from '~/api/types/poi'
+
 definePageMeta({ layout: 'default' })
 
 const route = useRoute()
+const router = useRouter()
+const toastStore = useToastStore()
+const { t } = useTranslation()
 
-// Demo record — sau này replace bằng API call theo route.params.id
-const demoRecord = {
-  id: String(route.params.id),
-  recordType: 'trespass' as const,
-  status: 'active',
-  firstName: 'Jane',
-  lastName: 'Smith',
-  aliases: 'Jenny S, J. Smith',
-  dateOfBirth: '1988-04-15',
-  gender: 'female',
-  physicalDescription: 'Approximately 165cm, medium build, dark brown hair, usually wears glasses.',
-  summary: 'Subject issued formal trespass notice following repeated unauthorised access to South Plaza.',
-  internalNotes: 'Second offence. Previously warned in Jan 2026.',
-  sites: ['South Plaza', 'Central Hub'],
-  threatLevel: 'medium',
-  relatedIncidentIds: 'INC-2026-041, INC-2026-088',
-  incidentHistorySummary: '',
-  watchLevelReviewDate: '',
-  associatedIndividuals: '',
-  trespassNoticeNumber: 'TN-2026-0192',
-  trespassIssuingAuthority: 'City Security Authority',
-  propertyAreaCovered: 'South Plaza levels G-3, Central Hub main entrance',
-  trespassIssueDate: '2026-04-01',
-  trespassExpiryDate: '2026-07-15',
-  trespassRenewalReminder: 14,
-  lawEnforcementContact: 'Sgt. R. Thompson — City Police, ph: 0400 000 111',
-  conditions: 'Subject is not to enter or remain on property.',
-  redCardNumber: '',
-  metroIssuingAuthority: '',
-  metroIssueDate: '',
-  metroExpiryDate: '',
-  metroLines: '',
-  metroRenewalReminder: 14,
-  existingPhotos: [
-    'https://picsum.photos/seed/ti002a/400/400',
-    'https://picsum.photos/seed/ti002b/400/400',
-    'https://picsum.photos/seed/ti002c/400/400',
-  ],
-}
+const recordId = computed(() => {
+  const id = Number(route.params.id)
+  return Number.isNaN(id) ? 0 : id
+})
+
+const loading = ref(true)
+const error = ref('')
+const poiRecord = ref<PoiRecord | undefined>(undefined)
+
+onMounted(async () => {
+  if (!recordId.value) {
+    error.value = t('poi.record_not_found')
+    toastStore.error(error.value)
+    return
+  }
+  loading.value = true
+  try {
+    const response = await poiApi.getPoiRecord(recordId.value)
+    poiRecord.value = response.record
+  } catch (err) {
+    console.error('Failed to load POI record:', err)
+    error.value = err instanceof Error ? err.message : 'Failed to load record'
+    toastStore.error(error.value)
+  } finally {
+    loading.value = false
+  }
+})
 </script>
 
 <template>
   <div class="poi-edit-page">
-    <POIForm mode="edit" :record="demoRecord" />
+    <div v-if="loading" class="poi-edit-page__loading">
+      <Icon name="lucide:loader-2" :size="24" class="spin" />
+      <span>Loading record…</span>
+    </div>
+    <div v-else-if="error" class="poi-edit-page__error">
+      <Icon name="lucide:alert-circle" :size="24" />
+      <span>{{ error }}</span>
+      <AppButton :text="t('common.back')" type="secondary" size="sm" @click="router.push('/poi')" />
+    </div>
+    <POIForm v-else-if="poiRecord" mode="edit" :record="poiRecord" />
+    <div v-else class="poi-edit-page__error">
+      <Icon name="lucide:alert-circle" :size="24" />
+      <span>{{ t('poi.record_not_found') }}</span>
+    </div>
   </div>
 </template>
 
@@ -55,5 +62,24 @@ const demoRecord = {
   height: 100%;
   display: flex;
   flex-direction: column;
+}
+
+.poi-edit-page__loading,
+.poi-edit-page__error {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  color: var(--color-text-muted);
+}
+
+.spin {
+  animation: spin 1s linear infinite;
+}
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 </style>

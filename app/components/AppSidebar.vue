@@ -60,7 +60,7 @@ const baseGroups: NavGroup[] = [
         ],
       },
       { key: 'post-orders',     label: t('nav.post_orders'),      icon: 'lucide:file-text',        to: '/post-orders',   badge: null },
-      { key: 'poi-trespass',    label: t('nav.poi_trespass'),     icon: 'lucide:search-alert',          to: '/poi',           badge: null },
+      { key: 'poi-registry',    label: t('nav.poi_registry'),     icon: 'lucide:shield',            to: '/poi',           badge: null },
       { key: 'report-templates',label: t('nav.report_templates'), icon: 'lucide:panels-top-left',   to: '/reports',       badge: null },
     ],
   },
