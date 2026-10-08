@@ -112,9 +112,9 @@ const videoUploadRef = ref<InstanceType<typeof FileUpload> | null>(null)
 
 const authStore = useAuthStore()
 
-const canResolve = computed(() => call.value?.status === 'accepted' && (call.value?.category.type !== 'panic' || authStore.isAdmin))
-const canCancel = computed(() => (call.value?.status === 'new' || call.value?.status === 'accepted') && call.value?.category.type === 'concierge')
-const canDeleteTest = computed(() => call.value?.category.type === 'test' && authStore.isAdmin)
+const canResolve = computed(() => call.value?.status === 'accepted' && (call.value?.category?.type !== 'panic' || authStore.isAdmin))
+const canCancel = computed(() => (call.value?.status === 'new' || call.value?.status === 'accepted') && call.value?.category?.type === 'concierge')
+const canDeleteTest = computed(() => call.value?.category?.type === 'test' && authStore.isAdmin)
 const okDisabled = computed(() => resolving.value || canceling.value || deletingTest.value)
 const okText = computed(() => canDeleteTest.value ? 'Delete Test Call' : (canResolve.value ? 'Resolve Call' : ''))
 const cancelText = computed(() => canCancel.value ? 'Cancel Call' : '')
@@ -291,12 +291,12 @@ async function fetchCallDetails() {
   }
 }
 
-watch(() => props.show, (show: boolean) => {
-  if (show && props.call) {
+watch(() => [props.show, props.call?.id], () => {
+  if (props.show && props.call?.id) {
     fetchedCall.value = null
     fetchCallDetails()
   }
-})
+}, { immediate: true })
 
 function handleClose() {
   emit('close')
@@ -349,8 +349,8 @@ function getPriorityClass(priority: string | null | undefined): string {
     @cancel="openCancelModal"
   >
     <template #default>
-      <div v-if="call" class="call-details-modal">
-        <div v-if="loading" class="loading-state">
+      <div class="call-details-modal">
+        <div v-if="!call || loading" class="loading-state">
           <Icon name="lucide:loader-2" :size="24" class="spinner" />
           <span>Loading call details...</span>
         </div>

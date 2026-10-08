@@ -164,7 +164,7 @@ export interface CreatePoiRecordRequest {
   internal_notes?: string
   community_ids: number[]
   photo_file_ids: (string | number)[]
-  related_incident_ids?: number[]
+  related_incident_ids?: string[]
   publish?: boolean
   // POI type
   incident_history_summary?: string
@@ -205,7 +205,7 @@ export interface UpdatePoiRecordRequest {
   internal_notes?: string | null
   community_ids?: number[] | null
   photo_file_ids?: (string | number)[] | null
-  related_incident_ids?: number[] | null
+  related_incident_ids?: string[] | null
   // POI type
   incident_history_summary?: string | null
   watch_level_review_date?: string | null

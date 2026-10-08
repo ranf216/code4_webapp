@@ -1,12 +1,16 @@
 <script setup lang="ts">
-import { ref, computed, reactive, onMounted } from 'vue'
+import { ref, computed, reactive, onMounted, watch } from 'vue'
 import AppButton from '~/components/AppButton.vue'
+import SearchableMultiSelect from '~/components/SearchableMultiSelect.vue'
 import { poiApi } from '~/api/poi'
 import { communityApi } from '~/api/community'
+import { callApi } from '~/api/call'
 import { useFileApi } from '~/composables/useFileApi'
 import { useToastStore } from '~/stores/toast'
 import type { PoiGender, PoiRecord, PoiRecordType, PoiThreatLevel, PoiMetadataResponse } from '~/api/types/poi'
 import type { Community } from '~/api/community'
+import type { Call } from '~/api/types/call'
+import type { SearchableOption } from '~/components/SearchableMultiSelect.vue'
 
 interface PhotoItem {
   key: string
@@ -28,7 +32,7 @@ interface POIFormData {
   internalNotes: string
   sites: number[]
   threatLevel: PoiThreatLevel | ''
-  relatedIncidentIds: string
+  relatedIncidentIds: string[]
   incidentHistorySummary: string
   watchLevelReviewDate: string
   associatedIndividuals: string
@@ -69,6 +73,11 @@ const trespassDocFile = ref<File | null>(null)
 const metroCardFile = ref<File | null>(null)
 const replaceTrespassDoc = ref(false)
 const replaceMetroCard = ref(false)
+
+const incidentSearch = ref('')
+const incidentOptions = ref<SearchableOption[]>([])
+const incidentLoading = ref(false)
+let incidentSearchTimer: ReturnType<typeof setTimeout> | null = null
 
 const isEdit = computed(() => props.mode === 'edit')
 const pageTitle = computed(() => isEdit.value ? t('poi.form_title_edit') : t('poi.form_title_create'))
@@ -119,7 +128,7 @@ function buildInitialForm(): POIFormData {
     internalNotes: r?.internal_notes ?? '',
     sites: r?.sites ? r.sites.map(s => s.community_id) : [],
     threatLevel: r?.threat_level ?? '',
-    relatedIncidentIds: r?.related_incidents ? r.related_incidents.map(i => i.call_id).join(', ') : '',
+    relatedIncidentIds: r?.related_incidents ? r.related_incidents.map(i => String(i.call_id)) : [],
     incidentHistorySummary: r?.incident_history_summary ?? '',
     watchLevelReviewDate: formatDateInput(r?.watch_level_review_date),
     associatedIndividuals: r?.associated_individuals ?? '',
@@ -179,6 +188,10 @@ onMounted(async () => {
       url: p.url,
     }))
   }
+
+  if (form.relatedIncidentIds.length) {
+    fetchIncidentOptions('')
+  }
 })
 
 function communityName(id: number): string {
@@ -190,6 +203,54 @@ function toggleSite(id: number) {
   if (idx === -1) form.sites.push(id)
   else form.sites.splice(idx, 1)
 }
+
+// ── Related Incidents ──
+function callOptionLabel(call: Call): string {
+  const parts: string[] = [`#${call.call_id}`]
+  if (call.category) parts.push(call.category)
+  if (call.resident_name) parts.push(call.resident_name)
+  if (call.status) parts.push(call.status)
+  return parts.join(' — ')
+}
+
+async function fetchIncidentOptions(search = '') {
+  incidentLoading.value = true
+  try {
+    const response = await callApi.getCalls(
+      { search_text: search, limit: 20, sort_by: 'created_on', sort_dir: 'desc' },
+      { showLoading: false }
+    )
+    const calls = response.calls ?? []
+    const selectedMap = new Map<string, Call>(calls.map((c: Call) => [String(c.call_id), c]))
+
+    // Ensure selected incidents remain in options so labels are visible
+    for (const id of form.relatedIncidentIds) {
+      if (selectedMap.has(id)) continue
+      try {
+        const detail = await callApi.getCall(Number(id), { showLoading: false })
+        if (detail.call) selectedMap.set(id, detail.call)
+      } catch {
+        // Keep the id even if detail fetch fails; label will just be the id
+      }
+    }
+
+    incidentOptions.value = Array.from(selectedMap.values()).map(c => ({
+      value: String(c.call_id),
+      label: callOptionLabel(c),
+    }))
+  } catch (err) {
+    console.error('Failed to fetch related incidents:', err)
+  } finally {
+    incidentLoading.value = false
+  }
+}
+
+watch(incidentSearch, (val) => {
+  if (incidentSearchTimer) clearTimeout(incidentSearchTimer)
+  incidentSearchTimer = setTimeout(() => {
+    fetchIncidentOptions(val)
+  }, 300)
+})
 
 // ── Photos ──
 function handlePhotoUpload(event: Event) {
@@ -280,15 +341,6 @@ function validate(): boolean {
   return Object.keys(errors).length === 0 && !photoError.value && !trespassDocError.value
 }
 
-function parseIncidentIds(): number[] {
-  return form.relatedIncidentIds
-    .split(',')
-    .map(s => s.trim())
-    .filter(Boolean)
-    .map(Number)
-    .filter(n => !Number.isNaN(n))
-}
-
 async function uploadDoc(file: File | null): Promise<number | string | null> {
   if (!file) return null
   return uploadFile(file)
@@ -323,7 +375,7 @@ async function submitForm(publish: boolean) {
       return
     }
 
-    const relatedIds = parseIncidentIds()
+    const relatedIds = form.relatedIncidentIds
     const basePayload = {
       first_name: form.firstName.trim(),
       last_name: form.lastName.trim(),
@@ -639,7 +691,7 @@ function handleCancel() {
         </div>
 
         <!-- ── SECTION: Summary & Notes ── -->
-        <div class="form-section">
+        <div class="form-section form-section--allow-overflow">
           <div class="form-section__header">
             <Icon name="lucide:file-text" :size="16" />
             <h2 class="form-section__title">{{ t('poi.section_summary') }}</h2>
@@ -660,7 +712,15 @@ function handleCancel() {
               </div>
               <div class="form-field">
                 <label class="form-field__label">{{ t('poi.field_related_incidents') }}</label>
-                <input v-model="form.relatedIncidentIds" type="text" class="form-field__input" :placeholder="t('poi.field_related_incidents_placeholder')" />
+                <SearchableMultiSelect
+                  v-model="form.relatedIncidentIds"
+                  v-model:search="incidentSearch"
+                  :options="incidentOptions"
+                  :loading="incidentLoading"
+                  :placeholder="t('poi.field_related_incidents_placeholder')"
+                  :empty-text="t('poi.related_incidents_empty')"
+                  @focus="fetchIncidentOptions(incidentSearch)"
+                />
               </div>
             </div>
           </div>
@@ -920,6 +980,10 @@ function handleCancel() {
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
   overflow: hidden;
+}
+
+.form-section--allow-overflow {
+  overflow: visible;
 }
 
 .form-section--conditional {

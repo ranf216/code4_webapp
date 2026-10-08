@@ -3,6 +3,7 @@ import { ref, computed, onMounted } from 'vue'
 import AppButton from '~/components/AppButton.vue'
 import AppDialogModal from '~/components/AppDialogModal.vue'
 import Badge from '~/components/Badge.vue'
+import CallDetailsModal from '~/components/calls/CallDetailsModal.vue'
 import { poiApi } from '~/api/poi'
 import { useToastStore } from '~/stores/toast'
 import { utcToLocal } from '~/utils/dateTime'
@@ -35,6 +36,9 @@ const isArchiving = ref(false)
 
 const isPublishing = ref(false)
 const isExporting = ref(false)
+
+const showCallModal = ref(false)
+const selectedCall = ref<any | null>(null)
 
 const canEdit = computed(() => record.value?.status === 'draft' || record.value?.status === 'active')
 const canPublish = computed(() => record.value?.status === 'draft')
@@ -227,6 +231,16 @@ function prevLightbox() {
   if (!photoUrls.value.length) return
   lightboxIndex.value = (lightboxIndex.value - 1 + photoUrls.value.length) % photoUrls.value.length
 }
+
+function openCallDetails(callId: number) {
+  selectedCall.value = { id: String(callId) }
+  showCallModal.value = true
+}
+
+function closeCallDetails() {
+  showCallModal.value = false
+  selectedCall.value = null
+}
 </script>
 
 <template>
@@ -394,14 +408,15 @@ function prevLightbox() {
                 <div v-if="record.related_incidents?.length" class="kv-row kv-row--full">
                   <span class="kv-label">{{ t('poi.field_related_incidents') }}</span>
                   <div class="kv-value related-incidents">
-                    <NuxtLink
+                    <button
                       v-for="incident in record.related_incidents"
                       :key="incident.incident_link_id"
-                      :to="`/calls?call_id=${incident.call_id}`"
+                      type="button"
                       class="related-incident-link"
+                      @click="openCallDetails(incident.call_id)"
                     >
                       #{{ incident.call_id }}
-                    </NuxtLink>
+                    </button>
                   </div>
                 </div>
               </div>
@@ -637,6 +652,16 @@ function prevLightbox() {
         />
       </template>
     </AppDialogModal>
+
+    <!-- Call Details Modal -->
+    <CallDetailsModal
+      :show="showCallModal"
+      :call="selectedCall"
+      @close="closeCallDetails"
+      @resolved="closeCallDetails"
+      @canceled="closeCallDetails"
+      @deleted="closeCallDetails"
+    />
 
     <!-- Lightbox -->
     <div

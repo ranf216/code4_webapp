@@ -64,7 +64,7 @@ const activeTab = ref<ActiveTab>(
   validTabIds.includes(route.query.tab as ActiveTab) ? (route.query.tab as ActiveTab) : 'all'
 )
 
-watch(() => route.query.tab, (tab) => {
+watch(() => route.query.tab, (tab: unknown) => {
   if (validTabIds.includes(tab as ActiveTab)) {
     activeTab.value = tab as ActiveTab
   } else {
@@ -72,18 +72,38 @@ watch(() => route.query.tab, (tab) => {
   }
 })
 
+interface MetadataItem {
+  id?: string | number
+  key?: string | number
+  name?: string | { en?: string }
+  label?: string
+}
+
 function normalizeMetadataItems(input: unknown): { value: string; label: string }[] {
+  const resolveLabel = (name?: MetadataItem['name'], label?: string, fallback = ''): string => {
+    if (label) return label
+    if (typeof name === 'string') return name
+    if (name && typeof name === 'object') return name.en ?? ''
+    return fallback
+  }
+
   if (Array.isArray(input)) {
-    return input.map((item: any) => ({
-      value: item.id ?? item.key ?? '',
-      label: item.name?.en ?? item.name ?? item.label ?? '',
-    }))
+    return input.map((item: unknown) => {
+      const m = item as MetadataItem
+      return {
+        value: String(m.id ?? m.key ?? ''),
+        label: resolveLabel(m.name, m.label),
+      }
+    })
   }
   if (input && typeof input === 'object') {
-    return Object.entries(input as Record<string, any>).map(([key, value]) => ({
-      value: key,
-      label: value?.name?.en ?? value?.name ?? key,
-    }))
+    return Object.entries(input as Record<string, unknown>).map(([key, value]) => {
+      const m = value as MetadataItem
+      return {
+        value: key,
+        label: resolveLabel(m.name, m.label, key),
+      }
+    })
   }
   return []
 }
@@ -100,7 +120,7 @@ const threatOptions = computed(() => [
 
 const communityOptions = computed(() => [
   { value: '', label: t('poi.filter_all_communities') },
-  ...communities.value.map(c => ({ value: String(c.community_id), label: c.name })),
+  ...communities.value.map((c: Community) => ({ value: String(c.community_id), label: c.name })),
 ])
 
 const currentPage = computed(() => Math.floor(offset.value / limit.value) + 1)
@@ -1023,7 +1043,7 @@ onMounted(async () => {
 .action-group {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: flex-start;
   gap: var(--space-1);
 }
 
