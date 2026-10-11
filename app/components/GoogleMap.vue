@@ -270,7 +270,7 @@ function renderOverlays() {
       background:${w.visited ? '#22c55e' : '#1f2937'};
       border:2px solid ${w.visited ? '#22c55e' : '#fff'};
       color:#fff;font-size:11px;font-weight:700;
-      font-family:sans-serif;position:relative;z-index:10;
+      font-family:sans-serif;position:relative;z-index:10;transform:translateY(-50%);
     `
     el.textContent = String(w.number)
     el.style.cursor = 'pointer'
@@ -293,7 +293,7 @@ function renderOverlays() {
       display:flex;align-items:center;justify-content:center;
       width:16px;height:16px;border-radius:4px;
       background:#3b82f6;border:1px solid #fff;
-      box-shadow:0 0 4px #3b82f6;position:relative;z-index:10;
+      box-shadow:0 0 4px #3b82f6;position:relative;z-index:10;transform:translateY(-50%);
     `
     trackOverlay(new AdvancedMarkerElement({
       map,
@@ -375,8 +375,9 @@ function renderOverlays() {
     const label = document.createElement('span')
     el.type = 'button'
     el.style.cssText = `
-      display:flex;align-items:center;gap:4px;padding:0;background:transparent;
+      position:relative;width:34px;height:34px;padding:0;background:transparent;
       border:0;cursor:pointer;opacity:${item.active === false ? '.4' : '1'};
+      transform:translateY(-50%);
     `
     pin.style.cssText = `
       display:flex;align-items:center;justify-content:center;width:34px;height:34px;
@@ -386,6 +387,7 @@ function renderOverlays() {
     `
     pin.textContent = item.type === 'asset' ? 'A' : item.type === 'post' ? 'P' : 'Z'
     label.style.cssText = `
+      position:absolute;left:calc(100% + 4px);top:50%;transform:translateY(-50%);
       max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
       padding:2px 5px;border-radius:4px;background:rgba(13,17,23,.82);color:#fff;
       font:500 11px sans-serif;text-decoration:${item.active === false ? 'line-through' : 'none'};
@@ -412,7 +414,7 @@ function renderOverlays() {
       width:18px;height:18px;border-radius:50%;
       background:#ef4444;border:2px solid #fff;
       box-shadow:0 0 0 0 rgba(239,68,68,0.7);
-      animation:pulse 1.5s infinite;position:relative;z-index:10;
+      animation:pulse 1.5s infinite;position:relative;z-index:10;transform:translateY(-50%);
     `
     trackOverlay(new AdvancedMarkerElement({
       map,
@@ -430,10 +432,14 @@ function renderOverlays() {
     const avatar = document.createElement('span')
     const label = document.createElement('span')
     wrapper.type = 'button'
+    // Wrapper sized exactly to the pin so the marker anchors on the pin's
+    // centre — the label is absolutely positioned and must not affect the
+    // element bounds, otherwise the lat/lng point lands between pin and label
+    // (huge visual offset when zoomed out).
     wrapper.style.cssText = `
-      display:flex;align-items:center;gap:6px;padding:0;background:transparent;
+      position:relative;width:44px;height:44px;padding:0;background:transparent;
       border:0;cursor:pointer;opacity:${m.status === 'grey' || m.status === 'offduty' ? '.65' : '1'};
-      position:relative;z-index:100;
+      z-index:100;transform:translateY(-50%);
     `
     pin.style.cssText = `
       display:flex;align-items:center;justify-content:center;
@@ -494,6 +500,7 @@ function renderOverlays() {
     }
 
     label.style.cssText = `
+      position:absolute;left:calc(100% + 6px);top:50%;transform:translateY(-50%);
       max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
       padding:3px 7px;border-radius:5px;background:rgba(13,17,23,.88);color:#fff;
       font:600 11px sans-serif;box-shadow:0 1px 4px rgba(0,0,0,.3);
