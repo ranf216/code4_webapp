@@ -1,26 +1,39 @@
 <script setup lang="ts">
-import { ref, computed, reactive } from 'vue'
+import { ref, computed, reactive, watch, onMounted } from 'vue'
+import AppButton from '~/components/AppButton.vue'
+import AppDialogModal from '~/components/AppDialogModal.vue'
+import { reportTemplateApi } from '~/api/reportTemplate'
+import { communityApi } from '~/api/community'
+import { useToastStore } from '~/stores/toast'
+import { utcToLocal } from '~/utils/dateTime'
+import type { Community } from '~/api/community'
+import type {
+  ReportTemplate,
+  ReportTemplateCategory,
+  ReportTemplateStatus,
+  ReportFieldType,
+  ReportFieldPayload,
+  ReportSectionPayload,
+} from '~/api/types/reportTemplate'
 
-type TemplateStatus = 'draft' | 'active' | 'archived'
-type ReportCategory = 'incident' | 'daily_activity' | 'custom'
-type CustomFieldType = 'text' | 'date' | 'location' | 'dropdown' | 'file_upload'
-
-interface CustomField {
+interface SectionField {
+  /** Internal UI id (drag keys, expansion) */
   id: string
+  /** 'system' | 'custom' — maps to is_system_field */
+  source: 'system' | 'custom'
+  /** Selected system field key (source === 'system') */
+  systemKey?: string
+  /** API field_key — read-only for system, editable for custom */
+  fieldKey: string
   label: string
   description: string
-  type: CustomFieldType
+  fieldType: ReportFieldType
+  isRequired: boolean
+  // type-specific config
   maxChars?: number
   dropdownValues?: string
   dropdownMulti?: boolean
   maxFiles?: number
-}
-
-interface SectionField {
-  id: string
-  isCustom: boolean
-  incidentFieldId?: string
-  custom?: CustomField
 }
 
 interface TemplateSection {
@@ -32,181 +45,360 @@ interface TemplateSection {
   fields: SectionField[]
 }
 
-interface TemplateRecord {
-  id?: string
+interface HeaderForm {
   name: string
-  category: ReportCategory
-  communities: string[]
-  reportTitleFormat: string
-  status: TemplateStatus
+  category: ReportTemplateCategory
+  communityIds: number[]
+  isGlobal: boolean
+  titleFormat: string
+  status: ReportTemplateStatus
   reviewBeforeClient: boolean
   allowOfficerEditing: boolean
 }
 
 const props = defineProps<{
   mode: 'create' | 'edit'
-  template?: TemplateRecord
+  template?: ReportTemplate
 }>()
 
 const { t } = useTranslation()
 const router = useRouter()
+const toastStore = useToastStore()
 
 const isEdit = computed(() => props.mode === 'edit')
 const pageTitle = computed(() =>
   isEdit.value ? t('tpl.editor_title_edit') : t('tpl.editor_title_create'),
 )
 
-const DEMO_COMMUNITIES = [
-  'Global',
-  'Sunset Heights',
-  'Central Hub',
-  'Green Valley',
-  'Riverside',
-  'North Gate',
-]
-
 const PLACEHOLDER_TOKENS = ['{date}', '{community}', '{officer}', '{template_name}', '{incident_type}']
 
-function buildInitialForm(): TemplateRecord {
-  if (props.template) {
+function buildInitialForm(): HeaderForm {
+  const tpl = props.template
+  if (tpl) {
     return {
-      id: props.template.id,
-      name: props.template.name,
-      category: props.template.category,
-      communities: [...props.template.communities],
-      reportTitleFormat: props.template.reportTitleFormat,
-      status: props.template.status,
-      reviewBeforeClient: props.template.reviewBeforeClient,
-      allowOfficerEditing: props.template.allowOfficerEditing,
+      name: tpl.name,
+      category: tpl.category,
+      communityIds: (tpl.communities ?? []).map(c => c.community_id),
+      isGlobal: tpl.is_global,
+      titleFormat: tpl.title_format,
+      status: tpl.status,
+      reviewBeforeClient: tpl.review_before_client,
+      allowOfficerEditing: tpl.allow_officer_editing,
     }
   }
   return {
     name: '',
     category: 'incident',
-    communities: [],
-    reportTitleFormat: '',
+    communityIds: [],
+    isGlobal: false,
+    titleFormat: '',
     status: 'draft',
     reviewBeforeClient: false,
     allowOfficerEditing: false,
   }
 }
 
-const form = reactive<TemplateRecord>(buildInitialForm())
+const form = reactive<HeaderForm>(buildInitialForm())
+const original = ref<HeaderForm>({ ...form, communityIds: [...form.communityIds] })
 const errors = reactive<Record<string, string>>({})
+const sectionErrors = reactive<Record<string, string>>({})
 const isSubmitting = ref(false)
 const activePane = ref<'header' | 'sections'>('header')
 
-// Community multi-select
-const communityDropdownOpen = ref(false)
+// ── Communities (real API) ──
+const communities = ref<Community[]>([])
 
-function toggleCommunity(c: string) {
-  if (c === 'Global') {
-    form.communities = form.communities.includes('Global') ? [] : ['Global']
-    return
-  }
-  const idx = form.communities.indexOf(c)
+onMounted(() => {
+  communityApi.getCommunities({ include_inactive: false }, { showLoading: false })
+    .then(res => { communities.value = res.communities ?? [] })
+    .catch(() => {})
+})
+
+const communityDropdownOpen = ref(false)
+const communitySearch = ref('')
+
+const filteredCommunities = computed(() => {
+  const q = communitySearch.value.trim().toLowerCase()
+  if (!q) return communities.value
+  return communities.value.filter(c => c.name.toLowerCase().includes(q))
+})
+
+watch(communityDropdownOpen, open => { if (!open) communitySearch.value = '' })
+
+function toggleCommunity(id: number) {
+  const idx = form.communityIds.indexOf(id)
   if (idx !== -1) {
-    form.communities.splice(idx, 1)
+    form.communityIds.splice(idx, 1)
   } else {
-    form.communities = form.communities.filter((x: string) => x !== 'Global')
-    form.communities.push(c)
+    form.isGlobal = false
+    form.communityIds.push(id)
   }
 }
 
-function isCommunitySelected(c: string) {
-  return form.communities.includes(c)
+function isCommunitySelected(id: number) {
+  return form.communityIds.includes(id)
+}
+
+function toggleGlobal() {
+  form.isGlobal = !form.isGlobal
+  if (form.isGlobal) form.communityIds = []
 }
 
 const communityDisplayText = computed(() => {
-  if (!form.communities.length) return t('tpl.communities_placeholder')
-  if (form.communities.includes('Global')) return t('tpl.community_global')
-  return form.communities.join(', ')
+  if (form.isGlobal) return t('tpl.community_global')
+  if (!form.communityIds.length) return t('tpl.communities_placeholder')
+  return form.communityIds
+    .map(id => communities.value.find(c => c.community_id === id)?.name ?? `#${id}`)
+    .join(', ')
 })
 
+const selectedCommunityChips = computed(() =>
+  form.communityIds.map(id => ({
+    id,
+    name: communities.value.find(c => c.community_id === id)?.name ?? `#${id}`,
+  }))
+)
+
 function insertToken(token: string) {
-  form.reportTitleFormat += (form.reportTitleFormat ? ' ' : '') + token
+  form.titleFormat += (form.titleFormat ? ' ' : '') + token
+}
+
+const TOKEN_SAMPLE_VALUES: Record<string, string> = {
+  '{date}': '15/03/2026',
+  '{community}': 'Riverside Community',
+  '{officer}': 'Officer Nguyen',
+  '{template_name}': 'Standard Incident Report',
+  '{incident_type}': 'Theft',
+}
+
+const titleFormatExample = computed(() =>
+  form.titleFormat.replace(/\{[a-z_]+\}/gi, m => TOKEN_SAMPLE_VALUES[m.toLowerCase()] ?? m)
+)
+
+function formatDateTime(dateStr: string | null | undefined): string {
+  if (!dateStr) return '—'
+  return utcToLocal(dateStr).format('MMM D, YYYY h:mm A')
+}
+
+// ── Section payload serialization ──
+const sectionsDirty = ref(false)
+
+function buildSectionsPayload(): ReportSectionPayload[] {
+  return sections.value.map(sec => ({
+    title: sec.title,
+    is_enabled: sec.enabled,
+    is_required: sec.required,
+    client_visible: sec.clientVisible,
+    fields: sec.fields.map((f): ReportFieldPayload => {
+      const cfg: Record<string, unknown> = {}
+      if (f.fieldType === 'text' && f.maxChars) cfg.max_chars = f.maxChars
+      if (f.fieldType === 'dropdown' && f.source === 'custom') {
+        cfg.dropdown_values = (f.dropdownValues ?? '')
+          .split('\n')
+          .map(v => v.trim())
+          .filter(Boolean)
+        cfg.is_multi_select = !!f.dropdownMulti
+      }
+      if (f.fieldType === 'file_upload' && f.maxFiles) cfg.max_files = f.maxFiles
+      return {
+        field_key: f.fieldKey,
+        label: f.label,
+        description: f.description || undefined,
+        field_type: f.fieldType,
+        config: Object.keys(cfg).length ? cfg : undefined,
+        is_system_field: f.source === 'system',
+        is_required: f.isRequired,
+      }
+    }),
+  }))
 }
 
 function validate(): boolean {
   Object.keys(errors).forEach(k => delete errors[k])
+  Object.keys(sectionErrors).forEach(k => delete sectionErrors[k])
+  Object.keys(fieldErrors).forEach(k => delete fieldErrors[k])
   if (!form.name.trim()) errors.name = t('validation.required')
   else if (form.name.length > 80) errors.name = t('validation.max_80')
-  if (!form.communities.length) errors.communities = t('validation.required')
-  if (!form.reportTitleFormat.trim()) errors.reportTitleFormat = t('validation.required')
+  if (!form.category) errors.category = t('validation.required')
+  if (!form.isGlobal && !form.communityIds.length) errors.communities = t('validation.community_or_global')
+  if (!form.titleFormat.trim()) errors.titleFormat = t('validation.required')
+  else if (form.titleFormat.length > 500) errors.titleFormat = t('validation.max_500')
+
+  if (!sections.value.length) {
+    errors.sections = t('tpl.validation_section_required')
+  } else {
+    for (const sec of sections.value) {
+      if (!sec.title.trim()) {
+        sectionErrors[sec.id] = t('validation.required')
+      } else if (!sec.fields.length) {
+        sectionErrors[sec.id] = t('tpl.validation_field_required')
+      }
+      for (const f of sec.fields) {
+        if (f.source === 'system' && !f.systemKey) {
+          fieldErrors[f.id] = t('tpl.validation_field_incomplete')
+        } else if (!f.fieldKey.trim() || f.fieldKey.length > 50) {
+          fieldErrors[f.id] = t('tpl.validation_field_key')
+        } else if (!f.label.trim() || f.label.length > 80) {
+          fieldErrors[f.id] = t('tpl.validation_field_incomplete')
+        } else if (f.fieldType === 'dropdown' && f.source === 'custom' && !(f.dropdownValues ?? '').trim()) {
+          fieldErrors[f.id] = t('tpl.validation_dropdown_values')
+        } else {
+          delete fieldErrors[f.id]
+        }
+        const fErr = fieldErrors[f.id]
+        if (fErr && !sectionErrors[sec.id]) {
+          sectionErrors[sec.id] = fErr
+        }
+      }
+    }
+  }
   return Object.keys(errors).length === 0
+    && Object.keys(sectionErrors).length === 0
+    && Object.keys(fieldErrors).length === 0
 }
 
-function handleSaveDraft() {
-  form.status = 'draft'
-  submitForm()
+function idsEqual(a: number[], b: number[]) {
+  if (a.length !== b.length) return false
+  const sa = [...a].sort((x, y) => x - y)
+  const sb = [...b].sort((x, y) => x - y)
+  return sa.every((v, i) => v === sb[i])
 }
 
-function handlePublish() {
-  form.status = 'active'
-  if (validate()) submitForm()
-}
-
-function submitForm() {
+async function handleSave(goBack = false) {
+  if (!validate()) {
+    toastStore.error(t('tpl.validation_fix_errors'))
+    if (Object.keys(sectionErrors).length) activePane.value = 'sections'
+    else if (Object.keys(errors).length) activePane.value = 'header'
+    return
+  }
   isSubmitting.value = true
-  const action = isEdit.value ? 'update' : 'create'
-  console.log(`[TemplateEditor] ${action}`, form)
-  setTimeout(() => {
+  try {
+    if (isEdit.value && props.template) {
+      const payload: Record<string, unknown> = { template_id: props.template.template_id }
+      if (form.name !== original.value.name) payload.name = form.name
+      if (form.category !== original.value.category) payload.category = form.category
+      if (form.titleFormat !== original.value.titleFormat) payload.title_format = form.titleFormat
+      if (form.reviewBeforeClient !== original.value.reviewBeforeClient) payload.review_before_client = form.reviewBeforeClient
+      if (form.allowOfficerEditing !== original.value.allowOfficerEditing) payload.allow_officer_editing = form.allowOfficerEditing
+      const newIds = form.isGlobal ? [] : form.communityIds
+      const oldIds = original.value.isGlobal ? [] : original.value.communityIds
+      if (!idsEqual(newIds, oldIds)) payload.community_ids = newIds
+      if (sectionsDirty.value) payload.sections = buildSectionsPayload()
+      await reportTemplateApi.updateTemplate(payload as Parameters<typeof reportTemplateApi.updateTemplate>[0])
+      toastStore.success(t('tpl.update_success'))
+      original.value = { ...form, communityIds: [...form.communityIds] }
+      sectionsDirty.value = false
+      if (goBack) router.push('/report-templates')
+    } else {
+      const res = await reportTemplateApi.createTemplate({
+        name: form.name,
+        category: form.category,
+        community_ids: form.isGlobal ? [] : form.communityIds,
+        title_format: form.titleFormat,
+        review_before_client: form.reviewBeforeClient,
+        allow_officer_editing: form.allowOfficerEditing,
+        sections: buildSectionsPayload(),
+      })
+      toastStore.success(t('tpl.create_success'))
+      router.push(goBack ? '/report-templates' : `/report-templates/${res.template_id}/edit`)
+      return
+    }
+  } catch (err) {
+    toastStore.error(err instanceof Error ? err.message : 'Failed to save template')
+  } finally {
     isSubmitting.value = false
-    router.push('/reports')
-  }, 800)
+  }
 }
 
 function handleCancel() {
-  router.push('/reports')
+  router.push('/report-templates')
 }
 
-// ── Archive / Restore ─────────────────────────────────────────
+// ── Archive / Restore / Activate ──────────────────────────────
 const isArchived = computed(() => form.status === 'archived')
+const isDraft = computed(() => form.status === 'draft')
 const showArchiveModal = ref(false)
 const isArchiving = ref(false)
+const isActivating = ref(false)
 
 function handleArchive() {
   showArchiveModal.value = true
 }
 
-function confirmArchive() {
+async function confirmArchive() {
+  if (!props.template) return
   isArchiving.value = true
-  form.status = 'archived'
-  console.log('[TemplateEditor] archive', form.id)
-  setTimeout(() => {
-    isArchiving.value = false
+  try {
+    await reportTemplateApi.archiveTemplate(props.template.template_id)
+    form.status = 'archived'
+    toastStore.success(t('reports.archive_success'))
     showArchiveModal.value = false
-    router.push('/reports')
-  }, 600)
+  } catch (err) {
+    toastStore.error(err instanceof Error ? err.message : 'Failed to archive template')
+  } finally {
+    isArchiving.value = false
+  }
 }
 
-function handleRestore() {
-  form.status = 'active'
-  console.log('[TemplateEditor] restore', form.id)
-  router.push('/reports')
+async function handleActivate() {
+  if (!props.template) return
+  isActivating.value = true
+  try {
+    await reportTemplateApi.activateTemplate(props.template.template_id)
+    toastStore.success(t('reports.activate_success'))
+    router.push('/report-templates')
+  } catch (err) {
+    toastStore.error(err instanceof Error ? err.message : 'Failed to activate template')
+  } finally {
+    isActivating.value = false
+  }
 }
 
-const categoryOptions: { value: ReportCategory; label: string }[] = [
+const categoryOptions: { value: ReportTemplateCategory; label: string }[] = [
   { value: 'incident', label: 'Incident' },
   { value: 'daily_activity', label: 'Daily Activity' },
   { value: 'custom', label: 'Custom' },
 ]
 
 // ── Sections ──────────────────────────────────────────────────
-const INCIDENT_FIELDS = [
-  { id: 'incident_type',   label: 'Incident Type' },
-  { id: 'incident_date',   label: 'Incident Date & Time' },
-  { id: 'location',        label: 'Location' },
-  { id: 'description',     label: 'Description' },
-  { id: 'persons_involved',label: 'Persons Involved' },
-  { id: 'vehicles',        label: 'Vehicles' },
-  { id: 'actions_taken',   label: 'Actions Taken' },
-  { id: 'photos',          label: 'Photos / Media' },
-  { id: 'police_report',   label: 'Police Report #' },
-  { id: 'follow_up',       label: 'Follow-up Required' },
-  { id: 'witness',         label: 'Witness Details' },
-  { id: 'property_damage', label: 'Property Damage' },
+// System fields from report_system_field data item (API doc §1.2.3)
+interface SystemFieldDef {
+  key: string
+  label: string
+  type: ReportFieldType
+}
+
+const SYSTEM_FIELDS: SystemFieldDef[] = [
+  { key: 'incident_date',        label: 'Incident Date',        type: 'date' },
+  { key: 'incident_time',        label: 'Incident Time',        type: 'text' },
+  { key: 'incident_location',    label: 'Incident Location',    type: 'location' },
+  { key: 'incident_type',        label: 'Incident Type',        type: 'dropdown' },
+  { key: 'incident_description', label: 'Incident Description', type: 'text' },
+  { key: 'officer_name',         label: 'Officer Name',         type: 'text' },
+  { key: 'resident_name',        label: 'Resident Name',        type: 'text' },
+  { key: 'community_name',       label: 'Community Name',       type: 'text' },
+  { key: 'call_reference',       label: 'Call Reference',       type: 'text' },
+  { key: 'priority',             label: 'Priority',             type: 'dropdown' },
+  { key: 'media',                label: 'Media',                type: 'file_upload' },
+  { key: 'officer_comments',     label: 'Officer Comments',     type: 'text' },
 ]
+
+const FIELD_TYPE_OPTIONS: { value: ReportFieldType; label: string; icon: string }[] = [
+  { value: 'text',              label: 'Text',              icon: 'lucide:type' },
+  { value: 'date',              label: 'Date',              icon: 'lucide:calendar' },
+  { value: 'location',          label: 'Location',          icon: 'lucide:map-pin' },
+  { value: 'dropdown',          label: 'Dropdown',          icon: 'lucide:list' },
+  { value: 'file_upload',       label: 'File Upload',       icon: 'lucide:paperclip' },
+  { value: 'digital_signature', label: 'Digital Signature', icon: 'lucide:pen-tool' },
+]
+
+function fieldTypeIcon(type: ReportFieldType): string {
+  return FIELD_TYPE_OPTIONS.find(o => o.value === type)?.icon ?? 'lucide:type'
+}
+
+function fieldTypeLabel(type: ReportFieldType): string {
+  return FIELD_TYPE_OPTIONS.find(o => o.value === type)?.label ?? type
+}
 
 function newSectionId() {
   return `sec-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
@@ -215,30 +407,44 @@ function newFieldId() {
   return `fld-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
 }
 
-const sections = ref<TemplateSection[]>([
-  {
-    id: newSectionId(),
-    title: 'Incident Details',
-    enabled: true,
-    required: true,
-    clientVisible: true,
-    fields: [
-      { id: newFieldId(), isCustom: false, incidentFieldId: 'incident_type' },
-      { id: newFieldId(), isCustom: false, incidentFieldId: 'incident_date' },
-      { id: newFieldId(), isCustom: false, incidentFieldId: 'location' },
-    ],
-  },
-  {
-    id: newSectionId(),
-    title: 'Narrative',
-    enabled: true,
-    required: true,
-    clientVisible: true,
-    fields: [
-      { id: newFieldId(), isCustom: false, incidentFieldId: 'description' },
-    ],
-  },
-])
+function buildInitialSections(): TemplateSection[] {
+  const tpl = props.template
+  if (tpl?.sections?.length) {
+    return [...tpl.sections]
+      .sort((a, b) => a.sort_order - b.sort_order)
+      .map(sec => ({
+        id: `sec-${sec.section_id}`,
+        title: sec.title,
+        enabled: sec.is_enabled,
+        required: sec.is_required,
+        clientVisible: sec.client_visible,
+        fields: [...sec.fields]
+          .sort((a, b) => a.sort_order - b.sort_order)
+          .map(f => {
+            const cfg = (f.config ?? {}) as Record<string, unknown>
+            return {
+              id: `fld-${f.field_id}`,
+              source: f.is_system_field ? 'system' as const : 'custom' as const,
+              systemKey: f.is_system_field ? f.field_key : undefined,
+              fieldKey: f.field_key,
+              label: f.label,
+              description: f.description ?? '',
+              fieldType: f.field_type,
+              isRequired: f.is_required,
+              maxChars: typeof cfg.max_chars === 'number' ? cfg.max_chars : undefined,
+              dropdownValues: Array.isArray(cfg.dropdown_values) ? (cfg.dropdown_values as string[]).join('\n') : '',
+              dropdownMulti: !!cfg.is_multi_select,
+              maxFiles: typeof cfg.max_files === 'number' ? cfg.max_files : undefined,
+            }
+          }),
+      }))
+  }
+  return []
+}
+
+const sections = ref<TemplateSection[]>(buildInitialSections())
+
+watch(sections, () => { sectionsDirty.value = true }, { deep: true })
 
 // Expanded/collapsed state per section
 const expandedSections = ref<Record<string, boolean>>({})
@@ -265,8 +471,27 @@ function addSection() {
   expandedSections.value[sec.id] = true
 }
 
-function removeSection(sectionId: string) {
-  sections.value = sections.value.filter((s: TemplateSection) => s.id !== sectionId)
+// Remove section requires confirmation (spec §1.2.2)
+const showRemoveSectionModal = ref(false)
+const removeSectionTarget = ref<TemplateSection | null>(null)
+
+function requestRemoveSection(sectionId: string) {
+  removeSectionTarget.value = sections.value.find((s: TemplateSection) => s.id === sectionId) ?? null
+  showRemoveSectionModal.value = true
+}
+
+function closeRemoveSectionModal() {
+  showRemoveSectionModal.value = false
+  removeSectionTarget.value = null
+}
+
+function confirmRemoveSection() {
+  if (!removeSectionTarget.value) return
+  const id = removeSectionTarget.value.id
+  sections.value = sections.value.filter((s: TemplateSection) => s.id !== id)
+  delete expandedSections.value[id]
+  delete sectionErrors[id]
+  closeRemoveSectionModal()
 }
 
 // Drag reorder sections (simple up/down)
@@ -444,32 +669,69 @@ function onFieldDragEnd() {
   dragOverFieldKey.value = null
 }
 
-// Field picker per section
-const fieldPickerOpen = ref<Record<string, boolean>>({})
+// ── Field editors (spec §1.2.3) ──
+const expandedFields = ref<Record<string, boolean>>({})
+const fieldErrors = reactive<Record<string, string>>({})
 
-function toggleFieldPicker(sectionId: string) {
-  fieldPickerOpen.value[sectionId] = !fieldPickerOpen.value[sectionId]
+function toggleFieldExpand(fieldId: string) {
+  expandedFields.value[fieldId] = !expandedFields.value[fieldId]
 }
 
-function isFieldSelected(section: TemplateSection, fieldId: string) {
-  return section.fields.some(f => f.incidentFieldId === fieldId)
+function isFieldExpanded(fieldId: string) {
+  return expandedFields.value[fieldId] !== false // default expanded
 }
 
-function toggleIncidentField(section: TemplateSection, fieldId: string) {
-  const idx = section.fields.findIndex(f => f.incidentFieldId === fieldId)
-  if (idx !== -1) {
-    section.fields.splice(idx, 1)
-  } else {
-    section.fields.push({ id: newFieldId(), isCustom: false, incidentFieldId: fieldId })
+function addField(section: TemplateSection) {
+  const sIdx = sections.value.indexOf(section)
+  const fIdx = section.fields.length
+  const field: SectionField = {
+    id: newFieldId(),
+    source: 'system',
+    systemKey: undefined,
+    fieldKey: `custom_${sIdx}_${fIdx}`,
+    label: '',
+    description: '',
+    fieldType: 'text',
+    isRequired: true,
+    maxChars: undefined,
+    dropdownValues: '',
+    dropdownMulti: false,
+    maxFiles: undefined,
   }
+  section.fields.push(field)
+  expandedFields.value[field.id] = true
 }
 
 function removeField(section: TemplateSection, fieldId: string) {
   section.fields = section.fields.filter(f => f.id !== fieldId)
+  delete expandedFields.value[fieldId]
+  delete fieldErrors[fieldId]
 }
 
-function getFieldLabel(fieldId: string): string {
-  return INCIDENT_FIELDS.find(f => f.id === fieldId)?.label ?? fieldId
+function setFieldSource(field: SectionField, source: 'system' | 'custom') {
+  field.source = source
+  if (source === 'system') {
+    const sys = field.systemKey ? SYSTEM_FIELDS.find(s => s.key === field.systemKey) : undefined
+    if (sys) {
+      field.fieldKey = sys.key
+      field.label = sys.label
+      field.fieldType = sys.type
+    }
+  } else {
+    // keep label/description/type; restore editable custom key if it matched a system key
+    if (!field.fieldKey || SYSTEM_FIELDS.some(s => s.key === field.fieldKey)) {
+      field.fieldKey = `custom_${newFieldId().slice(4, 10)}`
+    }
+  }
+}
+
+function onSystemFieldSelect(field: SectionField, key: string) {
+  const sys = SYSTEM_FIELDS.find(s => s.key === key)
+  if (!sys) return
+  field.systemKey = sys.key
+  field.fieldKey = sys.key
+  field.label = sys.label
+  field.fieldType = sys.type
 }
 
 function moveFieldUp(section: TemplateSection, index: number) {
@@ -488,64 +750,6 @@ function moveFieldDown(section: TemplateSection, index: number) {
   section.fields[index] = b
   section.fields[index + 1] = a
 }
-
-// Custom field modal
-const showCustomFieldModal = ref(false)
-const customFieldTargetSectionId = ref<string | null>(null)
-const customFieldForm = reactive<CustomField>({
-  id: '',
-  label: '',
-  description: '',
-  type: 'text',
-  maxChars: 500,
-  dropdownValues: '',
-  dropdownMulti: false,
-  maxFiles: 5,
-})
-const customFieldErrors = reactive<Record<string, string>>({})
-
-function openCustomFieldModal(sectionId: string) {
-  customFieldTargetSectionId.value = sectionId
-  Object.assign(customFieldForm, {
-    id: newFieldId(),
-    label: '',
-    description: '',
-    type: 'text',
-    maxChars: 500,
-    dropdownValues: '',
-    dropdownMulti: false,
-    maxFiles: 5,
-  })
-  Object.keys(customFieldErrors).forEach(k => delete customFieldErrors[k])
-  showCustomFieldModal.value = true
-}
-
-function confirmCustomField() {
-  Object.keys(customFieldErrors).forEach(k => delete customFieldErrors[k])
-  if (!customFieldForm.label.trim()) customFieldErrors.label = t('validation.required')
-  if (customFieldForm.type === 'dropdown' && !customFieldForm.dropdownValues?.trim()) {
-    customFieldErrors.dropdownValues = t('validation.required')
-  }
-  if (Object.keys(customFieldErrors).length) return
-
-  const sec = sections.value.find((s: TemplateSection) => s.id === customFieldTargetSectionId.value)
-  if (sec) {
-    sec.fields.push({
-      id: customFieldForm.id,
-      isCustom: true,
-      custom: { ...customFieldForm },
-    })
-  }
-  showCustomFieldModal.value = false
-}
-
-const customFieldTypeOptions: { value: CustomFieldType; label: string; icon: string }[] = [
-  { value: 'text',        label: 'Text',        icon: 'lucide:type' },
-  { value: 'date',        label: 'Date',         icon: 'lucide:calendar' },
-  { value: 'location',    label: 'Location',     icon: 'lucide:map-pin' },
-  { value: 'dropdown',    label: 'Dropdown',     icon: 'lucide:list' },
-  { value: 'file_upload', label: 'File Upload',  icon: 'lucide:paperclip' },
-]
 </script>
 
 <template>
@@ -560,29 +764,69 @@ const customFieldTypeOptions: { value: CustomFieldType; label: string; icon: str
         <p class="tpl-editor__page-sub">{{ t('tpl.editor_subtitle') }}</p>
       </div>
       <div class="tpl-editor__header-actions">
-        <button class="btn-cancel" @click="handleCancel">{{ t('common.cancel') }}</button>
+        <AppButton :text="t('common.cancel')" type="secondary" size="sm" @click="handleCancel" />
 
         <!-- Restore (archived templates only) -->
-        <button v-if="isEdit && isArchived" class="btn-restore" @click="handleRestore">
-          <Icon name="lucide:rotate-ccw" :size="14" />
-          {{ t('tpl.restore') }}
-        </button>
+        <AppButton
+          v-if="isEdit && isArchived"
+          :text="t('tpl.restore')"
+          icon="lucide:rotate-ccw"
+          type="primary"
+          size="sm"
+          :loading="isActivating"
+          @click="handleActivate"
+        />
+
+        <!-- Format / Style Studio (edit mode) -->
+        <AppButton
+          v-if="isEdit && template"
+          :text="t('tpl.format')"
+          icon="lucide:palette"
+          type="secondary"
+          size="sm"
+          @click="router.push(`/report-templates/${template.template_id}/format`)"
+        />
 
         <!-- Archive (edit mode, not yet archived) -->
-        <button v-if="isEdit && !isArchived" class="btn-archive" @click="handleArchive">
-          <Icon name="lucide:archive" :size="14" />
-          {{ t('tpl.archive') }}
-        </button>
+        <AppButton
+          v-if="isEdit && !isArchived"
+          :text="t('tpl.archive')"
+          icon="lucide:archive"
+          type="danger"
+          size="sm"
+          @click="handleArchive"
+        />
 
-        <button v-if="!isArchived" class="btn-draft" :disabled="isSubmitting" @click="handleSaveDraft">
-          <Icon name="lucide:save" :size="14" />
-          {{ t('tpl.save_draft') }}
-        </button>
-        <button v-if="!isArchived" class="btn-publish" :disabled="isSubmitting" @click="handlePublish">
-          <Icon v-if="isSubmitting" name="lucide:loader-2" :size="14" class="spin" />
-          <Icon v-else name="lucide:send" :size="14" />
-          {{ isEdit ? t('tpl.save_changes') : t('tpl.publish') }}
-        </button>
+        <!-- Activate (edit mode, draft only) -->
+        <AppButton
+          v-if="isEdit && isDraft"
+          :text="t('tpl.activate')"
+          icon="lucide:check-circle-2"
+          type="primary"
+          size="sm"
+          :loading="isActivating"
+          @click="handleActivate"
+        />
+
+        <AppButton
+          v-if="!isArchived"
+          :text="isEdit ? t('tpl.save_changes') : t('tpl.save')"
+          icon="lucide:save"
+          type="primary"
+          size="sm"
+          :loading="isSubmitting"
+          @click="handleSave()"
+        />
+
+        <AppButton
+          v-if="!isArchived"
+          :text="t('tpl.save_and_back')"
+          icon="lucide:save"
+          type="secondary"
+          size="sm"
+          :loading="isSubmitting"
+          @click="handleSave(true)"
+        />
       </div>
     </div>
 
@@ -660,23 +904,8 @@ const customFieldTypeOptions: { value: CustomFieldType; label: string; icon: str
 
               <div class="form-field">
                 <label class="form-field__label">{{ t('tpl.field_status') }}</label>
-                <div class="status-toggle-group">
-                  <button
-                    class="status-toggle-btn"
-                    :class="{ 'status-toggle-btn--active': form.status === 'draft' }"
-                    @click="form.status = 'draft'"
-                  >
-                    <Icon name="lucide:file-edit" :size="13" />
-                    {{ t('tpl.status_draft') }}
-                  </button>
-                  <button
-                    class="status-toggle-btn"
-                    :class="{ 'status-toggle-btn--active-ok': form.status === 'active' }"
-                    @click="form.status = 'active'"
-                  >
-                    <Icon name="lucide:check-circle" :size="13" />
-                    {{ t('tpl.status_active') }}
-                  </button>
+                <div class="status-display">
+                  <Badge type="templateStatus" :value="form.status" />
                 </div>
               </div>
             </div>
@@ -686,38 +915,68 @@ const customFieldTypeOptions: { value: CustomFieldType; label: string; icon: str
               <label class="form-field__label">
                 {{ t('tpl.field_communities') }} <span class="req">*</span>
               </label>
-              <div class="multiselect" :class="{ 'multiselect--open': communityDropdownOpen }">
+
+              <!-- Global master checkbox -->
+              <label class="global-checkbox" @click.prevent="toggleGlobal">
+                <span class="multiselect__checkbox" :class="{ 'multiselect__checkbox--checked': form.isGlobal }">
+                  <Icon v-if="form.isGlobal" name="lucide:check" :size="11" />
+                </span>
+                <span>
+                  <Icon name="lucide:globe" :size="13" class="global-checkbox__icon" />
+                  {{ t('tpl.community_global') }}
+                </span>
+              </label>
+
+              <div
+                class="multiselect"
+                :class="{ 'multiselect--open': communityDropdownOpen, 'multiselect--disabled': form.isGlobal }"
+              >
                 <button
                   type="button"
                   class="multiselect__trigger"
+                  :disabled="form.isGlobal"
                   @click="communityDropdownOpen = !communityDropdownOpen"
                 >
-                  <span class="multiselect__display" :class="{ 'multiselect__display--placeholder': !form.communities.length }">
+                  <span
+                    class="multiselect__display"
+                    :class="{ 'multiselect__display--placeholder': !form.communityIds.length }"
+                  >
                     {{ communityDisplayText }}
                   </span>
                   <Icon name="lucide:chevron-down" :size="14" class="multiselect__chevron" />
                 </button>
-                <div v-if="communityDropdownOpen" class="multiselect__dropdown">
+                <div v-if="communityDropdownOpen && !form.isGlobal" class="multiselect__dropdown">
+                  <div class="multiselect__search">
+                    <Icon name="lucide:search" :size="12" class="multiselect__search-icon" />
+                    <input
+                      v-model="communitySearch"
+                      type="text"
+                      class="multiselect__search-input"
+                      :placeholder="t('tpl.community_search')"
+                      @click.stop
+                    />
+                  </div>
                   <label
-                    v-for="c in DEMO_COMMUNITIES"
-                    :key="c"
+                    v-for="c in filteredCommunities"
+                    :key="c.community_id"
                     class="multiselect__option"
-                    :class="{ 'multiselect__option--selected': isCommunitySelected(c) }"
-                    @click.prevent="toggleCommunity(c)"
+                    :class="{ 'multiselect__option--selected': isCommunitySelected(c.community_id) }"
+                    @click.prevent="toggleCommunity(c.community_id)"
                   >
                     <span class="multiselect__checkbox">
-                      <Icon v-if="isCommunitySelected(c)" name="lucide:check" :size="11" />
+                      <Icon v-if="isCommunitySelected(c.community_id)" name="lucide:check" :size="11" />
                     </span>
-                    <span>{{ c === 'Global' ? `🌐 ${t('tpl.community_global')}` : c }}</span>
+                    <span>{{ c.name }}</span>
                   </label>
+                  <p v-if="!filteredCommunities.length" class="multiselect__empty">{{ t('reports.no_communities') }}</p>
                 </div>
               </div>
               <span v-if="errors.communities" class="field-error">{{ errors.communities }}</span>
               <!-- Selected chips -->
-              <div v-if="form.communities.length" class="community-chips">
-                <span v-for="c in form.communities" :key="c" class="community-chip">
-                  {{ c }}
-                  <button class="chip-remove" @click="toggleCommunity(c)">
+              <div v-if="!form.isGlobal && form.communityIds.length" class="community-chips">
+                <span v-for="chip in selectedCommunityChips" :key="chip.id" class="community-chip">
+                  {{ chip.name }}
+                  <button class="chip-remove" @click="toggleCommunity(chip.id)">
                     <Icon name="lucide:x" :size="10" />
                   </button>
                 </span>
@@ -725,17 +984,21 @@ const customFieldTypeOptions: { value: CustomFieldType; label: string; icon: str
             </div>
 
             <!-- Report Title Format -->
-            <div class="form-field" :class="{ 'form-field--error': errors.reportTitleFormat }">
+            <div class="form-field" :class="{ 'form-field--error': errors.titleFormat }">
               <label class="form-field__label">
                 {{ t('tpl.field_title_format') }} <span class="req">*</span>
               </label>
               <input
-                v-model="form.reportTitleFormat"
+                v-model="form.titleFormat"
                 type="text"
                 class="form-field__input"
+                maxlength="500"
                 :placeholder="t('tpl.field_title_format_placeholder')"
               />
-              <span v-if="errors.reportTitleFormat" class="field-error">{{ errors.reportTitleFormat }}</span>
+              <div class="form-field__footer">
+                <span class="field-error">{{ errors.titleFormat }}</span>
+                <span class="char-count">{{ form.titleFormat.length }}/500</span>
+              </div>
               <div class="token-row">
                 <span class="token-label">{{ t('tpl.insert_placeholder') }}</span>
                 <button
@@ -747,6 +1010,12 @@ const customFieldTypeOptions: { value: CustomFieldType; label: string; icon: str
                 >
                   {{ token }}
                 </button>
+              </div>
+              <!-- Live example — tokens replaced with sample values -->
+              <div v-if="form.titleFormat.trim()" class="title-format-example">
+                <span class="title-format-example__label">{{ t('tpl.title_example') }}</span>
+                <Icon name="lucide:arrow-right" :size="12" />
+                <span class="title-format-example__text">{{ titleFormatExample }}</span>
               </div>
             </div>
 
@@ -783,6 +1052,22 @@ const customFieldTypeOptions: { value: CustomFieldType; label: string; icon: str
               </div>
             </div>
 
+            <!-- Meta (edit mode, read-only) -->
+            <div v-if="isEdit && template" class="meta-grid">
+              <div class="meta-item">
+                <span class="meta-item__label">{{ t('tpl.created_by') }}</span>
+                <span class="meta-item__value">{{ template.created_by_name ?? '—' }}</span>
+              </div>
+              <div class="meta-item">
+                <span class="meta-item__label">{{ t('tpl.created_on') }}</span>
+                <span class="meta-item__value">{{ formatDateTime(template.created_on) }}</span>
+              </div>
+              <div class="meta-item">
+                <span class="meta-item__label">{{ t('tpl.last_update') }}</span>
+                <span class="meta-item__value">{{ formatDateTime(template.last_update) }}</span>
+              </div>
+            </div>
+
           </div>
         </div>
 
@@ -798,6 +1083,8 @@ const customFieldTypeOptions: { value: CustomFieldType; label: string; icon: str
           </div>
 
           <div class="editor-panel__body editor-panel__body--sections">
+
+            <p v-if="errors.sections" class="field-error sections-error">{{ errors.sections }}</p>
 
             <!-- Empty state -->
             <div v-if="sections.length === 0" class="sections-empty">
@@ -818,6 +1105,7 @@ const customFieldTypeOptions: { value: CustomFieldType; label: string; icon: str
                 'section-card--disabled': !sec.enabled,
                 'section-card--dragging': dragSectionId === sec.id,
                 'section-card--drag-over': dragOverSectionId === sec.id,
+                'section-card--error': sectionErrors[sec.id],
               }"
               draggable="true"
               @dragstart="onSectionDragStart($event, sec.id)"
@@ -881,16 +1169,17 @@ const customFieldTypeOptions: { value: CustomFieldType; label: string; icon: str
                   <button class="section-action-btn" :title="t('tpl.section_expand')" @click="toggleSectionExpand(sec.id)">
                     <Icon :name="isSectionExpanded(sec.id) ? 'lucide:chevron-up' : 'lucide:chevron-down'" :size="14" />
                   </button>
-                  <button class="section-action-btn section-action-btn--danger" :title="t('tpl.section_delete')" @click="removeSection(sec.id)">
+                  <button class="section-action-btn section-action-btn--danger" :title="t('tpl.section_delete')" @click="requestRemoveSection(sec.id)">
                     <Icon name="lucide:trash-2" :size="14" />
                   </button>
                 </div>
               </div>
+              <p v-if="sectionErrors[sec.id]" class="field-error section-card__error">{{ sectionErrors[sec.id] }}</p>
 
               <!-- Fields area (expanded) -->
               <div v-if="isSectionExpanded(sec.id)" class="section-card__fields">
 
-                <!-- Field list -->
+                <!-- Field editors list -->
                 <div
                   v-if="sec.fields.length"
                   class="fields-list"
@@ -900,10 +1189,11 @@ const customFieldTypeOptions: { value: CustomFieldType; label: string; icon: str
                   <div
                     v-for="(field, fIdx) in sec.fields"
                     :key="field.id"
-                    class="field-row"
+                    class="field-editor"
                     :class="{
-                      'field-row--dragging': dragFieldKey === makeFieldKey(sec.id, field.id),
-                      'field-row--drag-over': dragOverFieldKey === makeFieldKey(sec.id, field.id),
+                      'field-editor--dragging': dragFieldKey === makeFieldKey(sec.id, field.id),
+                      'field-editor--drag-over': dragOverFieldKey === makeFieldKey(sec.id, field.id),
+                      'field-editor--error': fieldErrors[field.id],
                     }"
                     draggable="true"
                     @dragstart="onFieldDragStart($event, sec.id, field.id)"
@@ -912,68 +1202,213 @@ const customFieldTypeOptions: { value: CustomFieldType; label: string; icon: str
                     @drop="onFieldDrop($event, sec.id, field.id)"
                     @dragend="onFieldDragEnd"
                   >
-                    <span class="field-row__drag" :title="t('tpl.drag_handle')">
-                      <Icon name="lucide:grip-vertical" :size="12" />
-                    </span>
-                    <div class="field-row__order">
-                      <button class="order-btn order-btn--sm" :disabled="fIdx === 0" @click="moveFieldUp(sec, fIdx)">
-                        <Icon name="lucide:chevron-up" :size="11" />
-                      </button>
-                      <button class="order-btn order-btn--sm" :disabled="fIdx === sec.fields.length - 1" @click="moveFieldDown(sec, fIdx)">
-                        <Icon name="lucide:chevron-down" :size="11" />
-                      </button>
-                    </div>
-                    <Icon
-                      :name="field.isCustom ? 'lucide:sparkles' : 'lucide:form-input'"
-                      :size="13"
-                      class="field-row__icon"
-                      :class="{ 'field-row__icon--custom': field.isCustom }"
-                    />
-                    <span class="field-row__label">
-                      {{ field.isCustom ? field.custom?.label : getFieldLabel(field.incidentFieldId ?? '') }}
-                    </span>
-                    <span v-if="field.isCustom" class="field-row__type-badge">
-                      {{ field.custom?.type?.replace('_', ' ') }}
-                    </span>
-                    <button class="field-row__remove" :title="t('tpl.field_remove')" @click="removeField(sec, field.id)">
-                      <Icon name="lucide:x" :size="12" />
-                    </button>
-                  </div>
-                </div>
-
-                <!-- Add fields row -->
-                <div class="fields-add-row">
-                  <!-- Field picker dropdown -->
-                  <div class="field-picker-wrap">
-                    <button class="btn-add-field" @click="toggleFieldPicker(sec.id)">
-                      <Icon name="lucide:plus" :size="13" />
-                      {{ t('tpl.add_incident_field') }}
-                    </button>
-                    <div v-if="fieldPickerOpen[sec.id]" class="field-picker-dropdown">
-                      <div class="field-picker__title">{{ t('tpl.picker_title') }}</div>
-                      <label
-                        v-for="iField in INCIDENT_FIELDS"
-                        :key="iField.id"
-                        class="field-picker__option"
-                        :class="{ 'field-picker__option--selected': isFieldSelected(sec, iField.id) }"
-                        @click.prevent="toggleIncidentField(sec, iField.id)"
+                    <!-- Collapsed header row -->
+                    <div class="field-editor__header" @click="toggleFieldExpand(field.id)">
+                      <span class="field-row__drag" :title="t('tpl.drag_handle')" @click.stop>
+                        <Icon name="lucide:grip-vertical" :size="12" />
+                      </span>
+                      <div class="field-row__order" @click.stop>
+                        <button class="order-btn order-btn--sm" :disabled="fIdx === 0" @click="moveFieldUp(sec, fIdx)">
+                          <Icon name="lucide:chevron-up" :size="11" />
+                        </button>
+                        <button class="order-btn order-btn--sm" :disabled="fIdx === sec.fields.length - 1" @click="moveFieldDown(sec, fIdx)">
+                          <Icon name="lucide:chevron-down" :size="11" />
+                        </button>
+                      </div>
+                      <Icon
+                        :name="fieldTypeIcon(field.fieldType)"
+                        :size="13"
+                        class="field-row__icon"
+                      />
+                      <span class="field-row__label">
+                        {{ field.label || t('tpl.field_untitled') }}
+                      </span>
+                      <span class="field-row__src-badge" :class="{ 'field-row__src-badge--custom': field.source === 'custom' }">
+                        {{ field.source === 'system' ? t('tpl.field_source_system') : t('tpl.field_source_custom') }}
+                      </span>
+                      <span v-if="field.isRequired" class="field-row__req-badge">{{ t('tpl.field_required_badge') }}</span>
+                      <button
+                        class="field-row__remove"
+                        :title="t('tpl.field_remove')"
+                        @click.stop="removeField(sec, field.id)"
                       >
-                        <span class="field-picker__checkbox">
-                          <Icon v-if="isFieldSelected(sec, iField.id)" name="lucide:check" :size="10" />
-                        </span>
-                        {{ iField.label }}
-                      </label>
+                        <Icon name="lucide:x" :size="12" />
+                      </button>
+                      <Icon
+                        :name="isFieldExpanded(field.id) ? 'lucide:chevron-up' : 'lucide:chevron-down'"
+                        :size="13"
+                        class="field-row__chevron"
+                      />
+                    </div>
+
+                    <!-- Expanded editor body -->
+                    <div v-if="isFieldExpanded(field.id)" class="field-editor__body">
+                      <!-- Field source -->
+                      <div class="fe-source">
+                        <label
+                          class="fe-source__option"
+                          :class="{ 'fe-source__option--active': field.source === 'system' }"
+                        >
+                          <input
+                            type="radio"
+                            class="sr-only"
+                            :checked="field.source === 'system'"
+                            @change="setFieldSource(field, 'system')"
+                          />
+                          <Icon name="lucide:form-input" :size="13" />
+                          {{ t('tpl.field_source_system') }}
+                        </label>
+                        <label
+                          class="fe-source__option"
+                          :class="{ 'fe-source__option--active': field.source === 'custom' }"
+                        >
+                          <input
+                            type="radio"
+                            class="sr-only"
+                            :checked="field.source === 'custom'"
+                            @change="setFieldSource(field, 'custom')"
+                          />
+                          <Icon name="lucide:sparkles" :size="13" />
+                          {{ t('tpl.field_source_custom') }}
+                        </label>
+                      </div>
+
+                      <!-- System field picker -->
+                      <div v-if="field.source === 'system'" class="form-field">
+                        <label class="form-field__label">{{ t('tpl.field_system_picker') }} <span class="req">*</span></label>
+                        <select
+                          :value="field.systemKey ?? ''"
+                          class="form-field__select"
+                          @change="onSystemFieldSelect(field, ($event.target as HTMLSelectElement).value)"
+                        >
+                          <option value="" disabled>{{ t('tpl.field_system_picker_placeholder') }}</option>
+                          <option v-for="sf in SYSTEM_FIELDS" :key="sf.key" :value="sf.key">{{ sf.label }}</option>
+                        </select>
+                      </div>
+
+                      <!-- Field key (custom only) -->
+                      <div v-else class="form-field">
+                        <label class="form-field__label">{{ t('tpl.field_key') }} <span class="req">*</span></label>
+                        <input
+                          v-model="field.fieldKey"
+                          type="text"
+                          class="form-field__input form-field__input--mono"
+                          maxlength="50"
+                          :placeholder="t('tpl.field_key_placeholder')"
+                        />
+                      </div>
+
+                      <div class="fe-grid">
+                        <!-- Label -->
+                        <div class="form-field">
+                          <label class="form-field__label">{{ t('tpl.field_label') }} <span class="req">*</span></label>
+                          <input
+                            v-model="field.label"
+                            type="text"
+                            class="form-field__input"
+                            maxlength="80"
+                            :readonly="field.source === 'system'"
+                            :class="{ 'form-field__input--readonly': field.source === 'system' }"
+                            :placeholder="t('tpl.field_label_placeholder')"
+                          />
+                        </div>
+
+                        <!-- Field type -->
+                        <div class="form-field">
+                          <label class="form-field__label">{{ t('tpl.field_type') }} <span class="req">*</span></label>
+                          <select
+                            v-if="field.source === 'custom'"
+                            v-model="field.fieldType"
+                            class="form-field__select"
+                          >
+                            <option v-for="opt in FIELD_TYPE_OPTIONS" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
+                          </select>
+                          <div v-else class="fe-readonly-value">
+                            <Icon :name="fieldTypeIcon(field.fieldType)" :size="13" />
+                            {{ fieldTypeLabel(field.fieldType) }}
+                          </div>
+                        </div>
+                      </div>
+
+                      <!-- Description -->
+                      <div class="form-field">
+                        <label class="form-field__label">{{ t('tpl.custom_field_description') }}</label>
+                        <input
+                          v-model="field.description"
+                          type="text"
+                          class="form-field__input"
+                          maxlength="500"
+                          :placeholder="t('tpl.custom_field_description_placeholder')"
+                        />
+                      </div>
+
+                      <!-- Type-specific config -->
+                      <div v-if="field.fieldType === 'text'" class="form-field">
+                        <label class="form-field__label">{{ t('tpl.custom_field_max_chars') }}</label>
+                        <input
+                          v-model.number="field.maxChars"
+                          type="number"
+                          min="10"
+                          class="form-field__input form-field__input--short"
+                        />
+                      </div>
+
+                      <div v-if="field.fieldType === 'dropdown' && field.source === 'custom'" class="form-field">
+                        <label class="form-field__label">{{ t('tpl.custom_field_dropdown_values') }} <span class="req">*</span></label>
+                        <textarea
+                          v-model="field.dropdownValues"
+                          class="form-field__textarea"
+                          rows="4"
+                          :placeholder="t('tpl.custom_field_dropdown_values_placeholder')"
+                        />
+                        <label class="mini-toggle fe-config-toggle">
+                          <input v-model="field.dropdownMulti" type="checkbox" class="sr-only" />
+                          <span class="mini-toggle__track" :class="{ 'mini-toggle__track--on': field.dropdownMulti }">
+                            <span class="mini-toggle__thumb" />
+                          </span>
+                          <span class="mini-toggle__label">{{ t('tpl.custom_field_multi_select') }}</span>
+                        </label>
+                      </div>
+
+                      <div v-if="field.fieldType === 'file_upload'" class="form-field">
+                        <label class="form-field__label">{{ t('tpl.custom_field_max_files') }}</label>
+                        <input
+                          v-model.number="field.maxFiles"
+                          type="number"
+                          min="1"
+                          class="form-field__input form-field__input--short"
+                        />
+                      </div>
+
+                      <!-- Required toggle -->
+                      <div class="fe-footer">
+                        <label class="mini-toggle">
+                          <input v-model="field.isRequired" type="checkbox" class="sr-only" />
+                          <span class="mini-toggle__track" :class="{ 'mini-toggle__track--on': field.isRequired }">
+                            <span class="mini-toggle__thumb" />
+                          </span>
+                          <span class="mini-toggle__label">{{ t('tpl.field_required') }}</span>
+                        </label>
+                      </div>
+                      <p v-if="fieldErrors[field.id]" class="field-error">{{ fieldErrors[field.id] }}</p>
                     </div>
                   </div>
-
-                  <button class="btn-add-custom" @click="openCustomFieldModal(sec.id)">
-                    <Icon name="lucide:sparkles" :size="13" />
-                    {{ t('tpl.add_custom_field') }}
-                  </button>
                 </div>
+
+                <!-- Add Field button -->
+                <button class="btn-add-field-bottom" @click="addField(sec)">
+                  <Icon name="lucide:plus" :size="13" />
+                  {{ t('tpl.add_field') }}
+                </button>
 
               </div>
             </div>
+
+            <!-- Add Section (below last section card) -->
+            <button v-if="sections.length" class="btn-add-section-bottom" @click="addSection">
+              <Icon name="lucide:plus" :size="14" />
+              {{ t('tpl.add_section') }}
+            </button>
 
           </div>
         </div>
@@ -1006,12 +1441,25 @@ const customFieldTypeOptions: { value: CustomFieldType; label: string; icon: str
     </div>
   </Teleport>
 
-  <!-- Dismiss field picker dropdowns -->
-  <div
-    v-if="Object.values(fieldPickerOpen).some(Boolean)"
-    class="overlay-dismiss"
-    @click="Object.keys(fieldPickerOpen).forEach(k => { fieldPickerOpen[k] = false })"
-  />
+  <!-- ── Remove Section confirm modal ── -->
+  <AppDialogModal
+    :show="showRemoveSectionModal"
+    :title="t('tpl.remove_section_title')"
+    max-width="420px"
+    @close="closeRemoveSectionModal"
+  >
+    <p class="modal__text">{{ t('tpl.remove_section_desc') }}</p>
+    <template #footer>
+      <AppButton :text="t('common.cancel')" type="secondary" size="sm" @click="closeRemoveSectionModal" />
+      <AppButton
+        :text="t('tpl.remove_section_confirm')"
+        icon="lucide:trash-2"
+        type="danger"
+        size="sm"
+        @click="confirmRemoveSection"
+      />
+    </template>
+  </AppDialogModal>
 
   <!-- Close community dropdown on outside click -->
   <div
@@ -1019,86 +1467,6 @@ const customFieldTypeOptions: { value: CustomFieldType; label: string; icon: str
     class="overlay-dismiss"
     @click="communityDropdownOpen = false"
   />
-
-  <!-- ── Custom Field Modal ── -->
-  <Teleport to="body">
-    <div v-if="showCustomFieldModal" class="modal-overlay" @click.self="showCustomFieldModal = false">
-      <div class="modal modal--lg">
-        <div class="modal__header">
-          <Icon name="lucide:sparkles" :size="17" class="modal__icon--accent" />
-          <h3 class="modal__title">{{ t('tpl.custom_field_title') }}</h3>
-        </div>
-        <div class="modal__body">
-
-          <!-- Label -->
-          <div class="form-field" :class="{ 'form-field--error': customFieldErrors.label }">
-            <label class="form-field__label">{{ t('tpl.custom_field_label') }} <span class="req">*</span></label>
-            <input v-model="customFieldForm.label" type="text" class="form-field__input" :placeholder="t('tpl.custom_field_label_placeholder')" />
-            <span v-if="customFieldErrors.label" class="field-error">{{ customFieldErrors.label }}</span>
-          </div>
-
-          <!-- Description -->
-          <div class="form-field">
-            <label class="form-field__label">{{ t('tpl.custom_field_description') }}</label>
-            <input v-model="customFieldForm.description" type="text" class="form-field__input" :placeholder="t('tpl.custom_field_description_placeholder')" />
-          </div>
-
-          <!-- Field Type -->
-          <div class="form-field">
-            <label class="form-field__label">{{ t('tpl.custom_field_type') }} <span class="req">*</span></label>
-            <div class="field-type-grid">
-              <button
-                v-for="opt in customFieldTypeOptions"
-                :key="opt.value"
-                class="field-type-btn"
-                :class="{ 'field-type-btn--active': customFieldForm.type === opt.value }"
-                @click="customFieldForm.type = opt.value"
-              >
-                <Icon :name="opt.icon" :size="16" />
-                {{ opt.label }}
-              </button>
-            </div>
-          </div>
-
-          <!-- Text: max chars -->
-          <div v-if="customFieldForm.type === 'text'" class="form-field">
-            <label class="form-field__label">{{ t('tpl.custom_field_max_chars') }}</label>
-            <input v-model.number="customFieldForm.maxChars" type="number" min="10" max="5000" class="form-field__input form-field__input--short" />
-          </div>
-
-          <!-- Dropdown: values + multi -->
-          <div v-if="customFieldForm.type === 'dropdown'" class="form-field" :class="{ 'form-field--error': customFieldErrors.dropdownValues }">
-            <label class="form-field__label">{{ t('tpl.custom_field_dropdown_values') }} <span class="req">*</span></label>
-            <textarea
-              v-model="customFieldForm.dropdownValues"
-              class="form-field__textarea"
-              rows="4"
-              :placeholder="t('tpl.custom_field_dropdown_values_placeholder')"
-            />
-            <span v-if="customFieldErrors.dropdownValues" class="field-error">{{ customFieldErrors.dropdownValues }}</span>
-            <label class="checkbox-row">
-              <input v-model="customFieldForm.dropdownMulti" type="checkbox" />
-              {{ t('tpl.custom_field_multi_select') }}
-            </label>
-          </div>
-
-          <!-- File upload: max files -->
-          <div v-if="customFieldForm.type === 'file_upload'" class="form-field">
-            <label class="form-field__label">{{ t('tpl.custom_field_max_files') }}</label>
-            <input v-model.number="customFieldForm.maxFiles" type="number" min="1" max="20" class="form-field__input form-field__input--short" />
-          </div>
-
-        </div>
-        <div class="modal__footer">
-          <button class="btn-cancel" @click="showCustomFieldModal = false">{{ t('common.cancel') }}</button>
-          <button class="btn-publish" @click="confirmCustomField">
-            <Icon name="lucide:plus" :size="14" />
-            {{ t('tpl.custom_field_add') }}
-          </button>
-        </div>
-      </div>
-    </div>
-  </Teleport>
 </template>
 
 <style scoped>
@@ -1492,6 +1860,33 @@ const customFieldTypeOptions: { value: CustomFieldType; label: string; icon: str
 }
 .token-btn:hover { border-color: var(--color-accent); color: var(--color-accent); }
 
+.title-format-example {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-bg-elevated);
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+}
+
+.title-format-example__label {
+  flex-shrink: 0;
+  font-weight: var(--font-weight-medium);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  font-size: 10px;
+}
+
+.title-format-example__text {
+  color: var(--color-text-primary);
+  font-weight: var(--font-weight-medium);
+  word-break: break-word;
+}
+
 /* ── Toggles section ── */
 .toggles-section {
   display: flex;
@@ -1650,6 +2045,25 @@ const customFieldTypeOptions: { value: CustomFieldType; label: string; icon: str
   transition: all var(--transition-base);
 }
 .btn-add-section-inline:hover { border-color: var(--color-accent); color: var(--color-accent); }
+
+.btn-add-section-bottom {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  width: 100%;
+  margin-top: var(--space-4);
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  cursor: pointer;
+  background: transparent;
+  border: 1px dashed var(--color-border);
+  color: var(--color-text-secondary);
+  transition: all var(--transition-base);
+}
+.btn-add-section-bottom:hover { border-color: var(--color-accent); color: var(--color-accent); }
 
 /* ── Section card ── */
 .section-card {
@@ -2182,6 +2596,219 @@ const customFieldTypeOptions: { value: CustomFieldType; label: string; icon: str
   color: var(--color-text-muted);
   font-size: var(--font-size-xs);
   margin-top: var(--space-2);
+}
+
+/* ── Status display (read-only) ── */
+.status-display {
+  padding: var(--space-2) 0;
+}
+
+/* ── Global checkbox ── */
+.global-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  user-select: none;
+}
+.global-checkbox__icon { color: #14b8a6; }
+
+.multiselect--disabled {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.multiselect__checkbox--checked {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  color: #fff;
+}
+
+.multiselect__empty {
+  padding: var(--space-3);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  margin: 0;
+}
+
+.multiselect__search {
+  position: sticky;
+  top: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-bg-surface);
+  border-bottom: 1px solid var(--color-border);
+}
+.multiselect__search-icon { color: var(--color-text-muted); flex-shrink: 0; }
+.multiselect__search-input {
+  flex: 1;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+}
+.multiselect__search-input::placeholder { color: var(--color-text-muted); }
+
+/* ── Meta grid (read-only) ── */
+.meta-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-4);
+  margin-top: var(--space-5);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--color-border);
+}
+.meta-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.meta-item__label {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.meta-item__value {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
+}
+
+/* ── Section errors ── */
+.sections-error { margin: 0 0 var(--space-3); }
+.section-card--error { border-color: var(--color-critical, #ef4444); }
+.section-card__error { padding: 0 var(--space-4) var(--space-2); margin: 0; }
+
+/* ── Field editor ── */
+.field-editor {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface);
+  transition: border-color var(--transition-base), box-shadow var(--transition-base);
+}
+.field-editor--dragging { opacity: 0.5; }
+.field-editor--drag-over { border-color: var(--color-accent); box-shadow: 0 -2px 0 0 var(--color-accent); }
+.field-editor--error { border-color: var(--color-critical, #ef4444); }
+
+.field-editor__header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  cursor: pointer;
+  user-select: none;
+}
+
+.field-row__chevron { color: var(--color-text-muted); flex-shrink: 0; }
+
+.field-row__src-badge {
+  padding: 1px var(--space-2);
+  border-radius: var(--radius-sm);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background: rgba(59, 130, 246, 0.12);
+  color: #3b82f6;
+  flex-shrink: 0;
+}
+.field-row__src-badge--custom {
+  background: rgba(139, 92, 246, 0.12);
+  color: #8b5cf6;
+}
+
+.field-row__req-badge {
+  padding: 1px var(--space-2);
+  border-radius: var(--radius-sm);
+  font-size: 10px;
+  font-weight: 600;
+  background: rgba(245, 158, 11, 0.15);
+  color: #f59e0b;
+  flex-shrink: 0;
+}
+
+.field-editor__body {
+  padding: var(--space-3) var(--space-4) var(--space-4);
+  border-top: 1px solid var(--color-border);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.fe-source {
+  display: flex;
+  gap: var(--space-2);
+}
+.fe-source__option {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: all var(--transition-base);
+}
+.fe-source__option--active {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+  background: rgba(229, 255, 68, 0.08);
+}
+
+.fe-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-3);
+}
+
+.fe-readonly-value {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+}
+
+.fe-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.fe-config-toggle { margin-top: var(--space-2); }
+
+.btn-add-field-bottom {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-xs);
+  font-weight: 500;
+  cursor: pointer;
+  background: transparent;
+  border: 1px dashed var(--color-border);
+  color: var(--color-text-secondary);
+  transition: all var(--transition-base);
+}
+.btn-add-field-bottom:hover { border-color: var(--color-accent); color: var(--color-accent); }
+
+.form-field__input--mono { font-family: monospace; }
+.form-field__input--readonly {
+  background: var(--color-bg-elevated);
+  color: var(--color-text-secondary);
 }
 
 /* ── Spin ── */

@@ -40,7 +40,7 @@ export function resolveNotificationEntityPath(entityType?: string, entityId?: nu
   if (!entityType || entityId === undefined || entityId === null) return null
   switch (entityType) {
     case 'call': return `/calls?call_id=${entityId}`
-    case 'report': return `/reports/${entityId}`
+    case 'report': return `/report-templates/${entityId}/edit`
     case 'shift': return `/shifts?shift_id=${entityId}`
     case 'post_order': return `/post-orders/${entityId}`
     case 'poi': return `/poi/${entityId}`
