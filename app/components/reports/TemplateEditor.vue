@@ -1857,6 +1857,7 @@ function moveFieldDown(section: TemplateSection, index: number) {
   cursor: pointer;
   font-family: monospace;
   transition: all var(--transition-base);
+  margin-top: 0px;
 }
 .token-btn:hover { border-color: var(--color-accent); color: var(--color-accent); }
 
@@ -2600,7 +2601,7 @@ function moveFieldDown(section: TemplateSection, index: number) {
 
 /* ── Status display (read-only) ── */
 .status-display {
-  padding: var(--space-2) 0;
+  padding: var(--space-1) 0;
 }
 
 /* ── Global checkbox ── */
