@@ -76,6 +76,7 @@ function formatDateTime(iso: string | undefined | null): string {
 const { t } = useTranslation()
 
 const loading = ref(false)
+const mapExpanded = ref(false)
 const error = ref('')
 const fetchedCall = ref<Call | null>(null)
 
@@ -411,7 +412,11 @@ function getPriorityClass(priority: string | null | undefined): string {
               <div v-if="call.latitude != null && call.longitude != null" class="info-item info-item--full">
                 <label>GPS coordinates</label>
                 <span class="gps-coords">{{ Number(call.latitude).toFixed(6) }}, {{ Number(call.longitude).toFixed(6) }}</span>
-                <div class="map-container">
+                <div class="map-container" :class="{ 'map-container--expanded': mapExpanded }">
+                  <button class="map-expand-btn" type="button" @click="mapExpanded = !mapExpanded">
+                    <Icon :name="mapExpanded ? 'lucide:shrink' : 'lucide:expand'" :size="14" />
+                    {{ mapExpanded ? t('calls.collapse_map') : t('calls.expand_map') }}
+                  </button>
                   <GoogleMap
                     :center="{ lat: Number(call.latitude), lng: Number(call.longitude) }"
                     :zoom="16"
@@ -786,7 +791,33 @@ function getPriorityClass(priority: string | null | undefined): string {
   border-radius: var(--radius-md);
   overflow: hidden;
   margin-top: var(--space-2);
+  transition: height 0.25s ease;
 }
+
+.map-container--expanded {
+  height: 440px;
+}
+
+.map-expand-btn {
+  position: absolute;
+  top: var(--space-2);
+  right: var(--space-2);
+  z-index: 5;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-surface, #fff);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  cursor: pointer;
+  box-shadow: var(--shadow-sm, 0 1px 2px rgba(0, 0, 0, 0.1));
+  transition: all var(--transition-base);
+}
+.map-expand-btn:hover { border-color: var(--color-accent); color: var(--color-accent); }
 
 .description-text {
   font-size: var(--font-size-sm);

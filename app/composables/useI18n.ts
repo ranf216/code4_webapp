@@ -615,6 +615,8 @@ const translations: Record<string, Record<string, string>> = {
     'calls.confirmation_short': 'Confirmation',
     'calls.officer_comments_short': 'Comments',
     'calls.resident_feedback_short': 'Feedback',
+    'calls.expand_map': 'Expand map',
+    'calls.collapse_map': 'Collapse map',
     'calls.call_details_title': 'Call Details',
     'calls.call_info': 'Call Information',
     'calls.call_datetime': 'Call Date & Time',
