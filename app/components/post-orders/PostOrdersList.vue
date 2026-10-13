@@ -384,7 +384,7 @@ onUnmounted(() => {
                 </NuxtLink>
                 <NuxtLink
                   v-if="po.status !== 'archived'"
-                  :to="`/post-orders/${po.post_order_id}`"
+                  :to="`/post-orders/${po.post_order_id}/edit`"
                   class="action-btn action-btn--icon"
                   :title="t('common.edit')"
                   @click.stop

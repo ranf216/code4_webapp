@@ -140,6 +140,7 @@ const label = computed((): string => {
     const labels: Record<string, string> = {
       incident: 'Incident',
       daily_activity: 'Daily Activity',
+      custom: 'Custom',
     }
     return labels[String(props.value)] || String(props.value)
   }
@@ -511,27 +512,27 @@ const badgeClass = computed((): string => {
 
 /* POI Threat variants */
 .badge--poi-threat-low {
-  background: rgba(148, 163, 184, 0.12);
-  color: #94a3b8;
-  border: 1px solid rgba(148, 163, 184, 0.25);
+  background: rgba(33, 150, 243, 0.15);
+  color: #ffffff;
+  border: 1px solid rgba(33, 150, 243, 0.3);
 }
 
 .badge--poi-threat-medium {
-  background: rgba(234, 179, 8, 0.15);
-  color: #ca8a04;
-  border: 1px solid rgba(234, 179, 8, 0.3);
+  background: #ffc107;
+  color: #333333;
+  border: 1px solid rgba(255, 193, 7, 0.5);
 }
 
 .badge--poi-threat-high {
-  background: rgba(249, 115, 22, 0.15);
-  color: #ea580c;
-  border: 1px solid rgba(249, 115, 22, 0.3);
+  background: rgba(255, 152, 0, 0.9);
+  color: #ffffff;
+  border: 1px solid rgba(255, 152, 0, 0.4);
 }
 
 .badge--poi-threat-critical {
-  background: rgba(239, 68, 68, 0.15);
-  color: #ef4444;
-  border: 1px solid rgba(239, 68, 68, 0.3);
+  background: rgba(244, 67, 54, 0.9);
+  color: #ffffff;
+  border: 1px solid rgba(244, 67, 54, 0.4);
 }
 
 /* POI Status variants */
@@ -554,9 +555,9 @@ const badgeClass = computed((): string => {
 }
 
 .badge--poi-status-inactive {
-  background: rgba(139, 92, 246, 0.12);
-  color: #a78bfa;
-  border: 1px solid rgba(139, 92, 246, 0.25);
+  background: #ffebee;
+  color: #c62828;
+  border: 1px solid rgba(198, 40, 40, 0.2);
 }
 
 .badge--poi-status-archived {
@@ -567,21 +568,21 @@ const badgeClass = computed((): string => {
 
 /* Template Status variants */
 .badge--tpl-status-active {
-  background: rgba(34, 197, 94, 0.15);
-  color: #22c55e;
-  border: 1px solid rgba(34, 197, 94, 0.3);
+  background: rgba(16, 185, 129, 0.15);
+  color: #10b981;
+  border: 1px solid rgba(16, 185, 129, 0.3);
 }
 
 .badge--tpl-status-draft {
-  background: rgba(234, 179, 8, 0.15);
-  color: #ca8a04;
-  border: 1px solid rgba(234, 179, 8, 0.3);
-}
-
-.badge--tpl-status-archived {
   background: rgba(107, 114, 128, 0.12);
   color: #6b7280;
   border: 1px solid rgba(107, 114, 128, 0.25);
+}
+
+.badge--tpl-status-archived {
+  background: rgba(245, 158, 11, 0.15);
+  color: #f59e0b;
+  border: 1px solid rgba(245, 158, 11, 0.3);
 }
 
 /* Template Category variants */
@@ -592,9 +593,15 @@ const badgeClass = computed((): string => {
 }
 
 .badge--tpl-cat-daily_activity {
-  background: rgba(99, 102, 241, 0.12);
-  color: #6366f1;
-  border: 1px solid rgba(99, 102, 241, 0.25);
+  background: rgba(59, 130, 246, 0.12);
+  color: #3b82f6;
+  border: 1px solid rgba(59, 130, 246, 0.25);
+}
+
+.badge--tpl-cat-custom {
+  background: rgba(139, 92, 246, 0.12);
+  color: #8b5cf6;
+  border: 1px solid rgba(139, 92, 246, 0.25);
 }
 
 /* Officer Role */

@@ -1,158 +1,318 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
+import AppButton from '~/components/AppButton.vue'
+import AppDialogModal from '~/components/AppDialogModal.vue'
+import { reportTemplateApi } from '~/api/reportTemplate'
+import { communityApi } from '~/api/community'
+import { useToastStore } from '~/stores/toast'
+import { utcToLocal } from '~/utils/dateTime'
+import type { Community } from '~/api/community'
+import type {
+  ReportTemplateListItem,
+  ReportTemplateCategory,
+  ReportTemplateStatus,
+} from '~/api/types/reportTemplate'
 
-type TemplateStatus = 'draft' | 'active' | 'archived'
-type ReportCategory = 'incident' | 'daily_activity'
-
-interface ReportTemplate {
-  id: string
-  name: string
-  community: string
-  category: ReportCategory
-  sectionsCount: number
-  status: TemplateStatus
-  lastModified: string
-}
+type SortBy = 'name' | 'category' | 'status' | 'last_modified'
+type StatusTab = 'all' | ReportTemplateStatus
 
 const { t } = useTranslation()
 const router = useRouter()
+const route = useRoute()
+const toastStore = useToastStore()
+
+const templates = ref<ReportTemplateListItem[]>([])
+const numOfItems = ref(0)
+const numOfPages = ref(0)
+const loading = ref(false)
+const error = ref('')
 
 const searchQuery = ref('')
-const filterStatus = ref<TemplateStatus | 'all'>('all')
-const filterCategory = ref<ReportCategory | 'all'>('all')
+const filterCommunity = ref<number | ''>('')
+const filterCategory = ref<ReportTemplateCategory | ''>('')
+const sortBy = ref<SortBy>('name')
+const sortDir = ref<'asc' | 'desc'>('asc')
+const page = ref(0)
 
-const showArchiveModal = ref(false)
-const archiveTargetId = ref<string | null>(null)
-const isArchiving = ref(false)
+const communities = ref<Community[]>([])
+const tabCounts = ref<Record<StatusTab, number>>({ all: 0, draft: 0, active: 0, archived: 0 })
 
-const DEMO_TEMPLATES: ReportTemplate[] = [
-  {
-    id: 'TPL-001',
-    name: 'Standard Incident Report',
-    community: 'Global',
-    category: 'incident',
-    sectionsCount: 6,
-    status: 'active',
-    lastModified: '2026-06-20T09:14:00Z',
-  },
-  {
-    id: 'TPL-002',
-    name: 'Daily Activity Log',
-    community: 'Sunset Heights',
-    category: 'daily_activity',
-    sectionsCount: 4,
-    status: 'active',
-    lastModified: '2026-06-18T14:30:00Z',
-  },
-  {
-    id: 'TPL-003',
-    name: 'Trespass Incident',
-    community: 'Central Hub',
-    category: 'incident',
-    sectionsCount: 5,
-    status: 'draft',
-    lastModified: '2026-06-25T11:00:00Z',
-  },
-  {
-    id: 'TPL-004',
-    name: 'Site Observation Report',
-    community: 'Green Valley',
-    category: 'daily_activity',
-    sectionsCount: 3,
-    status: 'archived',
-    lastModified: '2026-05-10T08:00:00Z',
-  },
-  {
-    id: 'TPL-005',
-    name: 'Vehicle Incident Report',
-    community: 'Global',
-    category: 'incident',
-    sectionsCount: 7,
-    status: 'active',
-    lastModified: '2026-06-22T16:45:00Z',
-  },
+interface TabConfig {
+  id: StatusTab
+  label: string
+  icon: string
+}
+
+const tabs: TabConfig[] = [
+  { id: 'all', label: t('reports.tab_all'), icon: 'lucide:layers' },
+  { id: 'active', label: t('reports.status_active'), icon: 'lucide:check-circle-2' },
+  { id: 'draft', label: t('reports.tab_drafts'), icon: 'lucide:file-edit' },
+  { id: 'archived', label: t('reports.status_archived'), icon: 'lucide:archive' },
 ]
 
-const templates = ref<ReportTemplate[]>([...DEMO_TEMPLATES])
+const validTabIds = tabs.map(tab => tab.id)
 
-const filteredTemplates = computed(() => {
-  return templates.value.filter((tpl) => {
-    const q = searchQuery.value.toLowerCase()
-    if (q && !`${tpl.name} ${tpl.community} ${tpl.id}`.toLowerCase().includes(q)) return false
-    if (filterStatus.value !== 'all' && tpl.status !== filterStatus.value) return false
-    if (filterCategory.value !== 'all' && tpl.category !== filterCategory.value) return false
-    return true
-  })
+const activeTab = ref<StatusTab>(
+  validTabIds.includes(route.query.tab as StatusTab) ? (route.query.tab as StatusTab) : 'active'
+)
+
+watch(() => route.query.tab, (tab: unknown) => {
+  const next = validTabIds.includes(tab as StatusTab) ? (tab as StatusTab) : 'active'
+  if (next === activeTab.value) return
+  activeTab.value = next
+  page.value = 0
+  fetchTemplates()
 })
 
-function formatDate(iso: string) {
-  return new Date(iso).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
+function setTab(tab: StatusTab) {
+  if (tab === activeTab.value) return
+  activeTab.value = tab
+  page.value = 0
+  fetchTemplates()
+  router.replace({ query: { ...route.query, tab } })
 }
 
-function navigateToNew() {
-  router.push('/reports/new')
-}
+const communityOptions = computed(() => [
+  { value: '' as const, label: t('reports.filter_all_communities') },
+  ...communities.value.map((c: Community) => ({ value: c.community_id as number, label: c.name })),
+])
 
-function navigateToEdit(id: string) {
-  router.push(`/reports/${id}/edit`)
-}
+const categoryOptions = computed<{ value: ReportTemplateCategory | ''; label: string }[]>(() => [
+  { value: '', label: t('reports.filter_all_categories') },
+  { value: 'incident', label: t('reports.category_incident') },
+  { value: 'daily_activity', label: t('reports.category_daily') },
+  { value: 'custom', label: t('reports.category_custom') },
+])
 
-function duplicateTemplate(id: string) {
-  const src = templates.value.find(tpl => tpl.id === id)
-  if (!src) return
-  const newId = `TPL-${String(templates.value.length + 1).padStart(3, '0')}`
-  templates.value.unshift({
-    ...src,
-    id: newId,
-    name: `${src.name} (Copy)`,
-    status: 'draft',
-    lastModified: new Date().toISOString(),
-  })
-}
+let searchTimer: ReturnType<typeof setTimeout> | null = null
+watch(searchQuery, () => {
+  if (searchTimer) clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => {
+    page.value = 0
+    fetchTemplates()
+  }, 300)
+})
 
-function openArchiveModal(id: string) {
-  archiveTargetId.value = id
-  showArchiveModal.value = true
-}
+watch([filterCommunity, filterCategory], () => {
+  page.value = 0
+  fetchTemplates()
+})
 
-function confirmArchive() {
-  isArchiving.value = true
-  setTimeout(() => {
-    const idx = templates.value.findIndex(tpl => tpl.id === archiveTargetId.value)
-    if (idx !== -1) {
-      const existing = templates.value[idx]
-      if (existing) templates.value[idx] = { ...existing, status: 'archived' }
+watch(page, () => fetchTemplates())
+
+async function fetchTabCounts() {
+  try {
+    const results = await Promise.all([
+      reportTemplateApi.getTemplatesList({ status: undefined, page: 0 }, { showLoading: false }),
+      reportTemplateApi.getTemplatesList({ status: 'draft', page: 0 }, { showLoading: false }),
+      reportTemplateApi.getTemplatesList({ status: 'active', page: 0 }, { showLoading: false }),
+      reportTemplateApi.getTemplatesList({ status: 'archived', page: 0 }, { showLoading: false }),
+    ])
+    tabCounts.value = {
+      all: results[0].num_of_items ?? 0,
+      draft: results[1].num_of_items ?? 0,
+      active: results[2].num_of_items ?? 0,
+      archived: results[3].num_of_items ?? 0,
     }
-    isArchiving.value = false
-    showArchiveModal.value = false
-    archiveTargetId.value = null
-  }, 500)
-}
-
-function restoreTemplate(id: string) {
-  const idx = templates.value.findIndex(tpl => tpl.id === id)
-  if (idx !== -1) {
-    const existing = templates.value[idx]
-    if (existing) templates.value[idx] = { ...existing, status: 'active' }
+  } catch {
+    // counts are best-effort
   }
 }
 
-function navigateToFormat(id: string) {
-  router.push(`/reports/${id}/format`)
+async function fetchTemplates() {
+  loading.value = true
+  error.value = ''
+  try {
+    const response = await reportTemplateApi.getTemplatesList(
+      {
+        status: activeTab.value === 'all' ? undefined : activeTab.value,
+        community_id: filterCommunity.value === '' ? undefined : filterCommunity.value,
+        category: filterCategory.value || undefined,
+        search_text: searchQuery.value.trim() || undefined,
+        sort_by: sortBy.value,
+        sort_dir: sortDir.value,
+        page: page.value,
+      },
+      { showLoading: false }
+    )
+    templates.value = response.templates ?? []
+    numOfItems.value = response.num_of_items ?? 0
+    numOfPages.value = response.num_of_pages ?? 0
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : 'Failed to load templates'
+    toastStore.error(error.value)
+  } finally {
+    loading.value = false
+  }
 }
 
-const statusOptions: { value: TemplateStatus | 'all'; label: string }[] = [
-  { value: 'all', label: 'All Statuses' },
-  { value: 'active', label: 'Active' },
-  { value: 'draft', label: 'Draft' },
-  { value: 'archived', label: 'Archived' },
-]
+function refresh() {
+  fetchTemplates()
+  fetchTabCounts()
+}
 
-const categoryOptions: { value: ReportCategory | 'all'; label: string }[] = [
-  { value: 'all', label: 'All Categories' },
-  { value: 'incident', label: 'Incident' },
-  { value: 'daily_activity', label: 'Daily Activity' },
-]
+function toggleSort(col: SortBy) {
+  if (sortBy.value === col) {
+    sortDir.value = sortDir.value === 'asc' ? 'desc' : 'asc'
+  } else {
+    sortBy.value = col
+    sortDir.value = 'asc'
+  }
+  page.value = 0
+  fetchTemplates()
+}
+
+function formatLastModified(dateStr: string | null): string {
+  if (!dateStr) return '—'
+  return utcToLocal(dateStr).fromNow()
+}
+
+function communitiesLabel(tpl: ReportTemplateListItem): string {
+  return (tpl.communities ?? []).map(c => c.community_name).join(', ')
+}
+
+// ── Navigation ──
+function navigateToNew() {
+  router.push('/report-templates/new')
+}
+
+function navigateToEdit(tpl: ReportTemplateListItem) {
+  router.push(`/report-templates/${tpl.template_id}/edit`)
+}
+
+// ── Actions ──
+const canEdit = (tpl: ReportTemplateListItem) => tpl.status !== 'archived'
+const canActivate = (tpl: ReportTemplateListItem) => tpl.status === 'draft' || tpl.status === 'archived'
+const canArchive = (tpl: ReportTemplateListItem) => tpl.status === 'draft' || tpl.status === 'active'
+const canDelete = (tpl: ReportTemplateListItem) => tpl.status === 'draft'
+
+const duplicatingId = ref<number | null>(null)
+const actionLoadingId = ref<number | null>(null)
+
+async function duplicateTemplate(tpl: ReportTemplateListItem) {
+  duplicatingId.value = tpl.template_id
+  try {
+    const response = await reportTemplateApi.duplicateTemplate(tpl.template_id)
+    toastStore.success(t('reports.duplicate_success'))
+    const newId = response.template_id
+    if (newId) {
+      router.push(`/report-templates/${newId}/edit`)
+    } else {
+      refresh()
+    }
+  } catch (err) {
+    toastStore.error(err instanceof Error ? err.message : 'Failed to duplicate template')
+  } finally {
+    duplicatingId.value = null
+  }
+}
+
+// ── Activate modal ──
+const showActivateModal = ref(false)
+const activateTarget = ref<ReportTemplateListItem | null>(null)
+
+function openActivateModal(tpl: ReportTemplateListItem) {
+  activateTarget.value = tpl
+  showActivateModal.value = true
+}
+
+function closeActivateModal() {
+  showActivateModal.value = false
+  activateTarget.value = null
+}
+
+async function confirmActivate() {
+  if (!activateTarget.value) return
+  actionLoadingId.value = activateTarget.value.template_id
+  try {
+    await reportTemplateApi.activateTemplate(activateTarget.value.template_id)
+    toastStore.success(t('reports.activate_success'))
+    closeActivateModal()
+    refresh()
+  } catch (err) {
+    toastStore.error(err instanceof Error ? err.message : 'Failed to activate template')
+  } finally {
+    actionLoadingId.value = null
+  }
+}
+
+// ── Archive modal ──
+const showArchiveModal = ref(false)
+const archiveTarget = ref<ReportTemplateListItem | null>(null)
+
+function openArchiveModal(tpl: ReportTemplateListItem) {
+  archiveTarget.value = tpl
+  showArchiveModal.value = true
+}
+
+function closeArchiveModal() {
+  showArchiveModal.value = false
+  archiveTarget.value = null
+}
+
+async function confirmArchive() {
+  if (!archiveTarget.value) return
+  actionLoadingId.value = archiveTarget.value.template_id
+  try {
+    await reportTemplateApi.archiveTemplate(archiveTarget.value.template_id)
+    toastStore.success(t('reports.archive_success'))
+    closeArchiveModal()
+    refresh()
+  } catch (err) {
+    toastStore.error(err instanceof Error ? err.message : 'Failed to archive template')
+  } finally {
+    actionLoadingId.value = null
+  }
+}
+
+// ── Delete modal ──
+const showDeleteModal = ref(false)
+const deleteTarget = ref<ReportTemplateListItem | null>(null)
+
+function openDeleteModal(tpl: ReportTemplateListItem) {
+  deleteTarget.value = tpl
+  showDeleteModal.value = true
+}
+
+function closeDeleteModal() {
+  showDeleteModal.value = false
+  deleteTarget.value = null
+}
+
+async function confirmDelete() {
+  if (!deleteTarget.value) return
+  actionLoadingId.value = deleteTarget.value.template_id
+  try {
+    await reportTemplateApi.deleteTemplate(deleteTarget.value.template_id)
+    toastStore.success(t('reports.delete_success'))
+    closeDeleteModal()
+    refresh()
+  } catch (err) {
+    toastStore.error(err instanceof Error ? err.message : 'Failed to delete template')
+  } finally {
+    actionLoadingId.value = null
+  }
+}
+
+// ── Pagination ──
+const hasPrev = computed(() => page.value > 0)
+const hasNext = computed(() => page.value + 1 < numOfPages.value)
+
+function prevPage() {
+  if (hasPrev.value) page.value -= 1
+}
+
+function nextPage() {
+  if (hasNext.value) page.value += 1
+}
+
+onMounted(() => {
+  fetchTemplates()
+  fetchTabCounts()
+  communityApi.getCommunities({ include_inactive: false }, { showLoading: false })
+    .then(res => { communities.value = res.communities ?? [] })
+    .catch(() => {})
+})
 </script>
 
 <template>
@@ -163,9 +323,27 @@ const categoryOptions: { value: ReportCategory | 'all'; label: string }[] = [
         <h1 class="tpl-list__title">{{ t('reports.title') }}</h1>
         <p class="tpl-list__subtitle">{{ t('reports.subtitle') }}</p>
       </div>
-      <button class="btn-primary" @click="navigateToNew">
-        <Icon name="lucide:plus" :size="15" />
-        {{ t('reports.add_new') }}
+      <AppButton
+        :text="t('reports.add_new')"
+        icon="lucide:plus"
+        type="primary"
+        size="md"
+        @click="navigateToNew"
+      />
+    </div>
+
+    <!-- Status tabs -->
+    <div class="tpl-list__tabs">
+      <button
+        v-for="tab in tabs"
+        :key="tab.id"
+        class="tpl-tab"
+        :class="{ 'tpl-tab--active': activeTab === tab.id }"
+        @click="setTab(tab.id)"
+      >
+        <Icon :name="tab.icon" :size="15" />
+        <span>{{ tab.label }}</span>
+        <span v-if="tabCounts[tab.id] > 0" class="tpl-tab__count">{{ tabCounts[tab.id] }}</span>
       </button>
     </div>
 
@@ -180,13 +358,13 @@ const categoryOptions: { value: ReportCategory | 'all'; label: string }[] = [
           :placeholder="t('reports.search_placeholder')"
         />
       </div>
-      <select v-model="filterStatus" class="filter-select">
-        <option v-for="opt in statusOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
+      <select v-model="filterCommunity" class="filter-select">
+        <option v-for="opt in communityOptions" :key="String(opt.value)" :value="opt.value">{{ opt.label }}</option>
       </select>
       <select v-model="filterCategory" class="filter-select">
         <option v-for="opt in categoryOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
       </select>
-      <span class="total-count">{{ filteredTemplates.length }} {{ t('reports.count') }}</span>
+      <span class="total-count">{{ numOfItems }} {{ t('reports.count') }}</span>
     </div>
 
     <!-- Table -->
@@ -194,17 +372,64 @@ const categoryOptions: { value: ReportCategory | 'all'; label: string }[] = [
       <table class="tpl-table">
         <thead>
           <tr>
-            <th class="col-name">{{ t('reports.col_name') }}</th>
+            <th class="col-name sortable" @click="toggleSort('name')">
+              {{ t('reports.col_name') }}
+              <Icon
+                v-if="sortBy === 'name'"
+                :name="sortDir === 'asc' ? 'lucide:arrow-up' : 'lucide:arrow-down'"
+                :size="12"
+                class="sort-icon"
+              />
+            </th>
             <th class="col-community">{{ t('reports.col_community') }}</th>
-            <th class="col-category">{{ t('reports.col_category') }}</th>
+            <th class="col-category sortable" @click="toggleSort('category')">
+              {{ t('reports.col_category') }}
+              <Icon
+                v-if="sortBy === 'category'"
+                :name="sortDir === 'asc' ? 'lucide:arrow-up' : 'lucide:arrow-down'"
+                :size="12"
+                class="sort-icon"
+              />
+            </th>
             <th class="col-sections">{{ t('reports.col_sections') }}</th>
-            <th class="col-status">{{ t('reports.col_status') }}</th>
-            <th class="col-modified">{{ t('reports.col_modified') }}</th>
+            <th class="col-status sortable" @click="toggleSort('status')">
+              {{ t('reports.col_status') }}
+              <Icon
+                v-if="sortBy === 'status'"
+                :name="sortDir === 'asc' ? 'lucide:arrow-up' : 'lucide:arrow-down'"
+                :size="12"
+                class="sort-icon"
+              />
+            </th>
+            <th class="col-modified sortable" @click="toggleSort('last_modified')">
+              {{ t('reports.col_modified') }}
+              <Icon
+                v-if="sortBy === 'last_modified'"
+                :name="sortDir === 'asc' ? 'lucide:arrow-up' : 'lucide:arrow-down'"
+                :size="12"
+                class="sort-icon"
+              />
+            </th>
             <th class="col-actions">{{ t('common.actions') }}</th>
           </tr>
         </thead>
         <tbody>
-          <tr v-if="filteredTemplates.length === 0">
+          <tr v-if="loading">
+            <td colspan="7" class="empty-row">
+              <div class="empty-state">
+                <Icon name="lucide:loader-2" :size="28" class="spin" />
+              </div>
+            </td>
+          </tr>
+          <tr v-else-if="error">
+            <td colspan="7" class="empty-row">
+              <div class="empty-state">
+                <Icon name="lucide:alert-circle" :size="32" class="empty-state__icon" />
+                <p>{{ error }}</p>
+              </div>
+            </td>
+          </tr>
+          <tr v-else-if="templates.length === 0">
             <td colspan="7" class="empty-row">
               <div class="empty-state">
                 <Icon name="lucide:file-x" :size="32" class="empty-state__icon" />
@@ -213,25 +438,25 @@ const categoryOptions: { value: ReportCategory | 'all'; label: string }[] = [
             </td>
           </tr>
           <tr
-            v-for="tpl in filteredTemplates"
-            :key="tpl.id"
+            v-for="tpl in templates"
+            :key="tpl.template_id"
             class="tpl-row"
             :class="{ 'tpl-row--archived': tpl.status === 'archived' }"
-            @click="navigateToEdit(tpl.id)"
+            @click="canEdit(tpl) && navigateToEdit(tpl)"
           >
             <td class="col-name">
               <div class="tpl-name">
                 <Icon name="lucide:file-text" :size="15" class="tpl-name__icon" />
                 <span class="tpl-name__text">{{ tpl.name }}</span>
               </div>
-              <span class="tpl-id">{{ tpl.id }}</span>
+              <span class="tpl-id">TPL-{{ tpl.template_id }}</span>
             </td>
             <td class="col-community">
-              <span v-if="tpl.community === 'Global'" class="community-global">
+              <span v-if="tpl.is_global" class="community-global">
                 <Icon name="lucide:globe" :size="12" />
                 Global
               </span>
-              <span v-else class="community-name">{{ tpl.community }}</span>
+              <span v-else class="community-name">{{ communitiesLabel(tpl) || '—' }}</span>
             </td>
             <td class="col-category">
               <Badge type="templateCategory" :value="tpl.category" />
@@ -239,42 +464,67 @@ const categoryOptions: { value: ReportCategory | 'all'; label: string }[] = [
             <td class="col-sections">
               <span class="sections-count">
                 <Icon name="lucide:layers" :size="12" />
-                {{ tpl.sectionsCount }}
+                {{ tpl.section_count }}
               </span>
             </td>
             <td class="col-status">
               <Badge type="templateStatus" :value="tpl.status" />
             </td>
             <td class="col-modified">
-              <span class="modified-date">{{ formatDate(tpl.lastModified) }}</span>
+              <span class="modified-date">{{ formatLastModified(tpl.last_modified) }}</span>
             </td>
             <td class="col-actions" @click.stop>
               <div class="action-group">
-                <button class="action-btn" :title="t('common.edit')" @click.stop="navigateToEdit(tpl.id)">
-                  <Icon name="lucide:pencil" :size="14" />
-                </button>
-                <button class="action-btn" :title="t('reports.action_duplicate')" @click.stop="duplicateTemplate(tpl.id)">
-                  <Icon name="lucide:copy" :size="14" />
-                </button>
-                <button class="action-btn" :title="t('reports.action_format')" @click.stop="navigateToFormat(tpl.id)">
-                  <Icon name="lucide:sliders" :size="14" />
-                </button>
-                <button
-                  v-if="tpl.status !== 'archived'"
-                  class="action-btn action-btn--danger"
+                <AppButton
+                  v-if="canEdit(tpl)"
+                  type="ghost"
+                  size="sm"
+                  icon="lucide:pencil"
+                  text=""
+                  :icon-only="true"
+                  :title="t('common.edit')"
+                  @click="navigateToEdit(tpl)"
+                />
+                <AppButton
+                  type="ghost"
+                  size="sm"
+                  icon="lucide:copy"
+                  text=""
+                  :icon-only="true"
+                  :title="t('reports.action_duplicate')"
+                  :loading="duplicatingId === tpl.template_id"
+                  @click="duplicateTemplate(tpl)"
+                />
+                <AppButton
+                  v-if="canActivate(tpl)"
+                  type="ghost"
+                  size="sm"
+                  icon="lucide:check-circle-2"
+                  text=""
+                  :icon-only="true"
+                  :title="t('reports.action_activate')"
+                  @click="openActivateModal(tpl)"
+                />
+                <AppButton
+                  v-if="canArchive(tpl)"
+                  type="ghost"
+                  size="sm"
+                  icon="lucide:archive"
+                  text=""
+                  :icon-only="true"
                   :title="t('reports.action_archive')"
-                  @click.stop="openArchiveModal(tpl.id)"
-                >
-                  <Icon name="lucide:archive" :size="14" />
-                </button>
-                <button
-                  v-else
-                  class="action-btn action-btn--ok"
-                  :title="t('reports.action_restore')"
-                  @click.stop="restoreTemplate(tpl.id)"
-                >
-                  <Icon name="lucide:archive-restore" :size="14" />
-                </button>
+                  @click="openArchiveModal(tpl)"
+                />
+                <AppButton
+                  v-if="canDelete(tpl)"
+                  type="ghost"
+                  size="sm"
+                  icon="lucide:trash-2"
+                  text=""
+                  :icon-only="true"
+                  :title="t('reports.action_delete')"
+                  @click="openDeleteModal(tpl)"
+                />
               </div>
             </td>
           </tr>
@@ -282,28 +532,95 @@ const categoryOptions: { value: ReportCategory | 'all'; label: string }[] = [
       </table>
     </div>
 
-    <!-- Archive Modal -->
-    <Teleport to="body">
-      <div v-if="showArchiveModal" class="modal-overlay" @click.self="showArchiveModal = false">
-        <div class="modal">
-          <div class="modal__header">
-            <Icon name="lucide:archive" :size="18" class="modal__icon--warn" />
-            <h3 class="modal__title">{{ t('reports.modal_archive_title') }}</h3>
-          </div>
-          <div class="modal__body">
-            <p class="modal__desc">{{ t('reports.modal_archive_desc') }}</p>
-          </div>
-          <div class="modal__footer">
-            <button class="btn-cancel" @click="showArchiveModal = false">{{ t('common.cancel') }}</button>
-            <button class="btn-warn" :disabled="isArchiving" @click="confirmArchive">
-              <Icon v-if="isArchiving" name="lucide:loader-2" :size="14" class="spin" />
-              <Icon v-else name="lucide:archive" :size="14" />
-              {{ t('reports.modal_archive_confirm') }}
-            </button>
-          </div>
-        </div>
+    <!-- Pagination -->
+    <div v-if="numOfPages > 1 || numOfItems > 0" class="tpl-list__pagination">
+      <span class="pagination-info">
+        {{ t('reports.page_info', { page: String(page + 1), pages: String(numOfPages) }) }}
+      </span>
+      <div class="pagination-controls">
+        <AppButton
+          type="secondary"
+          size="sm"
+          icon="lucide:chevron-left"
+          text=""
+          :icon-only="true"
+          :disabled="!hasPrev"
+          @click="prevPage"
+        />
+        <AppButton
+          type="secondary"
+          size="sm"
+          icon="lucide:chevron-right"
+          text=""
+          :icon-only="true"
+          :disabled="!hasNext"
+          @click="nextPage"
+        />
       </div>
-    </Teleport>
+    </div>
+
+    <!-- Activate Modal -->
+    <AppDialogModal
+      :show="showActivateModal"
+      :title="t('reports.modal_activate_title')"
+      max-width="480px"
+      @close="closeActivateModal"
+    >
+      <p class="modal__desc">{{ t('reports.modal_activate_desc') }}</p>
+      <template #footer>
+        <AppButton :text="t('common.cancel')" type="secondary" size="sm" @click="closeActivateModal" />
+        <AppButton
+          :text="t('reports.modal_activate_confirm')"
+          icon="lucide:check-circle-2"
+          type="primary"
+          size="sm"
+          :loading="actionLoadingId === activateTarget?.template_id"
+          @click="confirmActivate"
+        />
+      </template>
+    </AppDialogModal>
+
+    <!-- Archive Modal -->
+    <AppDialogModal
+      :show="showArchiveModal"
+      :title="t('reports.modal_archive_title')"
+      max-width="480px"
+      @close="closeArchiveModal"
+    >
+      <p class="modal__desc">{{ t('reports.modal_archive_desc') }}</p>
+      <template #footer>
+        <AppButton :text="t('common.cancel')" type="secondary" size="sm" @click="closeArchiveModal" />
+        <AppButton
+          :text="t('reports.modal_archive_confirm')"
+          icon="lucide:archive"
+          type="danger"
+          size="sm"
+          :loading="actionLoadingId === archiveTarget?.template_id"
+          @click="confirmArchive"
+        />
+      </template>
+    </AppDialogModal>
+
+    <!-- Delete Modal -->
+    <AppDialogModal
+      :show="showDeleteModal"
+      :title="t('reports.modal_delete_title')"
+      max-width="480px"
+      @close="closeDeleteModal"
+    >
+      <p class="modal__desc">{{ t('reports.modal_delete_desc') }}</p>
+      <template #footer>
+        <AppButton :text="t('common.cancel')" type="secondary" size="sm" @click="closeDeleteModal" />
+        <AppButton
+          :text="t('reports.modal_delete_confirm')"
+          icon="lucide:trash-2"
+          type="danger"
+          size="sm"
+          :loading="actionLoadingId === deleteTarget?.template_id"
+          @click="confirmDelete"
+        />
+      </template>
+    </AppDialogModal>
   </div>
 </template>
 
@@ -340,23 +657,54 @@ const categoryOptions: { value: ReportCategory | 'all'; label: string }[] = [
   margin: 0;
 }
 
-/* ── Primary button ── */
-.btn-primary {
+/* ── Tabs ── */
+.tpl-list__tabs {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.tpl-tab {
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
-  padding: var(--space-2) var(--space-4);
-  background: var(--color-accent);
-  color: white;
+  padding: var(--space-3) var(--space-4);
+  background: transparent;
   border: none;
-  border-radius: var(--radius-md);
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  color: var(--color-text-secondary);
   font-size: var(--font-size-sm);
   font-weight: 500;
   cursor: pointer;
-  white-space: nowrap;
-  transition: opacity var(--transition-base);
+  transition: all var(--transition-base);
 }
-.btn-primary:hover { opacity: 0.88; }
+
+.tpl-tab:hover {
+  color: var(--color-text-primary);
+}
+
+.tpl-tab--active {
+  color: var(--color-accent);
+  border-bottom-color: var(--color-accent);
+  background: rgba(229, 255, 68, 0.1);
+}
+
+.tpl-tab__count {
+  padding: 0 var(--space-2);
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-full, 999px);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+}
+
+.tpl-tab--active .tpl-tab__count {
+  background: rgba(229, 255, 68, 0.15);
+  border-color: transparent;
+  color: var(--color-accent);
+}
 
 /* ── Filters ── */
 .tpl-list__filters {
@@ -443,6 +791,20 @@ const categoryOptions: { value: ReportCategory | 'all'; label: string }[] = [
   white-space: nowrap;
 }
 
+.tpl-table th.sortable {
+  cursor: pointer;
+  user-select: none;
+}
+
+.tpl-table th.sortable:hover {
+  color: var(--color-text-primary);
+}
+
+.sort-icon {
+  vertical-align: middle;
+  margin-left: var(--space-1);
+}
+
 .tpl-table td {
   padding: var(--space-3) var(--space-4);
   border-bottom: 1px solid var(--color-border);
@@ -460,12 +822,12 @@ const categoryOptions: { value: ReportCategory | 'all'; label: string }[] = [
 
 /* ── Column widths ── */
 .col-name     { width: 28%; }
-.col-community { width: 14%; }
-.col-category { width: 13%; }
-.col-sections { width: 8%; text-align: center; }
+.col-community { width: 16%; }
+.col-category { width: 12%; }
+.col-sections { width: 9%; text-align: center; }
 .col-status   { width: 10%; }
-.col-modified { width: 12%; }
-.col-actions  { width: 15%; }
+.col-modified { width: 13%; }
+.col-actions  { width: 12%; }
 
 /* ── Template name cell ── */
 .tpl-name {
@@ -483,9 +845,13 @@ const categoryOptions: { value: ReportCategory | 'all'; label: string }[] = [
   display: inline-flex;
   align-items: center;
   gap: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  background: rgba(20, 184, 166, 0.12);
+  color: #14b8a6;
+  border: 1px solid rgba(20, 184, 166, 0.25);
+  border-radius: var(--radius-sm);
   font-size: var(--font-size-xs);
-  color: var(--color-accent);
-  font-weight: 500;
+  font-weight: 600;
 }
 .community-name { color: var(--color-text-secondary); }
 
@@ -510,23 +876,6 @@ const categoryOptions: { value: ReportCategory | 'all'; label: string }[] = [
   gap: var(--space-1);
 }
 
-.action-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: transparent;
-  color: var(--color-text-secondary);
-  cursor: pointer;
-  transition: all var(--transition-base);
-}
-.action-btn:hover { border-color: var(--color-accent); color: var(--color-accent); background: var(--color-bg-elevated); }
-.action-btn--danger:hover { border-color: var(--color-critical); color: var(--color-critical); background: rgba(239,68,68,0.08); }
-.action-btn--ok:hover { border-color: var(--color-ok); color: var(--color-ok); background: rgba(34,197,94,0.08); }
-
 /* ── Empty state ── */
 .empty-row { padding: 0 !important; }
 .empty-state {
@@ -540,74 +889,29 @@ const categoryOptions: { value: ReportCategory | 'all'; label: string }[] = [
 }
 .empty-state__icon { opacity: 0.3; }
 
-/* ── Modal ── */
-.modal-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0,0,0,0.6);
+/* ── Pagination ── */
+.tpl-list__pagination {
   display: flex;
   align-items: center;
-  justify-content: center;
-  z-index: 1000;
-}
-.modal {
-  background: var(--color-bg-surface);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg);
-  width: 400px;
-  max-width: calc(100vw - var(--space-8));
-}
-.modal__header {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-4) var(--space-5);
-  border-bottom: 1px solid var(--color-border);
-}
-.modal__icon--warn { color: var(--color-warn, #f59e0b); }
-.modal__title { font-size: var(--font-size-base); font-weight: 600; color: var(--color-text-primary); margin: 0; }
-.modal__body { padding: var(--space-5); }
-.modal__desc { font-size: var(--font-size-sm); color: var(--color-text-secondary); margin: 0; }
-.modal__footer {
-  display: flex;
-  justify-content: flex-end;
-  gap: var(--space-3);
-  padding: var(--space-4) var(--space-5);
-  border-top: 1px solid var(--color-border);
+  justify-content: space-between;
 }
 
-.btn-cancel {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-2) var(--space-4);
-  border-radius: var(--radius-md);
+.pagination-info {
   font-size: var(--font-size-sm);
-  font-weight: 500;
-  cursor: pointer;
-  background: transparent;
-  border: 1px solid var(--color-border);
+  color: var(--color-text-muted);
+}
+
+.pagination-controls {
+  display: flex;
+  gap: var(--space-2);
+}
+
+/* ── Modal body ── */
+.modal__desc {
   color: var(--color-text-secondary);
-  transition: all var(--transition-base);
-}
-.btn-cancel:hover { border-color: var(--color-text-secondary); color: var(--color-text-primary); }
-
-.btn-warn {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-2) var(--space-4);
-  border-radius: var(--radius-md);
   font-size: var(--font-size-sm);
-  font-weight: 500;
-  cursor: pointer;
-  background: var(--color-warn, #f59e0b);
-  border: none;
-  color: white;
-  transition: opacity var(--transition-base);
+  margin: 0;
 }
-.btn-warn:hover { opacity: 0.88; }
-.btn-warn:disabled { opacity: 0.5; cursor: not-allowed; }
 
 /* ── Spin ── */
 .spin { animation: spin 1s linear infinite; }

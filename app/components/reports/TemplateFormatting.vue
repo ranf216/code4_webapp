@@ -1,51 +1,60 @@
 <script setup lang="ts">
 import { ref, reactive, computed } from 'vue'
-
-type HeaderLayout = 'compact' | 'standard' | 'full_banner'
-type FontOption = 'arial' | 'calibri' | 'times_new_roman'
-type DateFormat = 'MM/DD/YYYY' | 'DD/MM/YYYY' | 'YYYY-MM-DD'
-type SectionBreaks = 'new_page' | 'continuous'
-
-interface StyleSettings {
-  templateId: string
-  templateName: string
-  logoUrl: string | null
-  accentColour: string
-  headerLayout: HeaderLayout
-  font: FontOption
-  pageNumbering: boolean
-  confidentialityFooter: string
-  dateFormat: DateFormat
-  sectionBreaks: SectionBreaks
-  includeCoverPage: boolean
-}
+import AppButton from '~/components/AppButton.vue'
+import { reportTemplateApi } from '~/api/reportTemplate'
+import { useToastStore } from '~/stores/toast'
+import { fileUrl } from '~/utils/fileUrl'
+import { fileToBase64 } from '~/composables/useFileApi'
+import type {
+  ReportTemplateStyle,
+  ReportHeaderLayout,
+  ReportFont,
+  ReportDateFormat,
+  ReportSectionBreaks,
+} from '~/api/types/reportTemplate'
 
 const props = defineProps<{
-  styleSettings: StyleSettings
+  templateId: number
+  templateName: string
+  style: ReportTemplateStyle
 }>()
 
 const { t } = useTranslation()
 const router = useRouter()
+const toastStore = useToastStore()
 
-function buildForm(): StyleSettings {
+interface StyleForm {
+  accentColour: string
+  headerLayout: ReportHeaderLayout
+  font: ReportFont
+  pageNumbering: boolean
+  confidentialityFooter: string
+  dateFormat: ReportDateFormat
+  sectionBreaks: ReportSectionBreaks
+  includeCoverPage: boolean
+}
+
+function buildForm(): StyleForm {
+  const s = props.style
   return {
-    templateId: props.styleSettings.templateId,
-    templateName: props.styleSettings.templateName,
-    logoUrl: props.styleSettings.logoUrl,
-    accentColour: props.styleSettings.accentColour,
-    headerLayout: props.styleSettings.headerLayout,
-    font: props.styleSettings.font,
-    pageNumbering: props.styleSettings.pageNumbering,
-    confidentialityFooter: props.styleSettings.confidentialityFooter,
-    dateFormat: props.styleSettings.dateFormat,
-    sectionBreaks: props.styleSettings.sectionBreaks,
-    includeCoverPage: props.styleSettings.includeCoverPage,
+    accentColour: s.accent_color ?? '',
+    headerLayout: s.header_layout,
+    font: s.font,
+    pageNumbering: s.page_numbering,
+    confidentialityFooter: s.confidentiality_footer ?? '',
+    dateFormat: s.date_format,
+    sectionBreaks: s.section_breaks,
+    includeCoverPage: s.include_cover_page,
   }
 }
 
-const form = reactive<StyleSettings>(buildForm())
+const form = reactive<StyleForm>(buildForm())
+const original = ref<StyleForm>({ ...form })
 const isSubmitting = ref(false)
-const logoPreview = ref<string | null>(form.logoUrl)
+
+// Logo state: null = unchanged, '' = remove, string = new base64 data
+const logoAction = ref<null | '' | string>(null)
+const logoPreview = ref<string | null>(fileUrl(props.style.company_logo) || null)
 const logoFileInput = ref<HTMLInputElement | null>(null)
 
 const PRESET_COLOURS = [
@@ -58,57 +67,98 @@ function onLogoClick() {
   logoFileInput.value?.click()
 }
 
-function onLogoChange(e: Event) {
+async function onLogoChange(e: Event) {
   const file = (e.target as HTMLInputElement).files?.[0]
   if (!file) return
-  const reader = new FileReader()
-  reader.onload = (ev) => {
-    logoPreview.value = ev.target?.result as string
-    form.logoUrl = logoPreview.value
+  try {
+    const base64 = await fileToBase64(file)
+    logoAction.value = base64
+    logoPreview.value = `data:${file.type};base64,${base64}`
+  } catch {
+    toastStore.error(t('fmt.logo_upload_error'))
   }
-  reader.readAsDataURL(file)
 }
 
 function removeLogo() {
+  logoAction.value = ''
   logoPreview.value = null
-  form.logoUrl = null
   if (logoFileInput.value) logoFileInput.value.value = ''
 }
 
-function handleSave() {
+function clearAccent() {
+  form.accentColour = ''
+}
+
+async function handleSave() {
   isSubmitting.value = true
-  console.log('[TemplateFormatting] save', form)
-  setTimeout(() => {
+  try {
+    const payload: Record<string, unknown> = { template_id: props.templateId }
+    if (logoAction.value !== null) payload.company_logo = logoAction.value
+    if (form.accentColour !== original.value.accentColour) payload.accent_color = form.accentColour
+    if (form.headerLayout !== original.value.headerLayout) payload.header_layout = form.headerLayout
+    if (form.font !== original.value.font) payload.font = form.font
+    if (form.pageNumbering !== original.value.pageNumbering) payload.page_numbering = form.pageNumbering
+    if (form.confidentialityFooter !== original.value.confidentialityFooter) payload.confidentiality_footer = form.confidentialityFooter
+    if (form.dateFormat !== original.value.dateFormat) payload.date_format = form.dateFormat
+    if (form.sectionBreaks !== original.value.sectionBreaks) payload.section_breaks = form.sectionBreaks
+    if (form.includeCoverPage !== original.value.includeCoverPage) payload.include_cover_page = form.includeCoverPage
+
+    const res = await reportTemplateApi.updateTemplateStyle(
+      payload as Parameters<typeof reportTemplateApi.updateTemplateStyle>[0]
+    )
+    // Refresh local state from the returned style object
+    if (res.style) {
+      Object.assign(form, {
+        accentColour: res.style.accent_color ?? '',
+        headerLayout: res.style.header_layout,
+        font: res.style.font,
+        pageNumbering: res.style.page_numbering,
+        confidentialityFooter: res.style.confidentiality_footer ?? '',
+        dateFormat: res.style.date_format,
+        sectionBreaks: res.style.section_breaks,
+        includeCoverPage: res.style.include_cover_page,
+      })
+      original.value = { ...form }
+      logoAction.value = null
+      if (res.style.company_logo) {
+        logoPreview.value = fileUrl(res.style.company_logo)
+      } else {
+        logoPreview.value = null
+      }
+    }
+    toastStore.success(t('fmt.save_success'))
+  } catch (err) {
+    toastStore.error(err instanceof Error ? err.message : 'Failed to save style settings')
+  } finally {
     isSubmitting.value = false
-    router.push('/reports')
-  }, 700)
+  }
 }
 
 function handleCancel() {
-  router.push('/reports')
+  router.push(`/report-templates/${props.templateId}/edit`)
 }
 
 const accentPreview = computed(() => form.accentColour || '#1d4ed8')
 
-const headerLayouts: { value: HeaderLayout; label: string; desc: string; icon: string }[] = [
-  { value: 'compact',     label: 'Compact',          desc: 'Logo + title on one line',              icon: 'lucide:layout-template' },
-  { value: 'standard',    label: 'Standard',          desc: 'Logo left, title & metadata right',     icon: 'lucide:layout-dashboard' },
-  { value: 'full_banner', label: 'Full-Width Banner',  desc: 'Logo and title in a wide header strip', icon: 'lucide:layout-panel-top' },
+const headerLayouts: { value: ReportHeaderLayout; label: string; desc: string; icon: string }[] = [
+  { value: 'compact',           label: 'Compact',           desc: 'Logo + title on one line',              icon: 'lucide:layout-template' },
+  { value: 'standard',          label: 'Standard',           desc: 'Logo left, title & metadata right',     icon: 'lucide:layout-dashboard' },
+  { value: 'full_width_banner', label: 'Full-Width Banner',  desc: 'Logo and title in a wide header strip', icon: 'lucide:layout-panel-top' },
 ]
 
-const fontOptions: { value: FontOption; label: string }[] = [
+const fontOptions: { value: ReportFont; label: string }[] = [
   { value: 'arial',             label: 'Arial (default)' },
   { value: 'calibri',           label: 'Calibri' },
   { value: 'times_new_roman',   label: 'Times New Roman' },
 ]
 
-const dateFormats: { value: DateFormat; label: string }[] = [
-  { value: 'MM/DD/YYYY',  label: 'MM/DD/YYYY' },
-  { value: 'DD/MM/YYYY',  label: 'DD/MM/YYYY' },
-  { value: 'YYYY-MM-DD',  label: 'YYYY-MM-DD' },
+const dateFormats: { value: ReportDateFormat; label: string }[] = [
+  { value: 'mm_dd_yyyy', label: 'MM/DD/YYYY' },
+  { value: 'dd_mm_yyyy', label: 'DD/MM/YYYY' },
+  { value: 'yyyy_mm_dd', label: 'YYYY-MM-DD' },
 ]
 
-const sectionBreakOptions: { value: SectionBreaks; label: string; desc: string }[] = [
+const sectionBreakOptions: { value: ReportSectionBreaks; label: string; desc: string }[] = [
   { value: 'continuous', label: 'Continuous',       desc: 'Sections separated by a divider line only' },
   { value: 'new_page',   label: 'New Page',          desc: 'Each section starts on a new page' },
 ]
@@ -119,9 +169,9 @@ const todayFormatted = computed(() => {
   const dd = String(d.getDate()).padStart(2, '0')
   const yyyy = d.getFullYear()
   const map: Record<string, string> = {
-    'MM/DD/YYYY': `${mm}/${dd}/${yyyy}`,
-    'DD/MM/YYYY': `${dd}/${mm}/${yyyy}`,
-    'YYYY-MM-DD': `${yyyy}-${mm}-${dd}`,
+    mm_dd_yyyy: `${mm}/${dd}/${yyyy}`,
+    dd_mm_yyyy: `${dd}/${mm}/${yyyy}`,
+    yyyy_mm_dd: `${yyyy}-${mm}-${dd}`,
   }
   return map[form.dateFormat] ?? `${dd}/${mm}/${yyyy}`
 })
@@ -136,15 +186,18 @@ const todayFormatted = computed(() => {
       </button>
       <div class="tpl-fmt__page-title-area">
         <h1 class="tpl-fmt__page-title">{{ t('fmt.title') }}</h1>
-        <p class="tpl-fmt__page-sub">{{ form.templateName }}</p>
+        <p class="tpl-fmt__page-sub">{{ templateName }}</p>
       </div>
       <div class="tpl-fmt__header-actions">
-        <button class="btn-cancel" @click="handleCancel">{{ t('common.cancel') }}</button>
-        <button class="btn-save" :disabled="isSubmitting" @click="handleSave">
-          <Icon v-if="isSubmitting" name="lucide:loader-2" :size="14" class="spin" />
-          <Icon v-else name="lucide:check" :size="14" />
-          {{ t('fmt.save') }}
-        </button>
+        <AppButton :text="t('common.cancel')" type="secondary" size="sm" @click="handleCancel" />
+        <AppButton
+          :text="t('fmt.save')"
+          icon="lucide:check"
+          type="primary"
+          size="sm"
+          :loading="isSubmitting"
+          @click="handleSave"
+        />
       </div>
     </div>
 
@@ -210,6 +263,10 @@ const todayFormatted = computed(() => {
                 />
               </div>
             </div>
+            <button v-if="form.accentColour" class="colour-clear-btn" @click="clearAccent">
+              <Icon name="lucide:x" :size="12" />
+              {{ t('fmt.accent_clear') }}
+            </button>
           </div>
         </section>
 
@@ -347,7 +404,7 @@ const todayFormatted = computed(() => {
             <div v-if="logoPreview" class="preview-cover__logo-wrap">
               <img :src="logoPreview" class="preview-cover__logo" alt="logo" />
             </div>
-            <div class="preview-cover__title">{{ form.templateName }}</div>
+            <div class="preview-cover__title">{{ templateName }}</div>
             <div class="preview-cover__meta">
               <span>Sunset Heights</span>
               <span>Officer: J. Smith</span>
@@ -361,7 +418,7 @@ const todayFormatted = computed(() => {
             :class="{
               'preview-header--compact':     form.headerLayout === 'compact',
               'preview-header--standard':    form.headerLayout === 'standard',
-              'preview-header--full-banner': form.headerLayout === 'full_banner',
+              'preview-header--full-banner': form.headerLayout === 'full_width_banner',
             }"
           >
             <div v-if="logoPreview" class="preview-header__logo-wrap">
@@ -369,7 +426,7 @@ const todayFormatted = computed(() => {
             </div>
             <div v-else class="preview-header__logo-placeholder">LOGO</div>
             <div class="preview-header__text">
-              <div class="preview-header__report-title">{{ form.templateName }}</div>
+              <div class="preview-header__report-title">{{ templateName }}</div>
               <div class="preview-header__meta">Sunset Heights · {{ todayFormatted }} · J. Smith</div>
             </div>
           </div>
@@ -563,6 +620,22 @@ const todayFormatted = computed(() => {
   transition: background var(--transition-base);
 }
 .logo-remove-btn:hover { background: var(--color-critical); }
+
+.colour-clear-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  align-self: flex-start;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+  transition: all var(--transition-base);
+}
+.colour-clear-btn:hover { border-color: var(--color-critical); color: var(--color-critical); }
 
 /* ── Colour ── */
 .colour-row { display: flex; flex-direction: column; gap: var(--space-3); }

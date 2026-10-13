@@ -3,6 +3,8 @@ const props = withDefaults(defineProps<{
   show: boolean
   title: string
   maxWidth?: string
+  titleIcon?: string
+  titleIconClass?: string
 }>(), {
   maxWidth: '600px',
 })
@@ -37,7 +39,16 @@ onBeforeUnmount(() => {
         <div class="dialog-modal" :style="{ maxWidth: props.maxWidth }">
           <!-- Header -->
           <div class="dialog-modal__header">
-            <h3 class="dialog-modal__title">{{ title }}</h3>
+            <div class="dialog-modal__title-wrap">
+              <Icon
+                v-if="titleIcon"
+                :name="titleIcon"
+                :size="20"
+                :class="titleIconClass"
+                class="dialog-modal__title-icon"
+              />
+              <h3 class="dialog-modal__title">{{ title }}</h3>
+            </div>
             <button class="dialog-modal__close" @click="$emit('close')">
               <Icon name="lucide:x" :size="20" />
             </button>
@@ -95,6 +106,16 @@ onBeforeUnmount(() => {
   justify-content: space-between;
   padding: var(--space-4) var(--space-6);
   border-bottom: 1px solid var(--color-border);
+}
+
+.dialog-modal__title-wrap {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.dialog-modal__title-icon {
+  flex-shrink: 0;
 }
 
 .dialog-modal__title {

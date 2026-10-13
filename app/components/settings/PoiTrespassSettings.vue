@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { settingsApi } from '~/api/settings'
+import { useToastStore } from '~/stores/toast'
 
 const { t } = useTranslation()
+const toastStore = useToastStore()
 
 const renewalReminderDays = ref(14)
 const archiveThresholdMonths = ref(24)
@@ -10,6 +12,7 @@ const defaultPoiGuidance = ref('')
 const defaultTrespassGuidance = ref('')
 const defaultRedCardGuidance = ref('')
 
+const loading = ref(false)
 const saving = ref(false)
 const isDirty = ref(false)
 
@@ -18,6 +21,7 @@ function markDirty() {
 }
 
 async function fetchSettings() {
+  loading.value = true
   try {
     const response = await settingsApi.getPoiSettings()
     if (response.rc === 0) {
@@ -27,10 +31,14 @@ async function fetchSettings() {
       defaultPoiGuidance.value = response.default_poi_guidance
       defaultTrespassGuidance.value = response.default_trespass_guidance
       defaultRedCardGuidance.value = response.default_red_card_guidance
+    } else {
+      toastStore.error(response.message || 'Failed to load POI settings')
     }
   } catch (err) {
     console.error('Error fetching POI settings:', err)
+    toastStore.error(err instanceof Error ? err.message : 'Failed to load POI settings')
   } finally {
+    loading.value = false
     isDirty.value = false
   }
 }
@@ -40,8 +48,8 @@ onMounted(() => {
 })
 
 async function handleSave() {
+  saving.value = true
   try {
-    saving.value = true
     const response = await settingsApi.updatePoiSettings({
       renewal_reminder_days: renewalReminderDays.value,
       archive_threshold_months: archiveThresholdMonths.value,
@@ -52,12 +60,13 @@ async function handleSave() {
     })
     if (response.rc === 0) {
       isDirty.value = false
+      toastStore.success(t('settings.poi.save_success'))
     } else {
-      alert(response.message || 'Failed to save POI settings')
+      toastStore.error(response.message || 'Failed to save POI settings')
     }
   } catch (err) {
     console.error('Error saving POI settings:', err)
-    alert('Failed to save POI settings')
+    toastStore.error(err instanceof Error ? err.message : 'Failed to save POI settings')
   } finally {
     saving.value = false
   }
@@ -216,6 +225,33 @@ async function handleReset() {
                 rows="5"
                 @input="markDirty()"
               />
+            </div>
+          </div>
+        </div>
+
+        <!-- Mobile Preview -->
+        <div class="settings-card preview-card">
+          <div class="card-header">
+            <div class="card-icon">
+              <Icon name="lucide:smartphone" :size="18" />
+            </div>
+            <div>
+              <h3 class="card-title">{{ t('settings.poi.preview_title') }}</h3>
+              <p class="card-desc">{{ t('settings.poi.preview_desc') }}</p>
+            </div>
+          </div>
+          <div class="card-body preview-body">
+            <div class="preview-item">
+              <span class="preview-label">{{ t('settings.poi.poi_guidance_label') }}</span>
+              <div class="preview-guidance">{{ defaultPoiGuidance || t('settings.poi.preview_empty') }}</div>
+            </div>
+            <div class="preview-item">
+              <span class="preview-label">{{ t('settings.poi.trespass_guidance_label') }}</span>
+              <div class="preview-guidance">{{ defaultTrespassGuidance || t('settings.poi.preview_empty') }}</div>
+            </div>
+            <div class="preview-item">
+              <span class="preview-label">{{ t('settings.poi.red_card_guidance_label') }}</span>
+              <div class="preview-guidance">{{ defaultRedCardGuidance || t('settings.poi.preview_empty') }}</div>
             </div>
           </div>
         </div>
@@ -426,6 +462,39 @@ async function handleReset() {
 }
 
 .toggle-btn--on { background: var(--color-accent, #e5ff44); }
+
+.preview-card { margin-top: var(--space-5); }
+
+.preview-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.preview-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.preview-label {
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--color-text-muted);
+}
+
+.preview-guidance {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
 
 .toggle-knob {
   position: absolute;
