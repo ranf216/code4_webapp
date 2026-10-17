@@ -410,6 +410,7 @@ export interface NotificationSettingsResponse {
   poi_expiring_enabled: boolean
   poi_expired_enabled: boolean
   report_submitted_enabled: boolean
+  report_under_review_enabled: boolean
   report_approved_enabled: boolean
   report_changes_enabled: boolean
   report_delivered_enabled: boolean
@@ -432,6 +433,7 @@ export interface SaveNotificationSettingsRequest {
   poi_expiring_enabled: boolean
   poi_expired_enabled: boolean
   report_submitted_enabled: boolean
+  report_under_review_enabled: boolean
   report_approved_enabled: boolean
   report_changes_enabled: boolean
   report_delivered_enabled: boolean

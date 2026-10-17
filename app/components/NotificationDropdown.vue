@@ -169,6 +169,7 @@ function getTypeIcon(type: NotificationType): string {
       return 'lucide:phone-incoming'
     case 'new_incident_report':
     case 'report_submitted':
+    case 'report_under_review':
     case 'report_approved':
     case 'report_changes_requested':
     case 'report_delivered':

@@ -10,6 +10,7 @@ const typeIconMap: Record<string, string> = {
   resident_like: 'lucide:phone-incoming',
   new_incident_report: 'lucide:file-text',
   report_submitted: 'lucide:file-text',
+  report_under_review: 'lucide:file-text',
   report_approved: 'lucide:file-text',
   report_changes_requested: 'lucide:file-text',
   report_delivered: 'lucide:file-text',
@@ -40,7 +41,7 @@ export function resolveNotificationEntityPath(entityType?: string, entityId?: nu
   if (!entityType || entityId === undefined || entityId === null) return null
   switch (entityType) {
     case 'call': return `/calls?call_id=${entityId}`
-    case 'report': return `/report-templates/${entityId}/edit`
+    case 'report': return `/incident-reports/${entityId}`
     case 'shift': return `/shifts?shift_id=${entityId}`
     case 'post_order': return `/post-orders/${entityId}`
     case 'poi': return `/poi/${entityId}`
