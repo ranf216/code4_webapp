@@ -58,6 +58,9 @@ const approving = ref(false)
 
 const showDeliverModal = ref(false)
 const delivering = ref(false)
+const showDeliveredPdfModal = ref(false)
+const deliveredPdfUrl = ref('')
+const deliveredPdfDownloadUrl = ref('')
 
 const pdfLoading = ref(false)
 const isSaving = ref(false)
@@ -374,13 +377,23 @@ async function submitDeliver() {
   delivering.value = true
   try {
     const response = await reportApi.deliverReport(props.reportId)
-    if (response.rc === 0 && response.pdf_url) {
-      openPdfUrl(response.pdf_url)
-    }
+    if (response.rc !== 0 || !response.pdf_url) return
+
     toastStore.success(t('reports.deliver_report'))
     showDeliverModal.value = false
     await fetchReport()
     await fetchHistory()
+    deliveredPdfDownloadUrl.value = response.pdf_url
+    activePanel.value = 'pdf'
+    try {
+      const pdfObjectUrl = await createPdfObjectUrl(response.pdf_url)
+      deliveredPdfUrl.value = pdfObjectUrl
+      replacePdfEmbedUrl(pdfObjectUrl)
+      showDeliveredPdfModal.value = true
+    } catch (err) {
+      console.error('Failed to display delivered PDF:', err)
+      toastStore.error(err instanceof Error ? err.message : 'Failed to display delivered PDF')
+    }
   } catch (err) {
     console.error('Failed to deliver report:', err)
     toastStore.error(err instanceof Error ? err.message : 'Failed to deliver report')
@@ -397,34 +410,41 @@ async function fetchPdfUrl(regenerate = false): Promise<string | null> {
   return null
 }
 
-async function downloadPdf(regenerate = false) {
+async function showPdfModal(regenerate = false) {
   pdfLoading.value = true
   try {
     const url = await fetchPdfUrl(regenerate)
-    if (url) {
-      window.open(url, '_blank')
+    if (!url) return
+
+    const pdfObjectUrl = await createPdfObjectUrl(url)
+    if (regenerate) {
+      await fetchReport()
+      await fetchHistory()
     }
+    deliveredPdfDownloadUrl.value = url
+    deliveredPdfUrl.value = pdfObjectUrl
+    replacePdfEmbedUrl(pdfObjectUrl)
+    showDeliveredPdfModal.value = true
   } catch (err) {
-    console.error('Failed to get PDF:', err)
-    toastStore.error(err instanceof Error ? err.message : 'Failed to get PDF')
+    console.error('Failed to display PDF:', err)
+    toastStore.error(err instanceof Error ? err.message : 'Failed to display PDF')
   } finally {
     pdfLoading.value = false
   }
 }
 
-async function loadPdfEmbed(regenerate = false) {
-  pdfLoading.value = true
-  try {
-    const url = await fetchPdfUrl(regenerate)
-    if (url) {
-      pdfEmbedUrl.value = url
-    }
-  } catch (err) {
-    console.error('Failed to load PDF embed:', err)
-    toastStore.error(err instanceof Error ? err.message : 'Failed to load PDF')
-  } finally {
-    pdfLoading.value = false
+async function createPdfObjectUrl(url: string): Promise<string> {
+  const response = await fetch(url)
+  if (!response.ok) throw new Error('Failed to load PDF')
+  const blob = await response.blob()
+  return URL.createObjectURL(blob.type === 'application/pdf' ? blob : new Blob([blob], { type: 'application/pdf' }))
+}
+
+function replacePdfEmbedUrl(url: string) {
+  if (pdfEmbedUrl.value.startsWith('blob:') && pdfEmbedUrl.value !== url) {
+    URL.revokeObjectURL(pdfEmbedUrl.value)
   }
+  pdfEmbedUrl.value = url
 }
 
 function openPdfUrl(url: string) {
@@ -483,6 +503,7 @@ onMounted(() => {
 
 onBeforeUnmount(async () => {
   revokePendingObjectUrls()
+  if (pdfEmbedUrl.value.startsWith('blob:')) URL.revokeObjectURL(pdfEmbedUrl.value)
   stopTimers()
   if (isReviewing.value) {
     await releaseReview()
@@ -492,12 +513,6 @@ onBeforeUnmount(async () => {
 watch(() => props.reportId, () => {
   fetchReport()
   fetchHistory()
-})
-
-watch(activePanel, (panel) => {
-  if (panel === 'pdf' && !pdfEmbedUrl.value) {
-    loadPdfEmbed(false)
-  }
 })
 
 function toggleHistory(historyId: number) {
@@ -940,14 +955,14 @@ function clientPreviewSections(): ReportSection[] {
                   :text="t('reports.download_pdf')"
                   type="secondary"
                   :loading="pdfLoading"
-                  @click="downloadPdf(false)"
+                  @click="showPdfModal(false)"
                 />
                 <AppButton
                   v-if="report.status === 'delivered'"
                   :text="t('reports.regenerate_pdf')"
                   type="secondary"
                   :loading="pdfLoading"
-                  @click="downloadPdf(true)"
+                  @click="showPdfModal(true)"
                 />
               </div>
             </div>
@@ -1000,7 +1015,8 @@ function clientPreviewSections(): ReportSection[] {
                 v-if="report.status === 'delivered'"
                 class="preview-tab"
                 :class="{ 'preview-tab--active': activePanel === 'pdf' }"
-                @click="activePanel = 'pdf'"
+                :disabled="pdfLoading"
+                @click="showPdfModal(false)"
               >
                 PDF
               </button>
@@ -1064,8 +1080,8 @@ function clientPreviewSections(): ReportSection[] {
                 <span>{{ t('common.loading') }}</span>
               </div>
               <div class="pdf-actions">
-                <AppButton :text="t('reports.download_pdf')" type="primary" :loading="pdfLoading" @click="downloadPdf(false)" />
-                <AppButton :text="t('reports.regenerate_pdf')" type="secondary" :loading="pdfLoading" @click="loadPdfEmbed(true)" />
+                <AppButton :text="t('reports.download_pdf')" type="primary" :loading="pdfLoading" @click="showPdfModal(false)" />
+                <AppButton :text="t('reports.regenerate_pdf')" type="secondary" :loading="pdfLoading" @click="showPdfModal(true)" />
               </div>
             </div>
           </div>
@@ -1176,6 +1192,21 @@ function clientPreviewSections(): ReportSection[] {
         <template #footer>
           <AppButton :text="t('common.cancel')" type="secondary" :disabled="delivering" @click="showDeliverModal = false" />
           <AppButton :text="t('reports.deliver_report')" type="primary" :loading="delivering" @click="submitDeliver" />
+        </template>
+      </AppDialogModal>
+
+      <AppDialogModal
+        :show="showDeliveredPdfModal"
+        :title="t('reports.delivered_pdf_title')"
+        max-width="1000px"
+        @close="showDeliveredPdfModal = false"
+      >
+        <div class="delivered-pdf-preview">
+          <iframe :src="deliveredPdfUrl" type="application/pdf" />
+        </div>
+        <template #footer>
+          <AppButton :text="t('common.close')" type="secondary" @click="showDeliveredPdfModal = false" />
+          <AppButton :text="t('reports.download_pdf')" type="primary" @click="openPdfUrl(deliveredPdfDownloadUrl)" />
         </template>
       </AppDialogModal>
     </template>
@@ -1779,6 +1810,22 @@ function clientPreviewSections(): ReportSection[] {
   display: flex;
   justify-content: center;
   gap: var(--space-2);
+}
+
+.delivered-pdf-preview {
+  width: 100%;
+  height: 70vh;
+  min-height: 500px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: var(--color-bg-surface);
+}
+
+.delivered-pdf-preview iframe {
+  width: 100%;
+  height: 100%;
+  border: none;
 }
 
 .history-list {

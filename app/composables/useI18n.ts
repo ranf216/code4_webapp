@@ -946,6 +946,7 @@ const translations: Record<string, Record<string, string>> = {
     'reports.deliver_report': 'Deliver to Client',
     'reports.download_pdf': 'Download PDF',
     'reports.regenerate_pdf': 'Regenerate PDF',
+    'reports.delivered_pdf_title': 'Delivered Report PDF',
     'reports.preview_label': 'Preview — final PDF will be generated on delivery',
     'reports.include_section': 'Include in client report',
     'reports.internal_only': 'Internal · never shared with officer or client',
