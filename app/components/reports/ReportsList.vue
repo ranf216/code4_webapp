@@ -37,8 +37,6 @@ const sortDir = ref<'asc' | 'desc'>('desc')
 const communities = ref<Community[]>([])
 const officers = ref<Officer[]>([])
 
-const currentUserId = ref<string>('')
-
 const tabs = computed(() => [
   { id: 'all' as TabKey, label: t('reports.queue_tab_all'), icon: 'lucide:layout-grid' },
   { id: 'pending-review' as TabKey, label: t('reports.queue_tab_pending_review'), icon: 'lucide:clock' },
@@ -213,9 +211,6 @@ function getLockDisplay(report: ReportListItem) {
     }
     return null
   }
-  if (lock.locked_by === currentUserId.value) {
-    return { icon: 'lucide:user-check', text: t('reports.lock_reviewing_you') }
-  }
   return { icon: 'lucide:lock', text: t('reports.lock_by', { name: lock.locked_by_name || report.reviewer_name || '' }) }
 }
 
@@ -284,16 +279,6 @@ onMounted(() => {
   fetchOfficers()
   fetchReports()
   startTimers()
-
-  const authUser = sessionStorage.getItem('auth_user')
-  if (authUser) {
-    try {
-      const parsed = JSON.parse(authUser)
-      currentUserId.value = parsed.user_id || ''
-    } catch {
-      currentUserId.value = ''
-    }
-  }
 })
 
 onUnmounted(() => {

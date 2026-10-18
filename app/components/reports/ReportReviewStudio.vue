@@ -37,8 +37,6 @@ const history = ref<ReportHistoryEntry[]>([])
 const loading = ref(false)
 const error = ref('')
 
-const currentUserId = ref<string>('')
-
 const editedValues = ref<Record<number, ReportFieldValue>>({})
 const editedManagerNotes = ref<Record<number, string>>({})
 const editedClientIncluded = ref<Record<number, boolean>>({})
@@ -107,7 +105,7 @@ function fieldImages(field: ReportField): string[] {
 
 const isReviewer = computed(() => {
   if (!report.value) return false
-  return report.value.reviewer_user_id === currentUserId.value
+  return report.value.status === 'under_review' && report.value.can_edit
 })
 
 const canEdit = computed(() => report.value?.can_edit ?? false)
@@ -115,7 +113,7 @@ const canEdit = computed(() => report.value?.can_edit ?? false)
 const isReviewing = computed(() => {
   if (!report.value) return false
   const lock = report.value.review_lock
-  return report.value.status === 'under_review' && lock?.is_locked && lock?.locked_by === currentUserId.value
+  return report.value.status === 'under_review' && !!lock?.is_locked && !!report.value.can_edit
 })
 
 function revokePendingObjectUrls() {
@@ -457,16 +455,6 @@ onMounted(() => {
   fetchReport()
   fetchHistory()
   startTimers()
-
-  const authUser = sessionStorage.getItem('auth_user')
-  if (authUser) {
-    try {
-      const parsed = JSON.parse(authUser)
-      currentUserId.value = parsed.user_id || ''
-    } catch {
-      currentUserId.value = ''
-    }
-  }
 })
 
 onBeforeUnmount(async () => {
