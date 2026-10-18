@@ -3,6 +3,7 @@ import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useTranslation } from '~/composables/useI18n'
 import { reportApi } from '~/api/report'
 import { useToastStore } from '~/stores/toast'
+import { useFileApi } from '~/composables/useFileApi'
 import { utcToLocal } from '~/utils/dateTime'
 import { renderMarkdown } from '~/utils/markdown'
 import type {
@@ -10,6 +11,8 @@ import type {
   ReportSection,
   ReportField,
   ReportFieldValue,
+  ReportFileValue,
+  ReportAttachment,
   ReportHistoryEntry,
   ReportStatus,
 } from '~/api/types/report'
@@ -17,6 +20,13 @@ import type {
 const props = defineProps<{
   reportId: number
 }>()
+
+type SectionUpdatePayload = {
+  report_section_id: number
+  values?: Record<string, ReportFieldValue>
+  manager_notes?: string
+  client_included?: boolean
+}
 
 const { t } = useTranslation()
 const router = useRouter()
@@ -32,6 +42,14 @@ const currentUserId = ref<string>('')
 const editedValues = ref<Record<number, ReportFieldValue>>({})
 const editedManagerNotes = ref<Record<number, string>>({})
 const editedClientIncluded = ref<Record<number, boolean>>({})
+interface PendingFile {
+  file: File
+  objectUrl: string
+}
+
+const editedFileUploads = ref<Record<number, { attachments: ReportAttachment[]; pending: PendingFile[] }>>({})
+
+const { uploadFile } = useFileApi()
 
 const showRequestChangesModal = ref(false)
 const changeRequestComments = ref('')
@@ -44,34 +62,47 @@ const showDeliverModal = ref(false)
 const delivering = ref(false)
 
 const pdfLoading = ref(false)
+const isSaving = ref(false)
 const activePanel = ref<'preview' | 'pdf' | null>('preview')
 
 const expandedHistory = ref<Set<number>>(new Set())
 
-const showImagePreview = ref(false)
-const previewImages = ref<string[]>([])
-const previewInitialIndex = ref(0)
-
-function openImagePreview(images: string[], index: number) {
-  previewImages.value = images
-  previewInitialIndex.value = index
-  showImagePreview.value = true
+function fieldUploadState(field: ReportField) {
+  return editedFileUploads.value[field.field_id] ?? { attachments: field.attachments ?? [], pending: [] }
 }
 
-function closeImagePreview() {
-  showImagePreview.value = false
+function fieldAttachments(field: ReportField): ReportAttachment[] {
+  const state = editedFileUploads.value[field.field_id]
+  return state?.attachments ?? field.attachments ?? []
+}
+
+function pendingImageFiles(field: ReportField): PendingFile[] {
+  return fieldUploadState(field).pending.filter((p: PendingFile) => isImageFile(p.file))
+}
+
+function pendingNonImageFiles(field: ReportField): PendingFile[] {
+  return fieldUploadState(field).pending.filter((p: PendingFile) => !isImageFile(p.file))
+}
+
+function isImageFile(file: File): boolean {
+  return file.type.startsWith('image/')
+}
+
+function isImageAttachment(att: ReportAttachment): boolean {
+  const url = att.url?.toLowerCase() ?? ''
+  return url.endsWith('.jpg') || url.endsWith('.jpeg') || url.endsWith('.png') || url.endsWith('.gif') || url.endsWith('.webp')
+}
+
+function imageAttachments(field: ReportField): ReportAttachment[] {
+  return fieldAttachments(field).filter(isImageAttachment)
+}
+
+function nonImageAttachments(field: ReportField): ReportAttachment[] {
+  return fieldAttachments(field).filter(a => !isImageAttachment(a))
 }
 
 function fieldImages(field: ReportField): string[] {
-  const urls: string[] = []
-  if (field.value && typeof field.value === 'object' && !Array.isArray(field.value)) {
-    if ('attachment_ids' in field.value || 'file_ids' in field.value) {
-      if (field.attachments?.length) {
-        urls.push(...field.attachments.map(a => a.url).filter(Boolean))
-      }
-    }
-  }
-  return urls.length ? urls : (field.attachments?.map(a => a.url).filter(Boolean) ?? [])
+  return imageAttachments(field).map((a: ReportAttachment) => a.url).filter((url: string): url is string => !!url)
 }
 
 const isReviewer = computed(() => {
@@ -87,15 +118,29 @@ const isReviewing = computed(() => {
   return report.value.status === 'under_review' && lock?.is_locked && lock?.locked_by === currentUserId.value
 })
 
+function revokePendingObjectUrls() {
+  Object.values(editedFileUploads.value).forEach((state) => {
+    state.pending.forEach((p: PendingFile) => URL.revokeObjectURL(p.objectUrl))
+  })
+}
+
 function loadReportFromResponse(r: Report) {
+  revokePendingObjectUrls()
   report.value = r
   editedValues.value = {}
   editedManagerNotes.value = {}
   editedClientIncluded.value = {}
+  editedFileUploads.value = {}
   r.sections.forEach((section) => {
     editedClientIncluded.value[section.report_section_id] = section.client_included
     section.fields.forEach((field) => {
       editedValues.value[field.field_id] = field.value
+      if (field.field_type === 'file_upload' || field.field_type === 'digital_signature') {
+        editedFileUploads.value[field.field_id] = {
+          attachments: field.attachments ? [...field.attachments] : [],
+          pending: [],
+        }
+      }
     })
   })
 }
@@ -154,12 +199,20 @@ async function releaseReview() {
 
 async function saveChanges() {
   if (!report.value) return
-  const sectionsPayload = buildSectionsPayload()
-  if (sectionsPayload.length === 0) {
-    toastStore.info('No changes to save')
-    return
-  }
+  isSaving.value = true
   try {
+    const uploadErrors: string[] = []
+    const uploadedFileIds = await uploadPendingFiles(uploadErrors)
+    if (uploadErrors.length) {
+      toastStore.error(uploadErrors.join('\n'))
+      return
+    }
+
+    const sectionsPayload = buildSectionsPayload(uploadedFileIds)
+    if (sectionsPayload.length === 0) {
+      toastStore.info('No changes to save')
+      return
+    }
     await reportApi.updateReport({
       report_id: props.reportId,
       sections: sectionsPayload,
@@ -170,17 +223,62 @@ async function saveChanges() {
   } catch (err) {
     console.error('Failed to save changes:', err)
     toastStore.error(err instanceof Error ? err.message : 'Failed to save changes')
+  } finally {
+    isSaving.value = false
   }
 }
 
-function buildSectionsPayload() {
+async function uploadPendingFiles(errors: string[]): Promise<Record<number, string[]>> {
+  const result: Record<number, string[]> = {}
+  for (const fieldId in editedFileUploads.value) {
+    const state = editedFileUploads.value[Number(fieldId)]
+    if (!state?.pending.length) continue
+    const ids: string[] = []
+    for (const pending of state.pending) {
+      const fileId = await uploadFile(pending.file)
+      if (fileId) {
+        ids.push(fileId)
+      } else {
+        errors.push(`${pending.file.name}: ${t('reports.upload_failed')}`)
+      }
+    }
+    if (errors.length) return {}
+    result[Number(fieldId)] = ids
+  }
+  return result
+}
+
+function buildSectionsPayload(uploadedFileIds: Record<number, string[]> = {}) {
   if (!report.value) return []
   return report.value.sections
-    .map((section) => {
+    .map((section: ReportSection) => {
       const sectionId = section.report_section_id
       const values: Record<string, ReportFieldValue> = {}
       let hasValueChanges = false
-      section.fields.forEach((field) => {
+      section.fields.forEach((field: ReportField) => {
+        if (field.field_type === 'file_upload' || field.field_type === 'digital_signature') {
+          const fileState = editedFileUploads.value[field.field_id]
+          if (fileState) {
+            const fileValue: ReportFileValue = {
+              attachment_ids: fileState.attachments.map((att: ReportAttachment) => att.attachment_id),
+              file_ids: uploadedFileIds[field.field_id] ?? [],
+            }
+            const originalAttachmentIds = (field.value && typeof field.value === 'object' && 'attachment_ids' in field.value
+              ? field.value.attachment_ids
+              : (field.attachments?.map((att: ReportAttachment) => att.attachment_id) ?? [])) as number[]
+            const originalFileIds = (field.value && typeof field.value === 'object' && 'file_ids' in field.value
+              ? field.value.file_ids
+              : []) as string[]
+            if (
+              !arraysEqual(fileValue.attachment_ids ?? [], originalAttachmentIds) ||
+              !arraysEqual(fileValue.file_ids ?? [], originalFileIds)
+            ) {
+              values[String(field.field_id)] = fileValue
+              hasValueChanges = true
+            }
+          }
+          return
+        }
         const current = editedValues.value[field.field_id]
         if (!isEqualValue(current, field.value)) {
           values[String(field.field_id)] = current ?? null
@@ -195,7 +293,7 @@ function buildSectionsPayload() {
 
       if (!hasValueChanges && !notesChanged && !inclusionChanged) return null
 
-      const payload: { report_section_id: number; values?: Record<string, ReportFieldValue>; manager_notes?: string; client_included?: boolean } = {
+      const payload: SectionUpdatePayload = {
         report_section_id: sectionId,
       }
       if (hasValueChanges) payload.values = values
@@ -203,7 +301,14 @@ function buildSectionsPayload() {
       if (inclusionChanged) payload.client_included = clientIncluded
       return payload
     })
-    .filter((s): s is NonNullable<typeof s> => s !== null)
+    .filter((s: SectionUpdatePayload | null): s is SectionUpdatePayload => s !== null)
+}
+
+function arraysEqual(a: unknown[] | undefined, b: unknown[] | undefined): boolean {
+  const aa = a ?? []
+  const bb = b ?? []
+  if (aa.length !== bb.length) return false
+  return aa.every((v, i) => v === bb[i])
 }
 
 function isEqualValue(a: ReportFieldValue | undefined, b: ReportFieldValue | undefined): boolean {
@@ -244,8 +349,8 @@ async function submitApprove() {
   approving.value = true
   try {
     const includedSectionIds = report.value.sections
-      .filter((s) => editedClientIncluded.value[s.report_section_id] ?? s.client_included)
-      .map((s) => s.report_section_id)
+      .filter((s: ReportSection) => editedClientIncluded.value[s.report_section_id] ?? s.client_included)
+      .map((s: ReportSection) => s.report_section_id)
 
     await reportApi.approveReport({
       report_id: props.reportId,
@@ -365,6 +470,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(async () => {
+  revokePendingObjectUrls()
   stopTimers()
   if (isReviewing.value) {
     await releaseReview()
@@ -466,6 +572,52 @@ function onDateInput(field: ReportField, event: Event) {
   editedValues.value[field.field_id] = target.value
 }
 
+function canUploadMore(field: ReportField): boolean {
+  const state = fieldUploadState(field)
+  const maxFiles = field.config?.max_files ?? (field.field_type === 'digital_signature' ? 1 : 5)
+  return state.attachments.length + state.pending.length < maxFiles
+}
+
+async function onFieldFileInput(field: ReportField, event: Event) {
+  const input = event.target as HTMLInputElement
+  if (!input.files?.length) return
+  const files = Array.from(input.files)
+  const maxFiles = field.config?.max_files ?? (field.field_type === 'digital_signature' ? 1 : 5)
+  const state = fieldUploadState(field)
+  const remaining = maxFiles - state.attachments.length - state.pending.length
+  const toAdd = files.slice(0, Math.max(0, remaining))
+
+  for (const file of toAdd) {
+    state.pending.push({ file, objectUrl: URL.createObjectURL(file) })
+  }
+  input.value = ''
+}
+
+function removeFieldAttachment(field: ReportField, attachmentId: number) {
+  const state = fieldUploadState(field)
+  state.attachments = state.attachments.filter(a => a.attachment_id !== attachmentId)
+}
+
+function removePendingFile(field: ReportField, filteredIndex: number, filterFn?: (p: PendingFile) => boolean) {
+  const state = fieldUploadState(field)
+  const list = filterFn ? state.pending.filter(filterFn) : state.pending
+  const target = list[filteredIndex]
+  if (!target) return
+  const index = state.pending.indexOf(target)
+  if (index >= 0) {
+    const removed = state.pending.splice(index, 1)[0]
+    if (removed) URL.revokeObjectURL(removed.objectUrl)
+  }
+}
+
+function dropdownDisplayValue(field: ReportField): string | string[] {
+  const value = editedValues.value[field.field_id] ?? field.value
+  if (field.config?.is_multi_select) {
+    return Array.isArray(value) ? (value as string[]) : []
+  }
+  return String(value ?? '')
+}
+
 function onDropdownInput(field: ReportField, event: Event) {
   const target = event.target as HTMLSelectElement
   const config = field.config
@@ -482,21 +634,21 @@ const managementSummary = ref('')
 function includedSectionNames(): string[] {
   if (!report.value) return []
   return report.value.sections
-    .filter((s) => editedClientIncluded.value[s.report_section_id] ?? s.client_included)
-    .map((s) => s.title)
+    .filter((s: ReportSection) => editedClientIncluded.value[s.report_section_id] ?? s.client_included)
+    .map((s: ReportSection) => s.title)
 }
 
 function excludedSectionNames(): string[] {
   if (!report.value) return []
   return report.value.sections
-    .filter((s) => !(editedClientIncluded.value[s.report_section_id] ?? s.client_included))
-    .map((s) => s.title)
+    .filter((s: ReportSection) => !(editedClientIncluded.value[s.report_section_id] ?? s.client_included))
+    .map((s: ReportSection) => s.title)
 }
 
 function clientPreviewSections(): ReportSection[] {
   if (!report.value) return []
   return report.value.sections
-    .filter((s) => editedClientIncluded.value[s.report_section_id] ?? s.client_included)
+    .filter((s: ReportSection) => editedClientIncluded.value[s.report_section_id] ?? s.client_included)
 }
 </script>
 
@@ -515,25 +667,19 @@ function clientPreviewSections(): ReportSection[] {
       </button>
     </div>
     <template v-else>
-      <!-- Header -->
+      <!-- Header info card -->
       <div class="review-header">
-        <div class="review-header__left">
-          <button class="back-btn" @click="goBack">
-            <Icon name="lucide:arrow-left" :size="16" />
-            {{ t('reports.back_to_list') }}
-          </button>
-          <div>
-            <h1 class="review-header__title">
-              {{ t('reports.report_id') }} #{{ report.report_id }}
-              <span class="review-header__divider">·</span>
-              {{ report.title }}
-            </h1>
-            <div class="review-header__meta">
-              <Badge type="report" :value="report.status" :text="getStatusLabel(report.status)" />
-              <span>{{ report.community_name }}</span>
-              <span>{{ report.officer_name }}</span>
-              <span v-if="report.call_id">{{ t('reports.source_call') }} #{{ report.call_id }}</span>
-            </div>
+        <div class="review-header__main">
+          <h1 class="review-header__title">
+            {{ t('reports.report_id') }} #{{ report.report_id }}
+            <span class="review-header__divider">·</span>
+            {{ report.title }}
+          </h1>
+          <div class="review-header__meta">
+            <Badge type="report" :value="report.status" :text="getStatusLabel(report.status)" />
+            <span>{{ report.community_name }}</span>
+            <span>{{ report.officer_name }}</span>
+            <span v-if="report.call_id">{{ t('reports.source_call') }} #{{ report.call_id }}</span>
           </div>
         </div>
         <div class="review-header__dates">
@@ -593,7 +739,7 @@ function clientPreviewSections(): ReportSection[] {
                   <!-- Dropdown -->
                   <select
                     v-else-if="field.field_type === 'dropdown'"
-                    :value="field.config?.is_multi_select ? (editedValues[field.field_id] as string[] ?? field.value ?? []) : String(editedValues[field.field_id] ?? field.value ?? '')"
+                    :value="dropdownDisplayValue(field)"
                     :disabled="!canEdit || field.is_locked"
                     :multiple="field.config?.is_multi_select"
                     class="field-input"
@@ -603,29 +749,87 @@ function clientPreviewSections(): ReportSection[] {
                   </select>
                   <!-- File / Signature -->
                   <div v-else-if="field.field_type === 'file_upload' || field.field_type === 'digital_signature'" class="attachments-list">
-                    <template v-if="fieldImages(field).length">
-                      <img
-                        v-for="(src, idx) in fieldImages(field)"
-                        :key="idx"
-                        :src="src"
-                        class="media-thumb"
-                        alt="Report media"
-                        @click="openImagePreview(fieldImages(field), idx)"
-                      >
-                    </template>
-                    <template v-else-if="field.attachments?.length">
-                      <a
-                        v-for="att in field.attachments"
+                    <template v-if="imageAttachments(field).length">
+                      <MImagePreview
+                        v-for="(att, idx) in imageAttachments(field)"
                         :key="att.attachment_id"
-                        :href="att.url"
-                        target="_blank"
-                        class="attachment-chip"
-                      >
-                        <Icon name="lucide:paperclip" :size="14" />
-                        {{ att.file_name || att.url.split('/').pop() || `Attachment ${att.attachment_id}` }}
-                      </a>
+                        :show="false"
+                        :thumbnail-url="att.url"
+                        :images="imageAttachments(field).map(a => a.url)"
+                        :initial-index="idx"
+                        :show-thumbnail-close="canEdit && !field.is_locked"
+                        @remove="removeFieldAttachment(field, att.attachment_id)"
+                      />
                     </template>
-                    <span v-else class="text-muted">—</span>
+                    <template v-if="pendingImageFiles(field).length">
+                      <MImagePreview
+                        v-for="(pending, pidx) in pendingImageFiles(field)"
+                        :key="pending.objectUrl"
+                        :show="false"
+                        :thumbnail-url="pending.objectUrl"
+                        :images="pendingImageFiles(field).map(p => p.objectUrl)"
+                        :initial-index="pidx"
+                        :show-thumbnail-close="canEdit && !field.is_locked"
+                        @remove="removePendingFile(field, pidx, (p: PendingFile) => isImageFile(p.file))"
+                      />
+                    </template>
+                    <template v-if="nonImageAttachments(field).length">
+                      <div
+                        v-for="att in nonImageAttachments(field)"
+                        :key="att.attachment_id"
+                        class="attachment-chip-wrap"
+                      >
+                        <a
+                          :href="att.url"
+                          target="_blank"
+                          class="attachment-chip"
+                        >
+                          <Icon name="lucide:paperclip" :size="14" />
+                          {{ att.file_name || att.url.split('/').pop() || `Attachment ${att.attachment_id}` }}
+                        </a>
+                        <button
+                          v-if="canEdit && !field.is_locked"
+                          type="button"
+                          class="attachment-remove"
+                          :title="t('reports.remove_attachment')"
+                          @click="removeFieldAttachment(field, att.attachment_id)"
+                        >
+                          <Icon name="lucide:x" :size="12" />
+                        </button>
+                      </div>
+                    </template>
+                    <template v-if="pendingNonImageFiles(field).length">
+                      <div
+                        v-for="(pending, pidx) in pendingNonImageFiles(field)"
+                        :key="pending.objectUrl"
+                        class="new-file-chip"
+                      >
+                        <Icon name="lucide:clock" :size="12" />
+                        <span>{{ pending.file.name }}</span>
+                        <button
+                          v-if="canEdit && !field.is_locked"
+                          type="button"
+                          class="attachment-remove"
+                          :title="t('reports.remove_attachment')"
+                          @click="removePendingFile(field, pidx, (p: PendingFile) => !isImageFile(p.file))"
+                        >
+                          <Icon name="lucide:x" :size="12" />
+                        </button>
+                      </div>
+                    </template>
+                    <span v-if="!imageAttachments(field).length && !pendingImageFiles(field).length && !nonImageAttachments(field).length && !pendingNonImageFiles(field).length" class="text-muted">—</span>
+
+                    <label v-if="canEdit && !field.is_locked && canUploadMore(field)" class="upload-add-btn">
+                      <Icon name="lucide:upload" :size="14" />
+                      <span>{{ field.field_type === 'digital_signature' ? (fieldAttachments(field).length || fieldUploadState(field).pending.length ? t('reports.replace_signature') : t('reports.upload_signature')) : t('reports.add_file') }}</span>
+                      <input
+                        type="file"
+                        class="upload-input"
+                        :accept="field.field_type === 'digital_signature' ? '.png,.jpg,.jpeg' : '.pdf,.jpg,.jpeg,.png,.mp4,.doc,.docx'"
+                        :multiple="field.field_type !== 'digital_signature'"
+                        @change="onFieldFileInput(field, $event)"
+                      >
+                    </label>
                   </div>
                   <!-- Fallback -->
                   <div v-else class="field-readonly">{{ renderFieldValue(field) }}</div>
@@ -656,7 +860,7 @@ function clientPreviewSections(): ReportSection[] {
           </div>
 
           <div v-if="canEdit" class="action-bar">
-            <AppButton :text="t('reports.save_changes')" type="primary" @click="saveChanges" />
+            <AppButton :text="t('reports.save_changes')" type="primary" :loading="isSaving" @click="saveChanges" />
           </div>
         </div>
 
@@ -664,100 +868,108 @@ function clientPreviewSections(): ReportSection[] {
         <div class="review-right">
           <!-- Review status card -->
           <div class="panel-card">
-            <h3 class="panel-card__title">{{ t('reports.status') }}</h3>
-            <div class="status-row">
-              <Badge type="report" :value="report.status" :text="getStatusLabel(report.status)" />
-              <span v-if="isReviewing" class="lock-countdown">{{ getLockCountdown() }}</span>
+            <div class="panel-card__header">
+              <h3 class="panel-card__title">{{ t('reports.status') }}</h3>
             </div>
-            <div v-if="report.reviewer_name" class="reviewer-info">
-              <span v-if="isReviewer">{{ t('reports.reviewing_you') }}</span>
-              <span v-else>{{ t('reports.lock_by', { name: report.reviewer_name }) }}</span>
-            </div>
-            <div v-if="report.changes_comment" class="changes-comment">
-              <strong>{{ t('reports.request_changes') }}:</strong>
-              <p>{{ report.changes_comment }}</p>
-            </div>
+            <div class="panel-card__body">
+              <div class="status-row">
+                <Badge type="report" :value="report.status" :text="getStatusLabel(report.status)" />
+                <span v-if="isReviewing" class="lock-countdown">{{ getLockCountdown() }}</span>
+              </div>
+              <div v-if="report.reviewer_name" class="reviewer-info">
+                <span v-if="isReviewer">{{ t('reports.reviewing_you') }}</span>
+                <span v-else>{{ t('reports.lock_by', { name: report.reviewer_name }) }}</span>
+              </div>
+              <div v-if="report.changes_comment" class="changes-comment">
+                <strong>{{ t('reports.request_changes') }}:</strong>
+                <p>{{ report.changes_comment }}</p>
+              </div>
 
-            <div class="panel-actions">
-              <AppButton
-                v-if="report.status === 'submitted' || (report.status === 'under_review' && !isReviewing)"
-                :text="t('reports.start_review')"
-                type="primary"
-                @click="startReview"
-              />
-              <AppButton
-                v-if="isReviewing"
-                :text="t('reports.release_review')"
-                type="secondary"
-                @click="releaseReview"
-              />
-              <AppButton
-                v-if="isReviewing"
-                :text="t('reports.request_changes')"
-                type="secondary"
-                @click="showRequestChangesModal = true"
-              />
-              <AppButton
-                v-if="isReviewing"
-                :text="t('reports.approve_report')"
-                type="primary"
-                @click="showApproveModal = true"
-              />
-              <AppButton
-                v-if="report.status === 'approved'"
-                :text="t('reports.deliver_report')"
-                type="primary"
-                :loading="delivering"
-                @click="showDeliverModal = true"
-              />
-              <AppButton
-                v-if="report.status === 'delivered'"
-                :text="t('reports.download_pdf')"
-                type="secondary"
-                :loading="pdfLoading"
-                @click="downloadPdf(false)"
-              />
-              <AppButton
-                v-if="report.status === 'delivered'"
-                :text="t('reports.regenerate_pdf')"
-                type="secondary"
-                :loading="pdfLoading"
-                @click="downloadPdf(true)"
-              />
+              <div class="panel-actions">
+                <AppButton
+                  v-if="report.status === 'submitted' || (report.status === 'under_review' && !isReviewing)"
+                  :text="t('reports.start_review')"
+                  type="primary"
+                  @click="startReview"
+                />
+                <AppButton
+                  v-if="isReviewing"
+                  :text="t('reports.release_review')"
+                  type="secondary"
+                  @click="releaseReview"
+                />
+                <AppButton
+                  v-if="isReviewing"
+                  :text="t('reports.request_changes')"
+                  type="secondary"
+                  @click="showRequestChangesModal = true"
+                />
+                <AppButton
+                  v-if="isReviewing"
+                  :text="t('reports.approve_report')"
+                  type="primary"
+                  @click="showApproveModal = true"
+                />
+                <AppButton
+                  v-if="report.status === 'approved'"
+                  :text="t('reports.deliver_report')"
+                  type="primary"
+                  :loading="delivering"
+                  @click="showDeliverModal = true"
+                />
+                <AppButton
+                  v-if="report.status === 'delivered'"
+                  :text="t('reports.download_pdf')"
+                  type="secondary"
+                  :loading="pdfLoading"
+                  @click="downloadPdf(false)"
+                />
+                <AppButton
+                  v-if="report.status === 'delivered'"
+                  :text="t('reports.regenerate_pdf')"
+                  type="secondary"
+                  :loading="pdfLoading"
+                  @click="downloadPdf(true)"
+                />
+              </div>
             </div>
           </div>
 
           <!-- Section inclusion checklist -->
           <div v-if="isReviewing || report.status === 'approved'" class="panel-card">
-            <h3 class="panel-card__title">{{ t('reports.section_inclusion') }}</h3>
-            <label
-              v-for="section in report.sections"
-              :key="section.report_section_id"
-              class="check-row"
-            >
-              <input
-                v-model="editedClientIncluded[section.report_section_id]"
-                type="checkbox"
-                :disabled="!isReviewing"
+            <div class="panel-card__header">
+              <h3 class="panel-card__title">{{ t('reports.section_inclusion') }}</h3>
+            </div>
+            <div class="panel-card__body">
+              <label
+                v-for="section in report.sections"
+                :key="section.report_section_id"
+                class="check-row"
               >
-              <span>{{ section.title }}</span>
-            </label>
+                <input
+                  v-model="editedClientIncluded[section.report_section_id]"
+                  type="checkbox"
+                  :disabled="!isReviewing"
+                >
+                <span>{{ section.title }}</span>
+              </label>
 
-            <div class="management-summary">
-              <label class="field-label">{{ t('reports.management_summary') }}</label>
-              <textarea
-                v-model="managementSummary"
-                rows="3"
-                class="field-input field-textarea"
-                :placeholder="t('reports.summary_placeholder')"
-                :disabled="!isReviewing"
-              />
+              <div class="management-summary">
+                <label class="field-label">{{ t('reports.management_summary') }}</label>
+                <textarea
+                  v-model="managementSummary"
+                  rows="3"
+                  class="field-input field-textarea"
+                  :placeholder="t('reports.summary_placeholder')"
+                  :disabled="!isReviewing"
+                />
+              </div>
             </div>
           </div>
 
           <!-- Client preview / PDF panel -->
           <div class="panel-card">
-            <div class="preview-tabs">
+            <div class="panel-card__header preview-tabs">
               <button
                 class="preview-tab"
                 :class="{ 'preview-tab--active': activePanel === 'preview' }"
@@ -810,8 +1022,10 @@ function clientPreviewSections(): ReportSection[] {
 
           <!-- History timeline -->
           <div class="panel-card">
-            <h3 class="panel-card__title">{{ t('reports.history') }}</h3>
-            <div class="history-list">
+            <div class="panel-card__header">
+              <h3 class="panel-card__title">{{ t('reports.history') }}</h3>
+            </div>
+            <div class="panel-card__body history-list">
               <div
                 v-for="entry in history"
                 :key="entry.history_id"
@@ -827,9 +1041,11 @@ function clientPreviewSections(): ReportSection[] {
                 <div v-if="entry.comment" class="history-comment">{{ entry.comment }}</div>
                 <div v-if="expandedHistory.has(entry.history_id) && entry.changes && Array.isArray(entry.changes)" class="history-changes">
                   <div v-for="(change, idx) in entry.changes" :key="idx" class="history-change">
-                    <span v-if="change.label">{{ change.label }}:</span>
-                    <span class="change-old">{{ change.old_value }}</span>
-                    <Icon name="lucide:arrow-right" :size="12" />
+                    <span v-if="change.label" class="change-label">{{ change.label }}:</span>
+                    <template v-if="change.old_value != null && String(change.old_value) !== ''">
+                      <span class="change-old">{{ change.old_value }}</span>
+                      <Icon name="lucide:arrow-right" :size="12" />
+                    </template>
                     <span class="change-new">{{ change.new_value }}</span>
                   </div>
                 </div>
@@ -837,6 +1053,7 @@ function clientPreviewSections(): ReportSection[] {
               <div v-if="!history.length" class="text-muted">—</div>
             </div>
           </div>
+
         </div>
       </div>
 
@@ -892,13 +1109,6 @@ function clientPreviewSections(): ReportSection[] {
           <AppButton :text="t('common.confirm')" type="primary" :loading="approving" @click="submitApprove" />
         </template>
       </AppDialogModal>
-
-      <MImagePreview
-        :show="showImagePreview"
-        :images="previewImages"
-        :initial-index="previewInitialIndex"
-        @close="closeImagePreview"
-      />
 
       <!-- Deliver Modal -->
       <AppDialogModal
@@ -971,22 +1181,22 @@ function clientPreviewSections(): ReportSection[] {
   gap: var(--space-4);
   flex-wrap: wrap;
   padding: var(--space-4);
-  background: var(--color-bg-elevated);
+  background: var(--color-bg-base);
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-md);
 }
 
-.review-header__left {
+.review-header__main {
   display: flex;
-  align-items: flex-start;
-  gap: var(--space-4);
+  flex-direction: column;
+  gap: var(--space-2);
 }
 
 .review-header__title {
   font-size: var(--font-size-lg);
-  font-weight: 600;
+  font-weight: 700;
   color: var(--color-text-primary);
-  margin: 0 0 var(--space-2);
+  margin: 0;
 }
 
 .review-header__divider {
@@ -1034,10 +1244,10 @@ function clientPreviewSections(): ReportSection[] {
 }
 
 .section-card {
-  background: var(--color-bg-elevated);
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg);
-  padding: var(--space-5);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-base);
+  overflow: hidden;
 }
 
 .section-card__header {
@@ -1045,8 +1255,8 @@ function clientPreviewSections(): ReportSection[] {
   align-items: center;
   justify-content: space-between;
   gap: var(--space-3);
-  margin-bottom: var(--space-4);
-  padding-bottom: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  background: var(--color-bg-elevated);
   border-bottom: 1px solid var(--color-border);
 }
 
@@ -1067,6 +1277,7 @@ function clientPreviewSections(): ReportSection[] {
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
+  padding: var(--space-4);
 }
 
 .field-row {
@@ -1140,20 +1351,15 @@ function clientPreviewSections(): ReportSection[] {
 .attachments-list {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: var(--space-2);
 }
 
-.media-thumb {
-  width: 100px;
-  height: 100px;
-  object-fit: cover;
-  border-radius: var(--radius-md);
-  cursor: pointer;
-  transition: transform 0.2s;
-}
-
-.media-thumb:hover {
-  transform: scale(1.05);
+.attachment-chip-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
 }
 
 .attachment-chip {
@@ -1167,6 +1373,72 @@ function clientPreviewSections(): ReportSection[] {
   color: var(--color-accent);
   font-size: var(--font-size-xs);
   text-decoration: none;
+}
+
+.attachment-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.5);
+  color: #fff;
+  cursor: pointer;
+  z-index: 1;
+  transition: background 0.2s;
+}
+
+.attachment-chip-wrap .attachment-remove,
+.new-file-chip .attachment-remove {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+}
+
+.attachment-remove:hover {
+  background: rgba(0, 0, 0, 0.7);
+}
+
+.new-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.new-file-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  background: var(--color-bg-elevated);
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+}
+
+.upload-add-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-accent);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+  transition: all var(--transition-base);
+}
+
+.upload-add-btn:hover {
+  border-color: var(--color-accent);
+  background: var(--color-bg-surface);
+}
+
+.upload-input {
+  display: none;
 }
 
 .audit-comparison {
@@ -1190,9 +1462,9 @@ function clientPreviewSections(): ReportSection[] {
 }
 
 .manager-notes {
-  margin-top: var(--space-4);
-  padding-top: var(--space-4);
+  padding: var(--space-4);
   border-top: 1px dashed var(--color-border);
+  background: var(--color-bg-surface);
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
@@ -1207,15 +1479,31 @@ function clientPreviewSections(): ReportSection[] {
   display: flex;
   justify-content: flex-end;
   padding: var(--space-4);
-  background: var(--color-bg-elevated);
+  background: var(--color-bg-base);
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-md);
 }
 
 .panel-card {
-  background: var(--color-bg-elevated);
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-base);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.panel-card__header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  background: var(--color-bg-elevated);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.panel-card__body {
   padding: var(--space-4);
   display: flex;
   flex-direction: column;
@@ -1223,7 +1511,7 @@ function clientPreviewSections(): ReportSection[] {
 }
 
 .panel-card__title {
-  font-size: var(--font-size-md);
+  font-size: var(--font-size-base);
   font-weight: 600;
   color: var(--color-text-primary);
   margin: 0;
@@ -1433,8 +1721,10 @@ function clientPreviewSections(): ReportSection[] {
   align-items: center;
   gap: var(--space-1);
   color: var(--color-text-secondary);
+  flex-wrap: wrap;
 }
 
+.change-label { flex-shrink: 0; }
 .change-old { text-decoration: line-through; }
 .change-new { color: var(--color-text-primary); }
 
