@@ -62,6 +62,7 @@ const delivering = ref(false)
 const pdfLoading = ref(false)
 const isSaving = ref(false)
 const activePanel = ref<'preview' | 'pdf' | null>('preview')
+const pdfEmbedUrl = ref<string>('')
 
 const expandedHistory = ref<Set<number>>(new Set())
 
@@ -388,16 +389,39 @@ async function submitDeliver() {
   }
 }
 
+async function fetchPdfUrl(regenerate = false): Promise<string | null> {
+  const response = await reportApi.exportReportPdf(props.reportId, regenerate)
+  if (response.rc === 0 && response.pdf_url) {
+    return response.pdf_url
+  }
+  return null
+}
+
 async function downloadPdf(regenerate = false) {
   pdfLoading.value = true
   try {
-    const response = await reportApi.exportReportPdf(props.reportId, regenerate)
-    if (response.rc === 0 && response.pdf_url) {
-      openPdfUrl(response.pdf_url)
+    const url = await fetchPdfUrl(regenerate)
+    if (url) {
+      window.open(url, '_blank')
     }
   } catch (err) {
     console.error('Failed to get PDF:', err)
     toastStore.error(err instanceof Error ? err.message : 'Failed to get PDF')
+  } finally {
+    pdfLoading.value = false
+  }
+}
+
+async function loadPdfEmbed(regenerate = false) {
+  pdfLoading.value = true
+  try {
+    const url = await fetchPdfUrl(regenerate)
+    if (url) {
+      pdfEmbedUrl.value = url
+    }
+  } catch (err) {
+    console.error('Failed to load PDF embed:', err)
+    toastStore.error(err instanceof Error ? err.message : 'Failed to load PDF')
   } finally {
     pdfLoading.value = false
   }
@@ -468,6 +492,12 @@ onBeforeUnmount(async () => {
 watch(() => props.reportId, () => {
   fetchReport()
   fetchHistory()
+})
+
+watch(activePanel, (panel) => {
+  if (panel === 'pdf' && !pdfEmbedUrl.value) {
+    loadPdfEmbed(false)
+  }
 })
 
 function toggleHistory(historyId: number) {
@@ -996,6 +1026,28 @@ function clientPreviewSections(): ReportSection[] {
                 <div v-for="field in section.fields" :key="field.field_id" class="preview-field">
                   <label>{{ field.label }}</label>
                   <div>{{ renderFieldValue(field) }}</div>
+                  <div v-if="field.attachments?.length" class="preview-attachments">
+                    <MImagePreview
+                      v-for="(att, idx) in imageAttachments(field)"
+                      :key="att.attachment_id"
+                      :show="false"
+                      :images="imageAttachments(field).map(a => a.url)"
+                      :initial-index="idx"
+                      :thumbnail-url="att.url"
+                      :show-thumbnail-close="false"
+                      :thumbnail-size="80"
+                    />
+                    <a
+                      v-for="att in nonImageAttachments(field)"
+                      :key="att.attachment_id"
+                      :href="att.url"
+                      target="_blank"
+                      class="attachment-link"
+                    >
+                      <Icon name="lucide:file" :size="14" />
+                      <span>{{ att.url?.split('/').pop() || att.url }}</span>
+                    </a>
+                  </div>
                 </div>
               </div>
               <div class="preview-footer">
@@ -1004,7 +1056,17 @@ function clientPreviewSections(): ReportSection[] {
             </div>
 
             <div v-else-if="activePanel === 'pdf'" class="pdf-panel">
-              <AppButton :text="t('reports.download_pdf')" type="primary" :loading="pdfLoading" @click="downloadPdf(false)" />
+              <div v-if="pdfEmbedUrl" class="pdf-embed">
+                <iframe :src="pdfEmbedUrl" type="application/pdf" />
+              </div>
+              <div v-else-if="pdfLoading" class="pdf-loading">
+                <Icon name="lucide:loader-2" :size="24" class="spinner" />
+                <span>{{ t('common.loading') }}</span>
+              </div>
+              <div class="pdf-actions">
+                <AppButton :text="t('reports.download_pdf')" type="primary" :loading="pdfLoading" @click="downloadPdf(false)" />
+                <AppButton :text="t('reports.regenerate_pdf')" type="secondary" :loading="pdfLoading" @click="loadPdfEmbed(true)" />
+              </div>
             </div>
           </div>
 
@@ -1647,6 +1709,32 @@ function clientPreviewSections(): ReportSection[] {
   font-size: var(--font-size-sm);
 }
 
+.preview-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.attachment-link {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  text-decoration: none;
+  word-break: break-all;
+}
+
+.attachment-link:hover {
+  color: var(--color-accent);
+  border-color: var(--color-accent);
+}
+
 .preview-footer {
   margin-top: var(--space-6);
   padding-top: var(--space-4);
@@ -1658,8 +1746,39 @@ function clientPreviewSections(): ReportSection[] {
 
 .pdf-panel {
   display: flex;
-  justify-content: center;
+  flex-direction: column;
+  gap: var(--space-4);
   padding: var(--space-4);
+}
+
+.pdf-embed {
+  width: 100%;
+  height: 600px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: var(--color-bg-surface);
+}
+
+.pdf-embed iframe {
+  width: 100%;
+  height: 100%;
+  border: none;
+}
+
+.pdf-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  height: 200px;
+  color: var(--color-text-secondary);
+}
+
+.pdf-actions {
+  display: flex;
+  justify-content: center;
+  gap: var(--space-2);
 }
 
 .history-list {
