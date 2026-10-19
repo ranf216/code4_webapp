@@ -23,7 +23,10 @@ const page = ref(0)
 const loading = ref(false)
 const error = ref('')
 
-const activeTab = ref<TabKey>('pending-review')
+const validTabIds: TabKey[] = ['all', 'pending-review', 'changes-requested', 'approved', 'delivered']
+const activeTab = ref<TabKey>(
+  validTabIds.includes(route.query.tab as TabKey) ? (route.query.tab as TabKey) : 'pending-review'
+)
 const searchQuery = ref('')
 const selectedCommunity = ref<string>('')
 const selectedOfficer = ref<string>('')
@@ -152,6 +155,7 @@ function setTab(key: TabKey) {
   if (activeTab.value === key) return
   activeTab.value = key
   page.value = 0
+  router.replace({ query: { ...route.query, tab: key } })
   fetchReports()
 }
 
