@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useTranslation } from '~/composables/useI18n'
 import type { GetOverviewResponse } from '~/api/types/dashboard'
 import { secondsAgo } from '~/utils/dashboard'
@@ -16,6 +16,24 @@ const emit = defineEmits<{
 
 const { t } = useTranslation()
 const router = useRouter()
+
+// Tick every second so "Last updated: Xs ago" counts up live (§5.3)
+const now = ref(Date.now())
+let tickTimer: ReturnType<typeof setInterval> | null = null
+
+onMounted(() => {
+  tickTimer = setInterval(() => { now.value = Date.now() }, 1000)
+})
+
+onBeforeUnmount(() => {
+  if (tickTimer) clearInterval(tickTimer)
+})
+
+const updatedSeconds = computed(() => {
+  if (!props.updatedOn) return 0
+  now.value // track
+  return secondsAgo(props.updatedOn)
+})
 
 interface KpiCard {
   key: string
@@ -76,7 +94,7 @@ const cards = computed<KpiCard[]>(() => [
       <h2 class="overview__title">{{ t('dashboard.overview_title') }}</h2>
       <div class="overview__meta">
         <span v-if="updatedOn" class="overview__updated">
-          {{ t('dashboard.last_updated') }} {{ secondsAgo(updatedOn) }}s
+          {{ t('dashboard.last_updated') }} {{ updatedSeconds }}s
         </span>
         <button
           type="button"
@@ -91,7 +109,10 @@ const cards = computed<KpiCard[]>(() => [
     </div>
 
     <!-- KPI cards -->
-    <div class="kpi-grid" :class="{ 'is-loading': loading && !overview }">
+    <div v-if="loading && !overview" class="kpi-grid">
+      <span v-for="n in 5" :key="n" class="kpi-skeleton" />
+    </div>
+    <div v-else class="kpi-grid" :class="{ 'is-loading': loading }">
       <button
         v-for="card in cards"
         :key="card.key"
@@ -221,6 +242,19 @@ const cards = computed<KpiCard[]>(() => [
   color: var(--color-text-muted);
 }
 
+.kpi-skeleton {
+  display: block;
+  height: 100px;
+  border-radius: var(--radius-md);
+  background: linear-gradient(90deg, var(--color-bg-elevated) 25%, var(--color-surface, var(--color-bg-elevated)) 50%, var(--color-bg-elevated) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s linear infinite;
+}
+
+@keyframes shimmer {
+  to { background-position: -200% 0; }
+}
+
 .is-loading {
   opacity: 0.5;
   pointer-events: none;
@@ -228,7 +262,7 @@ const cards = computed<KpiCard[]>(() => [
 
 .feeds-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(350px, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: var(--space-4);
 }
 

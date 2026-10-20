@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useTranslation } from '~/composables/useI18n'
-import type { GetCallsStatisticsResponse } from '~/api/types/dashboard'
+import type { DashboardRecentCall, GetCallsStatisticsResponse } from '~/api/types/dashboard'
 import {
   CALL_CATEGORY_COLORS,
   CALL_STATUS_COLORS,
@@ -75,7 +75,7 @@ const priorityBars = computed<BarItem[]>(() => {
 const filteredRecentCalls = computed(() => {
   const calls = props.stats?.recent_calls ?? []
   const list = categoryFilter.value
-    ? calls.filter((c) => c.category === categoryFilter.value)
+    ? calls.filter((c: DashboardRecentCall) => c.category === categoryFilter.value)
     : calls
   return list.slice(0, 5)
 })
@@ -94,8 +94,11 @@ function onCategorySelect(key: string) {
       </span>
     </div>
 
-    <div v-if="loading && !stats" class="panel__loading">
-      <Icon name="lucide:loader-2" :size="24" class="spinner" />
+    <div v-if="loading && !stats" class="panel__skeleton">
+      <span class="skeleton-block skeleton-block--tile" />
+      <span class="skeleton-block skeleton-block--tile" />
+      <span class="skeleton-block skeleton-block--tile" />
+      <span class="skeleton-block skeleton-block--wide" />
     </div>
 
     <template v-else>
@@ -143,7 +146,7 @@ function onCategorySelect(key: string) {
           {{ t('dashboard.clear_filter') }}
         </button>
       </div>
-      <RecentCallsFeed :items="filteredRecentCalls" />
+      <RecentCallsFeed :items="filteredRecentCalls" variant="compact" />
     </template>
   </section>
 </template>
@@ -198,11 +201,25 @@ function onCategorySelect(key: string) {
   text-decoration: underline;
 }
 
-.panel__loading {
-  display: flex;
-  justify-content: center;
-  padding: var(--space-6);
-  color: var(--color-text-muted);
+.panel__skeleton {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: var(--space-3);
+}
+
+.skeleton-block {
+  display: block;
+  border-radius: var(--radius-md);
+  background: linear-gradient(90deg, var(--color-bg-elevated) 25%, var(--color-surface, var(--color-bg-elevated)) 50%, var(--color-bg-elevated) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s linear infinite;
+}
+
+.skeleton-block--tile { height: 80px; }
+.skeleton-block--wide { grid-column: 1 / -1; height: 220px; }
+
+@keyframes shimmer {
+  to { background-position: -200% 0; }
 }
 
 .metrics-bar {

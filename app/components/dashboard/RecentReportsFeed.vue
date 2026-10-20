@@ -6,6 +6,7 @@ import { REPORT_STATUS_COLORS, colorFor, reportStatusTextColor, relativeTime, fu
 defineProps<{
   items: DashboardRecentReport[]
   loading?: boolean
+  variant?: 'card' | 'compact'
 }>()
 
 const { t } = useTranslation()
@@ -21,7 +22,7 @@ function goToReport(id: number) {
 </script>
 
 <template>
-  <div class="feed">
+  <div class="feed" :class="{ 'feed--compact': variant === 'compact' }">
     <div class="feed__header">
       <h3 class="feed__title">
         {{ t('dashboard.recent_reports') }}
@@ -32,14 +33,25 @@ function goToReport(id: number) {
       </button>
     </div>
 
-    <div v-if="loading" class="feed__loading">
-      <Icon name="lucide:loader-2" :size="20" class="spinner" />
+    <div v-if="loading" class="feed__skeleton">
+      <div v-for="n in 3" :key="n" class="skeleton-item">
+        <span class="skeleton-block skeleton-block--badge" />
+        <span class="skeleton-block skeleton-block--line" />
+        <span class="skeleton-block skeleton-block--short" />
+      </div>
     </div>
     <div v-else-if="!items.length" class="feed__empty">
       <Icon name="lucide:check-circle" :size="20" />
       <span>{{ t('dashboard.no_open_reports') }}</span>
     </div>
     <div v-else class="feed__list">
+      <div v-if="variant === 'compact'" class="feed__columns" aria-hidden="true">
+        <span>{{ t('dashboard.report_column_title') }}</span>
+        <span>{{ t('dashboard.report_column_category') }}</span>
+        <span>{{ t('dashboard.call_column_officer') }}</span>
+        <span>{{ t('dashboard.call_column_community') }}</span>
+        <span>{{ t('dashboard.call_column_created') }}</span>
+      </div>
       <button
         v-for="report in items"
         :key="report.report_id"
@@ -56,7 +68,7 @@ function goToReport(id: number) {
         </div>
         <p class="feed-item__desc">{{ humanizeKey(report.category) }}</p>
         <div class="feed-item__meta">
-          <span v-if="report.officer_name">{{ t('dashboard.filed_by') }} {{ report.officer_name }}</span>
+          <span v-if="report.officer_name || variant === 'compact'">{{ variant === 'compact' ? (report.officer_name || '—') : `${t('dashboard.filed_by')} ${report.officer_name}` }}</span>
           <span>{{ report.community_name }}</span>
         </div>
         <span class="feed-item__time" :title="fullDateTime(report.created_on)">
@@ -118,7 +130,6 @@ function goToReport(id: number) {
   color: var(--color-accent);
 }
 
-.feed__loading,
 .feed__empty {
   display: flex;
   align-items: center;
@@ -198,11 +209,109 @@ function goToReport(id: number) {
   color: var(--color-text-muted);
 }
 
-.spinner {
-  animation: spin 1s linear infinite;
+.feed__columns {
+  display: none;
 }
 
-@keyframes spin {
-  to { transform: rotate(360deg); }
+.feed-item:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
 }
+
+.feed--compact .feed__list {
+  overflow-x: auto;
+}
+
+@media (min-width: 0px) {
+  .feed--compact .feed__columns,
+  .feed--compact .feed-item {
+    min-width: 740px;
+  }
+
+  .feed--compact {
+    border-radius: var(--radius-lg);
+  }
+
+  .feed--compact .feed__columns,
+  .feed--compact .feed-item {
+    display: grid;
+    grid-template-columns: minmax(180px, 2fr) minmax(120px, 1fr) minmax(100px, 1fr) minmax(120px, 1.4fr) minmax(90px, 0.8fr);
+    align-items: center;
+    gap: 0;
+    padding: 0;
+    font-size: var(--font-size-sm);
+  }
+
+  .feed--compact .feed__columns {
+    background: var(--color-surface);
+    border-bottom: 1px solid var(--color-border);
+    color: var(--color-text-secondary);
+    font-weight: 600;
+    white-space: nowrap;
+  }
+
+  .feed--compact .feed__columns > span,
+  .feed--compact .feed-item > .feed-item__row,
+  .feed--compact .feed-item > .feed-item__desc,
+  .feed--compact .feed-item__meta > span,
+  .feed--compact .feed-item > .feed-item__time {
+    padding: var(--space-3) var(--space-4);
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .feed--compact .feed-item:hover {
+    background: var(--color-surface);
+  }
+
+  .feed--compact .feed-item__meta {
+    display: contents;
+  }
+
+  .feed--compact .feed-item__meta > span,
+  .feed--compact .feed-item__time,
+  .feed--compact .feed-item__desc {
+    color: var(--color-text-secondary);
+    font-size: var(--font-size-sm);
+  }
+
+  .feed--compact .feed-item__meta span + span::before {
+    content: none;
+  }
+}
+
+.feed__skeleton {
+  display: flex;
+  flex-direction: column;
+}
+
+.skeleton-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.skeleton-item:last-child {
+  border-bottom: none;
+}
+
+.skeleton-block {
+  display: block;
+  height: 12px;
+  border-radius: var(--radius-sm);
+  background: linear-gradient(90deg, var(--color-bg-elevated) 25%, var(--color-surface, var(--color-bg-elevated)) 50%, var(--color-bg-elevated) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s linear infinite;
+}
+
+.skeleton-block--badge { width: 90px; height: 16px; }
+.skeleton-block--line { width: 85%; }
+.skeleton-block--short { width: 55%; }
+
+@keyframes shimmer {
+  to { background-position: -200% 0; }
+}
+
 </style>

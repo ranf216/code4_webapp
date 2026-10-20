@@ -6,6 +6,7 @@ import { PRIORITY_COLORS, TASK_STATUS_COLORS, colorFor, priorityIcon, relativeTi
 defineProps<{
   items: DashboardRecentTask[]
   loading?: boolean
+  variant?: 'card' | 'compact'
 }>()
 
 const { t } = useTranslation()
@@ -17,7 +18,7 @@ function goToTasks() {
 </script>
 
 <template>
-  <div class="feed">
+  <div class="feed" :class="{ 'feed--compact': variant === 'compact' }">
     <div class="feed__header">
       <h3 class="feed__title">
         {{ t('dashboard.recent_tasks') }}
@@ -28,14 +29,25 @@ function goToTasks() {
       </button>
     </div>
 
-    <div v-if="loading" class="feed__loading">
-      <Icon name="lucide:loader-2" :size="20" class="spinner" />
+    <div v-if="loading" class="feed__skeleton">
+      <div v-for="n in 3" :key="n" class="skeleton-item">
+        <span class="skeleton-block skeleton-block--badge" />
+        <span class="skeleton-block skeleton-block--line" />
+        <span class="skeleton-block skeleton-block--short" />
+      </div>
     </div>
     <div v-else-if="!items.length" class="feed__empty">
       <Icon name="lucide:check-circle" :size="20" />
       <span>{{ t('dashboard.no_open_tasks') }}</span>
     </div>
     <div v-else class="feed__list">
+      <div v-if="variant === 'compact'" class="feed__columns" aria-hidden="true">
+        <span>{{ t('dashboard.task_column_title') }}</span>
+        <span>{{ t('dashboard.call_column_description') }}</span>
+        <span>{{ t('dashboard.task_column_assignee') }}</span>
+        <span>{{ t('dashboard.call_column_community') }}</span>
+        <span>{{ t('dashboard.call_column_created') }}</span>
+      </div>
       <button
         v-for="task in items"
         :key="task.task_id"
@@ -58,9 +70,9 @@ function goToTasks() {
             :style="{ backgroundColor: colorFor(TASK_STATUS_COLORS, task.status) }"
           >{{ humanizeKey(task.status) }}</span>
         </div>
-        <p class="feed-item__desc">{{ truncate(task.description, 60) }}</p>
+        <p class="feed-item__desc" :title="variant === 'compact' ? task.description : undefined">{{ variant === 'compact' ? (task.description || '—') : truncate(task.description, 60) }}</p>
         <div class="feed-item__meta">
-          <span v-if="task.assignee_name">{{ t('dashboard.assigned_to') }} {{ task.assignee_name }}</span>
+          <span v-if="task.assignee_name || variant === 'compact'">{{ variant === 'compact' ? (task.assignee_name || t('dashboard.unassigned')) : `${t('dashboard.assigned_to')} ${task.assignee_name}` }}</span>
           <span>{{ task.community_name }}</span>
         </div>
         <span class="feed-item__time" :title="fullDateTime(task.created_on)">
@@ -122,7 +134,6 @@ function goToTasks() {
   color: var(--color-accent);
 }
 
-.feed__loading,
 .feed__empty {
   display: flex;
   align-items: center;
@@ -222,11 +233,118 @@ function goToTasks() {
   color: var(--color-text-muted);
 }
 
-.spinner {
-  animation: spin 1s linear infinite;
+.feed__columns {
+  display: none;
 }
 
-@keyframes spin {
-  to { transform: rotate(360deg); }
+.feed-item:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
 }
+
+.feed--compact .feed__list {
+  overflow-x: auto;
+}
+
+@media (min-width: 0px) {
+  .feed--compact .feed__columns,
+  .feed--compact .feed-item {
+    min-width: 780px;
+  }
+
+  .feed--compact {
+    border-radius: var(--radius-lg);
+  }
+
+  .feed--compact .feed__columns,
+  .feed--compact .feed-item {
+    display: grid;
+    grid-template-columns: minmax(180px, 2fr) minmax(160px, 2fr) minmax(100px, 1fr) minmax(120px, 1.4fr) minmax(90px, 0.8fr);
+    align-items: center;
+    gap: 0;
+    padding: 0;
+    font-size: var(--font-size-sm);
+  }
+
+  .feed--compact .feed__columns {
+    background: var(--color-surface);
+    border-bottom: 1px solid var(--color-border);
+    color: var(--color-text-secondary);
+    font-weight: 600;
+    white-space: nowrap;
+  }
+
+  .feed--compact .feed__columns > span,
+  .feed--compact .feed-item > .feed-item__row,
+  .feed--compact .feed-item > .feed-item__desc,
+  .feed--compact .feed-item__meta > span,
+  .feed--compact .feed-item > .feed-item__time {
+    padding: var(--space-3) var(--space-4);
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .feed--compact .feed-item:hover {
+    background: var(--color-surface);
+  }
+
+  .feed--compact .feed-item__meta {
+    display: contents;
+  }
+
+  .feed--compact .feed-item__meta > span,
+  .feed--compact .feed-item__time {
+    color: var(--color-text-secondary);
+    font-size: var(--font-size-sm);
+  }
+
+  .feed--compact .feed-item__meta span + span::before {
+    content: none;
+  }
+
+  .feed--compact .feed-item__desc {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    overflow: hidden;
+    font-size: var(--font-size-sm);
+    color: var(--color-text-primary);
+  }
+}
+
+.feed__skeleton {
+  display: flex;
+  flex-direction: column;
+}
+
+.skeleton-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.skeleton-item:last-child {
+  border-bottom: none;
+}
+
+.skeleton-block {
+  display: block;
+  height: 12px;
+  border-radius: var(--radius-sm);
+  background: linear-gradient(90deg, var(--color-bg-elevated) 25%, var(--color-surface, var(--color-bg-elevated)) 50%, var(--color-bg-elevated) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s linear infinite;
+}
+
+.skeleton-block--badge { width: 90px; height: 16px; }
+.skeleton-block--line { width: 85%; }
+.skeleton-block--short { width: 55%; }
+
+@keyframes shimmer {
+  to { background-position: -200% 0; }
+}
+
 </style>

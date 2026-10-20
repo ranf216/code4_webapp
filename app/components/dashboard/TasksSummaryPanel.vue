@@ -22,7 +22,7 @@ const taskTypeNames = ref<Record<string, string>>({})
 
 onMounted(async () => {
   try {
-    const res = await taskApi.getTaskMetadata()
+    const res = await taskApi.getTaskMetadata({ showLoading: false })
     if (res.rc === 0) {
       taskTypeNames.value = (res as unknown as { task_types?: Record<string, string> }).task_types ?? {}
     }
@@ -67,24 +67,24 @@ const typeBars = computed<BarItem[]>(() => {
       </span>
     </div>
 
-    <div v-if="loading && !summary" class="panel__loading">
-      <Icon name="lucide:loader-2" :size="24" class="spinner" />
+    <div v-if="loading && !summary" class="panel__skeleton">
+      <span class="skeleton-block skeleton-block--tile" />
+      <span class="skeleton-block skeleton-block--tile" />
+      <span class="skeleton-block skeleton-block--tile" />
+      <span class="skeleton-block skeleton-block--wide" />
     </div>
 
     <template v-else>
-      <div class="metrics-bar">
-        <div class="metric-tile metric-tile--accent">
-          <span class="metric-tile__label">{{ t('dashboard.metric_open_tasks') }}</span>
-          <span class="metric-tile__value">{{ summary?.open_tasks_count ?? 0 }}</span>
-        </div>
-      </div>
-
       <p v-if="summary?.from_date && summary?.to_date" class="panel__range-note">
         {{ t('dashboard.breakdown_filtered', { from: summary.from_date, to: summary.to_date }) }}
         <br>{{ t('dashboard.open_count_current_state') }}
       </p>
 
       <div class="panel__charts">
+        <div class="metric-tile metric-tile--accent">
+          <span class="metric-tile__label">{{ t('dashboard.metric_open_tasks') }}</span>
+          <span class="metric-tile__value">{{ summary?.open_tasks_count ?? 0 }}</span>
+        </div>
         <div class="chart-card">
           <h4 class="chart-card__title">
             {{ t('dashboard.chart_task_status') }}
@@ -104,7 +104,7 @@ const typeBars = computed<BarItem[]>(() => {
         </div>
       </div>
 
-      <RecentTasksFeed :items="(summary?.recent_tasks ?? []).slice(0, 5)" />
+      <RecentTasksFeed :items="(summary?.recent_tasks ?? []).slice(0, 5)" variant="compact" />
     </template>
   </section>
 </template>
@@ -146,24 +146,31 @@ const typeBars = computed<BarItem[]>(() => {
   color: var(--color-text-muted);
 }
 
-.panel__loading {
-  display: flex;
-  justify-content: center;
-  padding: var(--space-6);
-  color: var(--color-text-muted);
-}
-
-.metrics-bar {
+.panel__skeleton {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: var(--space-3);
-  max-width: 400px;
+}
+
+.skeleton-block {
+  display: block;
+  border-radius: var(--radius-md);
+  background: linear-gradient(90deg, var(--color-bg-elevated) 25%, var(--color-surface, var(--color-bg-elevated)) 50%, var(--color-bg-elevated) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s linear infinite;
+}
+
+.skeleton-block--tile { height: 80px; }
+.skeleton-block--wide { grid-column: 1 / -1; height: 220px; }
+
+@keyframes shimmer {
+  to { background-position: -200% 0; }
 }
 
 .metric-tile {
   display: flex;
   flex-direction: column;
-  justify-content: center;
+  justify-content: flex-start;
   gap: var(--space-1);
   min-height: 80px;
   padding: var(--space-3);
@@ -189,8 +196,18 @@ const typeBars = computed<BarItem[]>(() => {
 
 .panel__charts {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: minmax(0, 10fr) minmax(0, 45fr) minmax(0, 45fr);
   gap: var(--space-4);
+}
+
+.panel__charts :deep(.donut-chart) {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.panel__charts :deep(.donut-chart__svg) {
+  align-self: center;
+  flex-shrink: 0;
 }
 
 .chart-card {

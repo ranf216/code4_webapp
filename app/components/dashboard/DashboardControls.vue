@@ -43,6 +43,11 @@ const scopeValue = computed({
   set: (v: string) => emit('update:scope', v as DashboardScope),
 })
 
+function onCommunityChange(event: Event) {
+  const target = event.target as HTMLSelectElement
+  emit('update:community', Number(target.value))
+}
+
 function selectPreset(preset: DashboardDatePreset) {
   showCustomPicker.value = false
   // Clicking the active preset deselects it — no date range sent.
@@ -117,7 +122,7 @@ onBeforeUnmount(() => {
       <select
         class="community-select"
         :value="communityId"
-        @change="emit('update:community', Number(($event.target as HTMLSelectElement).value))"
+        @change="onCommunityChange"
       >
         <option :value="0">{{ t('dashboard.all_communities') }}</option>
         <option v-for="c in communities" :key="c.community_id" :value="c.community_id">
@@ -208,6 +213,7 @@ onBeforeUnmount(() => {
   flex: 1;
   display: flex;
   justify-content: center;
+  min-width: 0;
 }
 
 .date-presets {
@@ -291,19 +297,38 @@ onBeforeUnmount(() => {
   flex-shrink: 0;
 }
 
-@media (max-width: 991px) {
+@media (min-width: 768px) and (max-width: 991px) {
+  .dashboard-controls {
+    flex-wrap: wrap;
+  }
+  .control-dates {
+    order: 3;
+    flex-basis: 100%;
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 767px) {
   .dashboard-controls {
     flex-direction: column;
     align-items: stretch;
   }
+  .control-group,
   .control-dates {
-    justify-content: flex-start;
+    width: 100%;
+    justify-content: stretch;
+  }
+  .date-presets {
+    width: 100%;
   }
   .community-select {
     width: 100%;
+    min-width: 0;
   }
-  .control-scope {
-    align-self: flex-start;
+  .custom-popover {
+    left: 0;
+    right: auto;
+    width: min(100%, 260px);
   }
 }
 </style>
