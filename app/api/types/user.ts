@@ -27,6 +27,26 @@ export interface LoginTwoFactorResponse {
 // Login response union type for both scenarios
 export type LoginResponse = LoginSuccessResponse | LoginTwoFactorResponse
 
+export interface ForgotPasswordRequest {
+  '#request': 'User/forgot_password'
+  email: string
+  language: string
+}
+
+export interface ForgotPasswordResponse {
+  link?: string
+}
+
+export interface ResetPasswordRequest {
+  '#request': 'User/reset_password'
+  user_id: string
+  activation_code: string
+  password: string
+  language: string
+}
+
+export type ResetPasswordResponse = Record<string, never>
+
 // Type guard to check if response requires two-factor authentication
 export function isTwoFactorRequired(response: LoginResponse | undefined | null): response is LoginTwoFactorResponse {
   return !!response && typeof response === 'object' && 'second_factor_key' in response

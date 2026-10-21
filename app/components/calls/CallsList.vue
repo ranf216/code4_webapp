@@ -657,8 +657,8 @@ watch(
 }
 
 @keyframes panic-pulse {
-  0%, 100% { box-shadow: inset 4px 0 0 0 #c53030; background: rgba(197, 48, 48, 0.12); }
-  50% { box-shadow: inset 4px 0 0 0 #c53030; background: rgba(197, 48, 48, 0.28); }
+  0%, 100% { background: rgba(197, 48, 48, 0.12); }
+  50% { background: rgba(197, 48, 48, 0.28); }
 }
 
 .call-row--emergency td {
@@ -667,6 +667,10 @@ watch(
 
 .call-row--panic td {
   animation: panic-pulse 1s infinite;
+}
+
+.call-row--panic td:first-child {
+  box-shadow: inset 3px 0 0 0 #c53030;
 }
 
 .call-row--panic .resident-name {

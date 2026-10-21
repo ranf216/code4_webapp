@@ -15,7 +15,10 @@ let activeInstances = 0
  * for use after mark_as_read / mark_all_as_read / delete_notification.
  */
 export function useNotificationBadge() {
+  const authStore = useAuthStore()
+
   async function fetchUnreadCount() {
+    if (!authStore.isAuthenticated || !authStore.token) return
     try {
       const response = await notificationApi.getUnreadCount({ showLoading: false })
       if (response.rc === 0) {
@@ -27,7 +30,7 @@ export function useNotificationBadge() {
   }
 
   function startPolling() {
-    if (pollTimer) return
+    if (pollTimer || !authStore.isAuthenticated || !authStore.token) return
     isPolling.value = true
     pollTimer = setInterval(fetchUnreadCount, POLL_INTERVAL)
   }
@@ -69,6 +72,16 @@ export function useNotificationBadge() {
     if (activeInstances === 1) {
       fetchUnreadCount()
       startPolling()
+    }
+  })
+
+  watch(() => authStore.isAuthenticated && !!authStore.token, (authenticated) => {
+    if (authenticated) {
+      fetchUnreadCount()
+      startPolling()
+    } else {
+      stopPolling()
+      reset()
     }
   })
 
