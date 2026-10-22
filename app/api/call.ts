@@ -9,6 +9,7 @@ import type {
   AssignCallRequest,
   CancelCallRequest,
   DeleteTestCallRequest,
+  AddCallDocumentRequest,
 } from './types/call'
 
 class CallApi extends BaseApiClient {
@@ -89,6 +90,25 @@ class CallApi extends BaseApiClient {
       {
         '#request': 'Call/cancel_call',
         call_id: callId,
+      },
+      options
+    )
+  }
+
+  /**
+   * Attach document files and/or a text transcription to a call.
+   * Admins can attach to any call. File IDs must be obtained via
+   * File/upload_file_base64 first. At least one of document_file_ids
+   * or transcription_text should be provided.
+   */
+  async addCallDocument(
+    params: Omit<AddCallDocumentRequest, '#request'>,
+    options?: { showLoading?: boolean; loadingMessage?: string }
+  ): Promise<ApiResponse<void>> {
+    return this.request<void>(
+      {
+        '#request': 'Call/add_call_document',
+        ...params,
       },
       options
     )
