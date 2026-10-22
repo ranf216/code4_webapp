@@ -2,14 +2,27 @@
 import { ref, onMounted } from 'vue'
 import TemplateFormatting from '~/components/reports/TemplateFormatting.vue'
 import { reportTemplateApi } from '~/api/reportTemplate'
-import type { ReportTemplate } from '~/api/types/reportTemplate'
+import type { ReportTemplate, ReportTemplateStyle } from '~/api/types/reportTemplate'
 
 definePageMeta({ layout: 'default' })
+
+const DEFAULT_STYLE: ReportTemplateStyle = {
+  company_logo: null,
+  accent_color: null,
+  header_layout: 'standard',
+  font: 'arial',
+  page_numbering: true,
+  confidentiality_footer: null,
+  date_format: 'mm_dd_yyyy',
+  section_breaks: 'continuous',
+  include_cover_page: false,
+}
 
 const route = useRoute()
 const { t } = useTranslation()
 
 const template = ref<ReportTemplate | null>(null)
+const templateStyle = ref<ReportTemplateStyle | null>(null)
 const loading = ref(true)
 const error = ref('')
 
@@ -19,7 +32,20 @@ onMounted(async () => {
   try {
     const res = await reportTemplateApi.getTemplate(Number(route.params.id), { showLoading: false })
     template.value = res.template ?? null
-    if (!template.value) error.value = t('tpl.not_found')
+    if (!template.value) {
+      error.value = t('tpl.not_found')
+      return
+    }
+    templateStyle.value = template.value.style ?? null
+    if (!templateStyle.value) {
+      try {
+        const styleRes = await reportTemplateApi.getTemplateStyle(template.value.template_id, { showLoading: false })
+        templateStyle.value = styleRes.style ?? null
+      } catch {
+        templateStyle.value = null
+      }
+    }
+    if (!templateStyle.value) templateStyle.value = { ...DEFAULT_STYLE }
   } catch (err) {
     error.value = err instanceof Error ? err.message : 'Failed to load template'
   } finally {
@@ -39,14 +65,11 @@ onMounted(async () => {
       <NuxtLink to="/report-templates" class="back-link">{{ t('common.back') }}</NuxtLink>
     </div>
     <TemplateFormatting
-      v-else-if="template?.style"
+      v-else-if="template && templateStyle"
       :template-id="template.template_id"
       :template-name="template.name"
-      :style="template.style"
+      :style="templateStyle"
     />
-    <div v-else class="page-state">
-      <p>{{ t('tpl.not_found') }}</p>
-    </div>
   </div>
 </template>
 

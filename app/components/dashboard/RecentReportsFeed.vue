@@ -124,6 +124,7 @@ function goToReport(id: number) {
   color: var(--color-text-secondary);
   font-size: var(--font-size-xs);
   cursor: pointer;
+  margin-top:0px;
 }
 
 .feed__show-all:hover {

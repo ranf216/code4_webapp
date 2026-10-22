@@ -182,6 +182,7 @@ const cards = computed<KpiCard[]>(() => [
   border-radius: var(--radius-sm);
   color: var(--color-text-secondary);
   cursor: pointer;
+  margin-top:0px;
 }
 
 .overview__refresh:hover {

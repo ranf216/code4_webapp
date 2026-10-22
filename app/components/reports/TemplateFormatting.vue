@@ -127,6 +127,7 @@ async function handleSave() {
       }
     }
     toastStore.success(t('fmt.save_success'))
+    router.push(`/report-templates/${props.templateId}/edit`)
   } catch (err) {
     toastStore.error(err instanceof Error ? err.message : 'Failed to save style settings')
   } finally {

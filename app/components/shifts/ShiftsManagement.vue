@@ -1518,6 +1518,7 @@ function toggleStatus(status: ShiftStatus) {
   background: transparent;
   cursor: pointer;
   opacity: 0.6;
+  margin-top: 0px;
 }
 
 .status-chip:hover {
@@ -1623,6 +1624,7 @@ function toggleStatus(status: ShiftStatus) {
   display: flex;
   align-items: center;
   justify-content: center;
+  margin-top: 0px;
 }
 
 .nav-btn:hover {
@@ -1638,6 +1640,7 @@ function toggleStatus(status: ShiftStatus) {
   cursor: pointer;
   font-size: var(--font-size-sm);
   font-weight: 500;
+  margin-top: 0px;
 }
 
 .calendar-range {
