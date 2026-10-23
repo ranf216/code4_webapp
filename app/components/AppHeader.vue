@@ -4,10 +4,12 @@ import { callApi } from '~/api/call'
 import { residentApi } from '~/api/resident'
 import { officerApi } from '~/api/officer'
 import { assetApi } from '~/api/asset'
+import { postOrderApi } from '~/api/postOrder'
 import type { Call } from '~/api/types/call'
 import type { Resident } from '~/api/types/resident'
 import type { Officer } from '~/api/types/officer'
 import type { Post } from '~/api/types/asset'
+import type { PostOrder } from '~/api/types/postOrder'
 
 interface BreadcrumbItem {
   label: string
@@ -28,7 +30,7 @@ const emit = defineEmits<{
 
 interface GlobalSearchResult {
   id: string
-  type: 'call' | 'resident' | 'officer' | 'post'
+  type: 'call' | 'resident' | 'officer' | 'post' | 'post_order'
   title: string
   subtitle: string
   to: string
@@ -45,13 +47,14 @@ let searchRequestId = 0
 
 const breadcrumbItems = computed(() => props.breadcrumb || [])
 const showSearchBox = computed(() => props.showSearch !== false)
-const placeholder = computed(() => props.searchPlaceholder || 'Search calls, residents, officers and posts...')
+const placeholder = computed(() => props.searchPlaceholder || 'Search calls, residents, officers, posts and post orders...')
 const groupedSearchResults = computed(() => {
   const groups = [
     { type: 'call', label: 'Calls' },
     { type: 'resident', label: 'Residents' },
     { type: 'officer', label: 'Officers' },
     { type: 'post', label: 'Posts' },
+    { type: 'post_order', label: 'Post Orders' },
   ] as const
   return groups.map(group => ({
     ...group,
@@ -88,14 +91,16 @@ async function performGlobalSearch(query: string, requestId: number) {
     residentApi.getResidents({ search_text: query, include_inactive: true }, { showLoading: false }),
     officerApi.getOfficers({ search_text: query, include_inactive: true }, { showLoading: false }),
     assetApi.getPostsList({ search_text: query, include_inactive: true, page: 0 }, { showLoading: false }),
+    postOrderApi.getPostOrdersList({ search_text: query, limit: 5 }, { showLoading: false }),
   ])
   if (requestId !== searchRequestId) return
 
-  const [callsResponse, residentsResponse, officersResponse, postsResponse] = responses
+  const [callsResponse, residentsResponse, officersResponse, postsResponse, postOrdersResponse] = responses
   const calls: Call[] = callsResponse.status === 'fulfilled' ? callsResponse.value.calls || [] : []
   const residents: Resident[] = residentsResponse.status === 'fulfilled' ? residentsResponse.value.residents || [] : []
   const officers: Officer[] = officersResponse.status === 'fulfilled' ? officersResponse.value.officers || [] : []
   const posts: Post[] = postsResponse.status === 'fulfilled' ? postsResponse.value.posts || [] : []
+  const postOrders: PostOrder[] = postOrdersResponse.status === 'fulfilled' ? postOrdersResponse.value.post_orders || [] : []
 
   searchResults.value = [
     ...calls.slice(0, 5).map(call => ({
@@ -125,6 +130,13 @@ async function performGlobalSearch(query: string, requestId: number) {
       title: post.name,
       subtitle: [post.community_name, post.priority].filter(Boolean).join(' · '),
       to: `/map-management?search=${encodeURIComponent(query)}&community_id=${post.community_id}&post_id=${post.post_id}`,
+    })),
+    ...postOrders.slice(0, 5).map(postOrder => ({
+      id: String(postOrder.post_order_id),
+      type: 'post_order' as const,
+      title: postOrder.post_name || `Post Order #${postOrder.post_order_id}`,
+      subtitle: [postOrder.community_name, postOrder.status, postOrder.version ? `v${postOrder.version}` : ''].filter(Boolean).join(' · '),
+      to: `/post-orders/${postOrder.post_order_id}`,
     })),
   ]
   isSearching.value = false

@@ -35,6 +35,7 @@ const pendingAllocation = ref<{ shiftId: number; officerId: string } | null>(nul
 
 const selectedCommunityName = computed(() => props.communities.find((community: BoardCommunity) => community.community_id === selectedCommunityId.value)?.name || t('shifts.all_communities'))
 const selectedOfficer = computed(() => officers.value.find((officer: AllocationBoardOfficer) => officer.officer_id === draggedOfficerId.value))
+const allocatedOfficerIds = computed(() => new Set(shifts.value.flatMap((shift: AllocationBoardShift) => shift.allocated_officer_ids)))
 
 function officerName(officerId: string): string {
   return officers.value.find((officer: AllocationBoardOfficer) => officer.officer_id === officerId)?.name || officerId
@@ -65,8 +66,17 @@ async function loadBoard() {
   }
 }
 
-function onDragStart(officerId: string) {
+function onDragStart(event: DragEvent, officerId: string) {
   draggedOfficerId.value = officerId
+  if (event.dataTransfer) {
+    event.dataTransfer.effectAllowed = 'move'
+    event.dataTransfer.setData('text/plain', officerId)
+
+    const card = event.currentTarget as HTMLElement | null
+    if (card) {
+      event.dataTransfer.setDragImage(card, 20, 20)
+    }
+  }
 }
 
 function onDragEnd() {
@@ -74,8 +84,13 @@ function onDragEnd() {
   hoveredShiftId.value = null
 }
 
-function onDrop(shift: AllocationBoardShift) {
-  const officerId = draggedOfficerId.value
+function onDragOverShift(event: DragEvent, shiftId: number) {
+  if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'
+  hoveredShiftId.value = shiftId
+}
+
+function onDrop(event: DragEvent, shift: AllocationBoardShift) {
+  const officerId = draggedOfficerId.value || event.dataTransfer?.getData('text/plain') || null
   onDragEnd()
   if (!officerId || shift.allocated_officer_ids.includes(officerId)) return
   validateAndAllocate(shift.shift_id, officerId)
@@ -159,10 +174,10 @@ loadBoard()
         <div class="officers-panel">
           <div class="panel-title">{{ t('shifts.available_officers') }}<span class="panel-subtitle">{{ selectedCommunityName }} · {{ boardDate }}</span></div>
           <div class="officers-list">
-            <div v-for="officer in officers" :key="officer.officer_id" class="officer-card" draggable="true" @dragstart="onDragStart(officer.officer_id)" @dragend="onDragEnd">
+            <div v-for="officer in officers" :key="officer.officer_id" class="officer-card" :class="{ 'officer-card--dragging': draggedOfficerId === officer.officer_id }" draggable="true" @dragstart="onDragStart($event, officer.officer_id)" @dragend="onDragEnd">
               <Icon name="lucide:grip-vertical" :size="16" class="drag-handle" />
               <div class="officer-info"><div class="officer-name">{{ officer.name }}</div><div class="officer-role">{{ officer.roles?.join(', ') || t('shifts.officer') }}</div><div class="officer-badges">{{ officer.certification_badges?.join(', ') }}</div></div>
-              <div class="officer-hours"><span class="hours-value">{{ officer.weekly_hours }}h</span><span class="hours-label">{{ t('shifts.weekly_hours') }}</span></div>
+              <div class="officer-hours"><span class="hours-value">{{ officer.weekly_hours }}h</span><span class="hours-label">{{ t('shifts.weekly_hours') }}</span><span v-if="allocatedOfficerIds.has(officer.officer_id)" class="has-shift-badge">{{ t('shifts.has_shift') }}</span></div>
             </div>
             <div v-if="!officers.length" class="board-empty">{{ t('shifts.no_officers') }}</div>
           </div>
@@ -171,7 +186,7 @@ loadBoard()
         <div class="shifts-panel">
           <div class="panel-title">{{ t('shifts.shift_timeline') }}<span class="panel-subtitle">{{ selectedCommunityName }}</span></div>
           <div class="shifts-list">
-            <div v-for="shift in shifts" :key="shift.shift_id" class="allocation-shift" :class="{ 'allocation-shift--droppable': hoveredShiftId === shift.shift_id }" @dragover.prevent="hoveredShiftId = shift.shift_id" @dragleave="hoveredShiftId = null" @drop.prevent="onDrop(shift)">
+            <div v-for="shift in shifts" :key="shift.shift_id" class="allocation-shift" :class="{ 'allocation-shift--droppable': hoveredShiftId === shift.shift_id, 'allocation-shift--drag-target': !!draggedOfficerId }" @dragover.prevent="onDragOverShift($event, shift.shift_id)" @dragleave="hoveredShiftId = null" @drop.prevent="onDrop($event, shift)">
               <div class="shift-main"><div class="shift-time">{{ shiftTime(shift) }}</div><div class="shift-community">{{ shift.community_name }}</div><Badge type="shiftStatus" :value="shift.status" /></div>
               <div class="shift-allocations"><div v-if="!shift.allocated_officer_ids.length" class="empty-allocation">{{ t('shifts.drop_officer_here') }}</div><span v-for="officerId in shift.allocated_officer_ids" :key="officerId" class="allocated-officer">{{ officerName(officerId) }}</span></div>
             </div>
@@ -207,6 +222,7 @@ loadBoard()
 .officers-list, .shifts-list { display: flex; flex-direction: column; gap: var(--space-2); }
 .officer-card { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-3); border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-bg-elevated); cursor: grab; }
 .officer-card:active { cursor: grabbing; }
+.officer-card--dragging { opacity: 0.4; border-style: dashed; border-color: var(--color-accent); cursor: grabbing; }
 .drag-handle { color: var(--color-text-muted); }
 .officer-info { flex: 1; min-width: 0; }
 .officer-name { color: var(--color-text-primary); font-size: var(--font-size-sm); font-weight: 600; }
@@ -214,8 +230,10 @@ loadBoard()
 .officer-hours { display: flex; flex-direction: column; align-items: flex-end; }
 .hours-value { color: var(--color-accent); font-weight: 700; }
 .hours-label { color: var(--color-text-muted); font-size: 9px; }
+.has-shift-badge { margin-top: var(--space-1); padding: 1px var(--space-2); border: 1px solid var(--color-warn); border-radius: var(--radius-sm); background: var(--color-warn-bg); color: var(--color-warn); font-size: 9px; font-weight: 600; white-space: nowrap; }
 .allocation-shift { display: grid; grid-template-columns: 170px 1fr; gap: var(--space-3); min-height: 76px; padding: var(--space-3); border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-bg-base); transition: border-color .15s, background .15s; }
-.allocation-shift--droppable { border-color: var(--color-accent); background: var(--color-accent-subtle); }
+.allocation-shift--drag-target { border-style: dashed; }
+.allocation-shift--droppable { border-style: solid; border-color: var(--color-accent); background: var(--color-accent-subtle); }
 .shift-main { display: flex; flex-direction: column; gap: var(--space-1); }
 .shift-time { color: var(--color-text-primary); font-weight: 600; }
 .shift-community { color: var(--color-text-muted); font-size: var(--font-size-xs); }

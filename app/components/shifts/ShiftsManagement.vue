@@ -11,8 +11,10 @@ import { ShiftErrorCodes } from '~/api/types/shift'
 import type { Shift as ApiShift, ShiftCheckin, ShiftConflictWarning, ShiftStatus, PostEligibilityWarning } from '~/api/types/shift'
 import type { Officer } from '~/api/types/officer'
 import { shifts, generateRoute, saveRoute, type Shift, type Waypoint } from '~/composables/useShifts'
+import { useToastStore } from '~/stores/toast'
 
 const { t } = useTranslation()
+const toastStore = useToastStore()
 const route = useRoute()
 
 const viewMode = ref<'day' | 'week' | 'month'>('week')
@@ -96,8 +98,16 @@ const showCancelShiftModal = ref(false)
 const showRecurringScopeModal = ref(false)
 const recurringUpdateScope = ref<'this_only' | 'this_and_future' | 'all'>('this_only')
 const showConflictModal = ref(false)
+const showPublishResultModal = ref(false)
+const publishResultTitle = ref('')
+const publishResultMessage = ref('')
+const publishResultVariant = ref<'message' | 'alert' | 'warning'>('message')
+const showPublishConfirmModal = ref(false)
+const pendingPublishIds = ref<number[]>([])
+const publishFromNew = ref(false)
 const conflictWarnings = ref<ShiftConflictWarning[]>([])
 const showOfficerPicker = ref(false)
+const pendingNewOfficers = ref<Array<{ id: string; fullName: string; title: string; picture: string }>>([])
 const pendingRemoveOfficer = ref<{ id: string; name: string } | null>(null)
 const isOfficerActionRunning = ref(false)
 const showAllocationConflictModal = ref(false)
@@ -398,6 +408,7 @@ function openCreateShift() {
   shiftForm.value.community = selectedCommunityName.value
   shiftForm.value.date = toDateString(currentDate.value)
   shiftFormError.value = ''
+  pendingNewOfficers.value = []
   showDetailsPanel.value = true
 }
 
@@ -461,6 +472,7 @@ function closeDetailsPanel() {
   showCancelShiftModal.value = false
   showConflictModal.value = false
   conflictWarnings.value = []
+  pendingNewOfficers.value = []
 }
 
 function openAllocationBoard() {
@@ -519,44 +531,50 @@ async function saveRecurringShift() {
   }
 }
 
-async function saveShift() {
-  if (isSavingShift.value || isShiftReadOnly.value) return
+function validateShiftForm(): boolean {
   const form = shiftForm.value
   shiftFormError.value = ''
   if (!form.communityId || !form.date || !form.start_time || !form.end_time) {
     shiftFormError.value = t('shifts.required_fields_error')
-    return
+    return false
   }
   if (form.start_time === form.end_time) {
     shiftFormError.value = t('shifts.same_time_error')
-    return
+    return false
   }
   if (form.notes.length > 500) {
     shiftFormError.value = t('shifts.notes_max_error')
-    return
+    return false
   }
   if (selectedShift.value?.seriesId != null && form.recurring) {
     showRecurringScopeModal.value = true
-    return
+    return false
   }
   if (!selectedShift.value && form.recurring) {
     if (form.recurrence_pattern === 'specific_days' && !form.repeat_on.length) {
       shiftFormError.value = t('shifts.repeat_on_required')
-      return
+      return false
     }
     if (form.recurrence_pattern === 'every_x_days' && form.interval_days < 2) {
       shiftFormError.value = t('shifts.interval_days_error')
-      return
+      return false
     }
     if (form.end_condition === 'end_date' && !form.end_date) {
       shiftFormError.value = t('shifts.end_date_required')
-      return
+      return false
     }
     if (form.end_condition === 'occurrences' && (form.occurrences < 1 || form.occurrences > 365)) {
       shiftFormError.value = t('shifts.occurrences_error')
-      return
+      return false
     }
   }
+  return true
+}
+
+async function saveShift() {
+  if (isSavingShift.value || isShiftReadOnly.value) return
+  if (!validateShiftForm()) return
+  const form = shiftForm.value
 
   isSavingShift.value = true
   try {
@@ -570,7 +588,7 @@ async function saveShift() {
       }, { showLoading: false })
     } else if (form.recurring) {
       await shiftApi.createRecurringShifts({
-        community_id: form.communityId,
+        community_id: Number(form.communityId),
         start_date: form.date,
         start_time: toApiTime(form.start_time),
         end_time: toApiTime(form.end_time),
@@ -581,14 +599,16 @@ async function saveShift() {
         end_date: form.end_condition === 'end_date' ? form.end_date : undefined,
         occurrences: form.end_condition === 'occurrences' ? form.occurrences : undefined,
         notes: form.notes || undefined,
+        officer_ids: pendingNewOfficers.value.length ? pendingNewOfficers.value.map((officer) => officer.id) : undefined,
       }, { showLoading: false })
     } else {
       await shiftApi.createShift({
-        community_id: form.communityId,
+        community_id: Number(form.communityId),
         shift_date: form.date,
         start_time: toApiTime(form.start_time),
         end_time: toApiTime(form.end_time),
         notes: form.notes || undefined,
+        officer_ids: pendingNewOfficers.value.length ? pendingNewOfficers.value.map((officer) => officer.id) : undefined,
       }, { showLoading: false })
     }
     closeDetailsPanel()
@@ -709,8 +729,12 @@ async function allocateOfficer(officerId: string, acknowledgeConflicts = false) 
   }
 }
 
-async function handleOfficerPickerConfirm(selected: Array<{ id: string }>) {
+async function handleOfficerPickerConfirm(selected: Array<{ id: string; fullName: string; title: string; picture: string }>) {
   showOfficerPicker.value = false
+  if (!selectedShift.value) {
+    pendingNewOfficers.value = selected
+    return
+  }
   const existingIds = new Set(allocatedOfficerIds.value)
   for (const officer of selected) {
     if (!existingIds.has(officer.id)) {
@@ -718,6 +742,10 @@ async function handleOfficerPickerConfirm(selected: Array<{ id: string }>) {
       if (!success) break
     }
   }
+}
+
+function removePendingOfficer(officerId: string) {
+  pendingNewOfficers.value = pendingNewOfficers.value.filter((officer) => officer.id !== officerId)
 }
 
 async function confirmAllocationConflict() {
@@ -748,6 +776,7 @@ async function removeOfficer() {
 async function publishShift(acknowledgeConflicts = false) {
   const shiftId = selectedShift.value?.apiId
   if (!shiftId || shiftAction.value) return
+  publishFromNew.value = false
   shiftAction.value = 'publish'
   shiftFormError.value = ''
   try {
@@ -755,17 +784,144 @@ async function publishShift(acknowledgeConflicts = false) {
     showConflictModal.value = false
     closeDetailsPanel()
     await loadCalendar()
+    publishResultVariant.value = 'message'
+    publishResultTitle.value = t('shifts.publish_success_title')
+    publishResultMessage.value = t('shifts.publish_success')
+    showPublishResultModal.value = true
   } catch (error) {
     if (error instanceof ApiError && error.rc === ShiftErrorCodes.OFFICER_CONFLICT) {
       conflictWarnings.value = (error.data?.warnings || []) as ShiftConflictWarning[]
           showConflictModal.value = true
     } else {
       console.error('Failed to publish shift:', error)
-      shiftFormError.value = error instanceof Error ? error.message : t('shifts.publish_failed')
+      const message = error instanceof Error ? error.message : t('shifts.publish_failed')
+      shiftFormError.value = message
+      publishResultVariant.value = 'alert'
+      publishResultTitle.value = t('shifts.publish_failed_title')
+      publishResultMessage.value = message
+      showPublishResultModal.value = true
     }
   } finally {
     shiftAction.value = null
   }
+}
+
+function requestPublishNewShift() {
+  if (!validateShiftForm()) return
+  if (!pendingNewOfficers.value.length) {
+    shiftFormError.value = t('shifts.publish_requires_officer')
+    return
+  }
+  showPublishConfirmModal.value = true
+}
+
+async function createAndPublishShift() {
+  showPublishConfirmModal.value = false
+  const form = shiftForm.value
+  isSavingShift.value = true
+  try {
+    let ids: number[] = []
+    if (form.recurring) {
+      const res = await shiftApi.createRecurringShifts({
+        community_id: Number(form.communityId),
+        start_date: form.date,
+        start_time: toApiTime(form.start_time),
+        end_time: toApiTime(form.end_time),
+        recurrence_pattern: form.recurrence_pattern,
+        repeat_on: form.recurrence_pattern === 'specific_days' ? form.repeat_on : undefined,
+        interval_days: form.recurrence_pattern === 'every_x_days' ? form.interval_days : undefined,
+        end_type: form.end_condition,
+        end_date: form.end_condition === 'end_date' ? form.end_date : undefined,
+        occurrences: form.end_condition === 'occurrences' ? form.occurrences : undefined,
+        notes: form.notes || undefined,
+        officer_ids: pendingNewOfficers.value.length ? pendingNewOfficers.value.map((officer) => officer.id) : undefined,
+      }, { showLoading: false })
+      ids = res.shift_ids || []
+    } else {
+      const res = await shiftApi.createShift({
+        community_id: Number(form.communityId),
+        shift_date: form.date,
+        start_time: toApiTime(form.start_time),
+        end_time: toApiTime(form.end_time),
+        notes: form.notes || undefined,
+        officer_ids: pendingNewOfficers.value.length ? pendingNewOfficers.value.map((officer) => officer.id) : undefined,
+      }, { showLoading: false })
+      ids = res.shift_id ? [res.shift_id] : []
+    }
+    if (!ids.length) throw new Error(t('shifts.publish_failed'))
+    publishFromNew.value = true
+    await publishShiftIds(ids, false)
+  } catch (error) {
+    console.error('Failed to create and publish shift:', error)
+    const message = error instanceof Error ? error.message : t('shifts.publish_failed')
+    shiftFormError.value = message
+    publishResultVariant.value = 'alert'
+    publishResultTitle.value = t('shifts.publish_failed_title')
+    publishResultMessage.value = message
+    showPublishResultModal.value = true
+  } finally {
+    isSavingShift.value = false
+  }
+}
+
+async function publishShiftIds(ids: number[], acknowledgeConflicts = false) {
+  if (!ids.length || shiftAction.value) return
+  shiftAction.value = 'publish'
+  shiftFormError.value = ''
+  try {
+    for (let index = 0; index < ids.length; index++) {
+      const id = ids[index]
+      if (id == null) continue
+      try {
+        await shiftApi.publishShift({ shift_id: id, acknowledge_conflicts: acknowledgeConflicts }, { showLoading: false })
+      } catch (error) {
+        if (error instanceof ApiError && error.rc === ShiftErrorCodes.OFFICER_CONFLICT && !acknowledgeConflicts) {
+          conflictWarnings.value = (error.data?.warnings || []) as ShiftConflictWarning[]
+          pendingPublishIds.value = ids.slice(index)
+          showConflictModal.value = true
+          return
+        }
+        throw error
+      }
+    }
+    showConflictModal.value = false
+    publishFromNew.value = false
+    pendingPublishIds.value = []
+    closeDetailsPanel()
+    await loadCalendar()
+    publishResultVariant.value = 'message'
+    publishResultTitle.value = t('shifts.publish_success_title')
+    publishResultMessage.value = ids.length > 1
+      ? t('shifts.publish_success_many', { count: String(ids.length) })
+      : t('shifts.publish_success')
+    showPublishResultModal.value = true
+  } catch (error) {
+    console.error('Failed to publish shift:', error)
+    const message = error instanceof Error ? error.message : t('shifts.publish_failed')
+    shiftFormError.value = message
+    publishResultVariant.value = 'alert'
+    publishResultTitle.value = t('shifts.publish_failed_title')
+    publishResultMessage.value = message
+    showPublishResultModal.value = true
+  } finally {
+    shiftAction.value = null
+  }
+}
+
+function confirmPublishConflict() {
+  if (publishFromNew.value) {
+    const ids = pendingPublishIds.value
+    pendingPublishIds.value = []
+    publishShiftIds(ids, true)
+  } else {
+    publishShift(true)
+  }
+}
+
+function closePublishConflictModal() {
+  showConflictModal.value = false
+  pendingPublishIds.value = []
+  publishFromNew.value = false
 }
 
 async function deleteShift() {
@@ -779,7 +935,9 @@ async function deleteShift() {
     await loadCalendar()
   } catch (error) {
     console.error('Failed to delete shift:', error)
-    shiftFormError.value = error instanceof Error ? error.message : t('shifts.delete_failed')
+    const message = error instanceof Error ? error.message : t('shifts.delete_failed')
+    shiftFormError.value = message
+    toastStore.error(message)
     showDeleteShiftModal.value = false
   } finally {
     shiftAction.value = null
@@ -797,7 +955,9 @@ async function cancelShift() {
     await loadCalendar()
   } catch (error) {
     console.error('Failed to cancel shift:', error)
-    shiftFormError.value = error instanceof Error ? error.message : t('shifts.cancel_failed')
+    const message = error instanceof Error ? error.message : t('shifts.cancel_failed')
+    shiftFormError.value = message
+    toastStore.error(message)
     showCancelShiftModal.value = false
   } finally {
     shiftAction.value = null
@@ -1172,6 +1332,36 @@ function toggleStatus(status: ShiftStatus) {
               <div v-else class="empty-officer-state">{{ t('shifts.no_officers_assigned') }}</div>
             </div>
 
+            <!-- Officer Allocation (new shift — local selection, sent with create request) -->
+            <div v-else class="officer-allocation-section">
+              <div class="section-heading">
+                <div>
+                  <label class="form-label">{{ t('shifts.allocated_officers') }}</label>
+                  <span class="form-hint">{{ pendingNewOfficers.length }} {{ t('shifts.officers_assigned') }}</span>
+                </div>
+                <button type="button" class="btn btn--secondary btn--small" @click="showOfficerPicker = true">
+                  <Icon name="lucide:user-plus" :size="14" />
+                  {{ t('shifts.add_officer') }}
+                </button>
+              </div>
+              <div v-if="pendingNewOfficers.length" class="allocated-officer-list">
+                <div v-for="officer in pendingNewOfficers" :key="officer.id" class="allocated-officer-row">
+                  <img v-if="officer.picture" :src="officer.picture" :alt="officer.fullName" class="allocated-officer-avatar" />
+                  <div v-else class="allocated-officer-avatar allocated-officer-avatar--initials">
+                    {{ officer.fullName.split(' ').map((part: string) => part?.[0] || '').join('').toUpperCase().slice(0, 2) }}
+                  </div>
+                  <div class="allocated-officer-info">
+                    <strong>{{ officer.fullName }}</strong>
+                    <span>{{ officer.title || t('shifts.officer') }}</span>
+                  </div>
+                  <button type="button" class="icon-action-btn" :title="t('shifts.remove_officer')" @click="removePendingOfficer(officer.id)">
+                    <Icon name="lucide:trash-2" :size="16" />
+                  </button>
+                </div>
+              </div>
+              <div v-else class="empty-officer-state">{{ t('shifts.no_officers_assigned') }}</div>
+            </div>
+
             <!-- Recurring Toggle -->
             <div class="form-group form-group--inline">
               <label class="form-label">{{ t('shifts.recurring') }}</label>
@@ -1311,6 +1501,15 @@ function toggleStatus(status: ShiftStatus) {
               {{ isSavingShift ? t('common.saving') : t('common.save') }}
             </button>
             <button
+              v-if="!selectedShift"
+              type="button"
+              class="btn btn--success"
+              :disabled="!!shiftAction || isSavingShift"
+              @click="requestPublishNewShift"
+            >
+              {{ shiftAction === 'publish' ? t('shifts.publishing') : t('shifts.publish') }}
+            </button>
+            <button
               v-if="selectedShift && shiftForm.status === 'draft'"
               type="button"
               class="btn btn--success"
@@ -1401,13 +1600,36 @@ function toggleStatus(status: ShiftStatus) {
       </div>
     </AppModal>
 
+    <AppModal
+      :show="showPublishConfirmModal"
+      :title="t('shifts.publish_confirm_title')"
+      :message="t('shifts.publish_confirm_message')"
+      :cancel-text="t('common.cancel')"
+      :ok-text="shiftAction === 'publish' ? t('shifts.publishing') : t('shifts.publish')"
+      :ok-disabled="!!shiftAction || isSavingShift"
+      @close="showPublishConfirmModal = false"
+      @cancel="showPublishConfirmModal = false"
+      @ok="createAndPublishShift"
+    />
+
+    <AppModal
+      :show="showPublishResultModal"
+      :title="publishResultTitle"
+      :message="publishResultMessage"
+      :variant="publishResultVariant"
+      cancel-text=""
+      :ok-text="t('common.ok')"
+      @close="showPublishResultModal = false"
+      @ok="showPublishResultModal = false"
+    />
+
     <ConflictWarningModal
       :show="showConflictModal"
       :warnings="conflictWarnings"
       :confirm-text="t('shifts.acknowledge_publish')"
       :confirming="shiftAction === 'publish'"
-      @close="showConflictModal = false"
-      @confirm="publishShift(true)"
+      @close="closePublishConflictModal"
+      @confirm="confirmPublishConflict"
     />
 
     <AppModal
@@ -1433,8 +1655,8 @@ function toggleStatus(status: ShiftStatus) {
 
     <OfficerPickerModal
       :show="showOfficerPicker"
-      :community-id="selectedShift?.communityId"
-      :preselected-ids="allocatedOfficerIds"
+      :community-id="selectedShift?.communityId || Number(shiftForm.communityId) || undefined"
+      :preselected-ids="selectedShift ? allocatedOfficerIds : pendingNewOfficers.map((officer) => officer.id)"
       @close="showOfficerPicker = false"
       @confirm="handleOfficerPickerConfirm"
     />
