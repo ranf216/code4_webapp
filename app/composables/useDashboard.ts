@@ -184,7 +184,7 @@ export function useDashboard() {
 
   function startAutoRefresh() {
     stopAutoRefresh()
-    autoRefreshTimer = setInterval(fetchOverview, autoRefreshSeconds * 1000)
+    autoRefreshTimer = setInterval(fetchAll, autoRefreshSeconds * 1000)
   }
 
   function stopAutoRefresh() {

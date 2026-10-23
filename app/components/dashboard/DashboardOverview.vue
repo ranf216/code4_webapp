@@ -133,9 +133,9 @@ const cards = computed<KpiCard[]>(() => [
 
     <!-- Recent feeds -->
     <div class="feeds-grid">
-      <RecentCallsFeed :items="overview?.recent_calls ?? []" />
-      <RecentTasksFeed :items="overview?.recent_tasks ?? []" />
-      <RecentReportsFeed :items="overview?.recent_reports ?? []" />
+      <RecentCallsFeed :items="overview?.recent_calls ?? []" :total="overview?.active_calls_count" />
+      <RecentTasksFeed :items="overview?.recent_tasks ?? []" :total="overview?.open_tasks_count" />
+      <RecentReportsFeed :items="overview?.recent_reports ?? []" :total="overview?.open_reports_count" />
     </div>
   </section>
 </template>

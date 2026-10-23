@@ -146,7 +146,7 @@ function onCategorySelect(key: string) {
           {{ t('dashboard.clear_filter') }}
         </button>
       </div>
-      <RecentCallsFeed :items="filteredRecentCalls" variant="compact" />
+      <RecentCallsFeed :items="filteredRecentCalls" variant="compact" :total="stats?.total_calls" />
     </template>
   </section>
 </template>

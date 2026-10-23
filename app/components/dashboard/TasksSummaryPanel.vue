@@ -104,7 +104,7 @@ const typeBars = computed<BarItem[]>(() => {
         </div>
       </div>
 
-      <RecentTasksFeed :items="(summary?.recent_tasks ?? []).slice(0, 5)" variant="compact" />
+      <RecentTasksFeed :items="(summary?.recent_tasks ?? []).slice(0, 5)" variant="compact" :total="summary?.open_tasks_count" />
     </template>
   </section>
 </template>

@@ -77,7 +77,7 @@ const statusBars = computed<BarItem[]>(() => {
         </div>
       </div>
 
-      <RecentReportsFeed :items="(summary?.recent_reports ?? []).slice(0, 5)" variant="compact" />
+      <RecentReportsFeed :items="(summary?.recent_reports ?? []).slice(0, 5)" variant="compact" :total="summary?.open_reports_count" />
     </template>
   </section>
 </template>

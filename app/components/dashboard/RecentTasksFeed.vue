@@ -7,6 +7,7 @@ defineProps<{
   items: DashboardRecentTask[]
   loading?: boolean
   variant?: 'card' | 'compact'
+  total?: number
 }>()
 
 const { t } = useTranslation()
@@ -22,7 +23,7 @@ function goToTasks() {
     <div class="feed__header">
       <h3 class="feed__title">
         {{ t('dashboard.recent_tasks') }}
-        <span v-if="items.length" class="feed__badge">{{ items.length }}</span>
+        <span v-if="items.length" class="feed__badge">{{ total ?? items.length }}</span>
       </h3>
       <button type="button" class="feed__show-all" @click="goToTasks">
         {{ t('dashboard.show_all') }}

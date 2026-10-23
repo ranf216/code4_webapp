@@ -661,6 +661,11 @@ onMounted(async () => {
     const map = new Map(mapEl.value, {
       center: props.center,
       zoom: props.zoom,
+      minZoom: 2,
+      restriction: {
+        latLngBounds: { north: 85, south: -85, east: 180, west: -180 },
+        strictBounds: true,
+      },
       disableDefaultUI: true,
       zoomControl: false,
       styles: darkMapStyles,
