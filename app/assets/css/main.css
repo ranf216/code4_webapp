@@ -322,3 +322,11 @@ input, textarea, select {
 .text-base     { font-size: var(--font-size-base); }
 .font-medium   { font-weight: 500; }
 .font-semibold { font-weight: 600; }
+
+/* Pages that manage their own internal scroll (no outer scroll on .app-main) */
+body:has(.tpl-editor),
+body:has(.tpl-fmt),
+.app-main:has(.tpl-editor),
+.app-main:has(.tpl-fmt) {
+  overflow: hidden;
+}

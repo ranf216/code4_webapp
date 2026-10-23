@@ -316,14 +316,15 @@ watch(() => props.show, (show: boolean) => {
             </div>
             <p v-if="locationError" class="action-error">{{ locationError }}</p>
             <p v-else-if="isLoadingLocation" class="action-loading"><Icon name="lucide:loader-2" :size="14" class="spin" /> Loading officer location…</p>
-            <GoogleMap
-              ref="mapRef"
-              v-if="hasCoordinates"
-              :center="mapCenter"
-              :markers="mapMarkers"
-              :zoom="officerLocation ? 14 : 15"
-              height="180px"
-            />
+            <div v-if="hasCoordinates" class="panic-map">
+              <GoogleMap
+                ref="mapRef"
+                :center="mapCenter"
+                :markers="mapMarkers"
+                :zoom="officerLocation ? 14 : 15"
+                height="100%"
+              />
+            </div>
           </div>
 
           <div v-if="panicCall.description || panicCall.resident_comment || panicCall.officer_comments" class="communication-section panic-section">
@@ -458,6 +459,8 @@ watch(() => props.show, (show: boolean) => {
 .contact-row a { color: var(--color-accent); text-decoration: none; }
 .contact-row a:hover { text-decoration: underline; }
 .contact-empty { color: var(--color-text-muted); font-size: var(--font-size-sm); }
+.panic-call-modal { max-height: 75vh; overflow-y: auto; padding-right: var(--space-2); scrollbar-width: none; -ms-overflow-style: none; }
+.panic-call-modal::-webkit-scrollbar { display: none; }
 .panic-state { display: flex; min-height: 180px; align-items: center; justify-content: center; gap: var(--space-2); color: var(--color-text-muted); }
 .panic-state--error { flex-direction: column; color: var(--color-critical); }
 .panic-call-content { display: flex; flex-direction: column; gap: var(--space-4); }
@@ -467,6 +470,7 @@ watch(() => props.show, (show: boolean) => {
 .panic-title { font-size: var(--font-size-lg); font-weight: 700; }
 .panic-subtitle { margin-top: 2px; font-size: var(--font-size-sm); opacity: .9; }
 .panic-section { padding: var(--space-3); border: 1px solid var(--color-border); border-radius: var(--radius-md); }
+.panic-map { position: relative; height: 180px; border-radius: var(--radius-md); overflow: hidden; margin-top: var(--space-3); }
 .section-title { display: flex; align-items: center; gap: var(--space-2); margin-bottom: var(--space-3); color: var(--color-text-primary); font-size: var(--font-size-sm); }
 .info-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--space-3); }
 .info-item { display: flex; flex-direction: column; gap: 3px; min-width: 0; }

@@ -557,11 +557,11 @@ onMounted(async () => {
             <span><Icon name="lucide:clock-3" :size="14" /> Next refresh in {{ Math.max(0, refreshInterval - secondsAgo) }}s</span>
             <span>{{ t('live_tracking.refreshed_ago', { seconds: String(secondsAgo) }) }}</span>
           </template>
-          <button type="button" @click="zoomToFit">
+          <button type="button" @click="zoomToFit" style="margin-top: 0px">
             <Icon name="lucide:scan" :size="14" />
             Zoom to fit
           </button>
-          <button type="button" :disabled="refreshing" @click="refreshNow">
+          <button type="button" :disabled="refreshing" @click="refreshNow" style="margin-top: 0px">
             <Icon name="lucide:refresh-cw" :size="14" :class="{ spinning: refreshing }" />
             {{ t('live_tracking.refresh_now') }}
           </button>

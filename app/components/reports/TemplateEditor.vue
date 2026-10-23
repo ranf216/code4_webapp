@@ -921,10 +921,10 @@ function moveFieldDown(section: TemplateSection, index: number) {
                 <span class="multiselect__checkbox" :class="{ 'multiselect__checkbox--checked': form.isGlobal }">
                   <Icon v-if="form.isGlobal" name="lucide:check" :size="11" />
                 </span>
-                <span>
+                <div style="display: flex; align-items: center;">
                   <Icon name="lucide:globe" :size="13" class="global-checkbox__icon" />
-                  {{ t('tpl.community_global') }}
-                </span>
+                  <span style="margin-top: var(--space-1)">{{t('tpl.community_global') }}</span>
+                </div>
               </label>
 
               <div
@@ -1474,7 +1474,8 @@ function moveFieldDown(section: TemplateSection, index: number) {
 .tpl-editor {
   display: flex;
   flex-direction: column;
-  height: 100%;
+  flex: 1;
+  min-height: 0;
   overflow: hidden;
 }
 
@@ -1863,7 +1864,7 @@ function moveFieldDown(section: TemplateSection, index: number) {
 
 .title-format-example {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: var(--space-2);
   margin-top: var(--space-2);
   padding: var(--space-2) var(--space-3);
@@ -2134,6 +2135,9 @@ function moveFieldDown(section: TemplateSection, index: number) {
   cursor: pointer;
   padding: 0;
   transition: all var(--transition-base);
+  margin-right: 0px;
+  margin-top: 10px;
+  margin-bottom: 10px;
 }
 .order-btn:hover:not(:disabled) { border-color: var(--color-accent); color: var(--color-accent); }
 .order-btn:disabled { opacity: 0.3; cursor: not-allowed; }
@@ -2152,6 +2156,7 @@ function moveFieldDown(section: TemplateSection, index: number) {
   font-weight: 500;
   outline: none;
   transition: border-color var(--transition-base);
+  margin-top: var(--space-4)
 }
 .section-title-input:focus { border-color: var(--color-accent); }
 .section-title-input::placeholder { color: var(--color-text-muted); font-weight: 400; }
@@ -2162,6 +2167,7 @@ function moveFieldDown(section: TemplateSection, index: number) {
   align-items: center;
   gap: var(--space-3);
   flex-wrap: wrap;
+  margin-top: var(--space-4)
 }
 
 .mini-toggle {
@@ -2210,6 +2216,7 @@ function moveFieldDown(section: TemplateSection, index: number) {
   gap: var(--space-1);
   margin-left: auto;
   flex-shrink: 0;
+  margin-top: var(--space-4)
 }
 .section-action-btn {
   display: inline-flex;
@@ -2224,9 +2231,10 @@ function moveFieldDown(section: TemplateSection, index: number) {
   cursor: pointer;
   padding: 0;
   transition: all var(--transition-base);
+  margin-top: 0px
 }
 .section-action-btn:hover { border-color: var(--color-accent); color: var(--color-accent); background: var(--color-bg-surface); }
-.section-action-btn--danger:hover { border-color: var(--color-critical); color: var(--color-critical); background: rgba(239,68,68,0.08); }
+.section-action-btn--danger:hover { border-color: var(--color-critical); color: var(--color-critical); background: rgba(239,68,68,0.08);}
 
 /* ── Fields area ── */
 .section-card__fields {
@@ -2310,6 +2318,7 @@ function moveFieldDown(section: TemplateSection, index: number) {
   padding: 0;
   flex-shrink: 0;
   transition: all var(--transition-base);
+  margin-top: 0px;
 }
 .field-row__remove:hover { color: var(--color-critical); background: rgba(239,68,68,0.08); }
 
@@ -2615,7 +2624,7 @@ function moveFieldDown(section: TemplateSection, index: number) {
   cursor: pointer;
   user-select: none;
 }
-.global-checkbox__icon { color: #14b8a6; }
+.global-checkbox__icon { color: #14b8a6; margin-right: var(--space-2) }
 
 .multiselect--disabled {
   opacity: 0.5;
