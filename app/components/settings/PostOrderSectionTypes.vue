@@ -202,7 +202,7 @@ function closeDeleteModal() {
             class="search-input"
           />
         </div>
-        <AppButton :text="t('settings.types.add_new')" icon="lucide:plus" type="primary" size="sm" @click="openAddModal" />
+        <AppButton :text="t('settings.types.add_new')" icon="lucide:plus" type="primary" size="sm" @click="openAddModal" :class="'mt-0'" />
       </div>
     </div>
 
