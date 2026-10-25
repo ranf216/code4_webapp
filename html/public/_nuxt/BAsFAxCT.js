@@ -1,0 +1,1 @@
+import{B as e,m as t,x as n,y as r}from"./DUwT0o-x.js";import{t as i}from"./BDNMzG2s.js";import{t as a}from"./dmnyj-Xp.js";import{t as o}from"./B4mlp-hY.js";var s={class:`poi-new-page`},c=i(n({__name:`new`,setup(n){return a({layout:`default`}),(n,i)=>{let a=o;return e(),t(`div`,s,[r(a,{mode:`create`})])}}}),[[`__scopeId`,`data-v-0dd24695`]]);export{c as default};

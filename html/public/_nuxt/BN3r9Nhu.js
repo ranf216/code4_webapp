@@ -1,1 +1,0 @@
-import{s as e}from"./BoI03tUh.js";var t=/\.(png|jpe?g|webp|gif|svg)$/i;function n(n){if(!n)return``;if(/^https?:\/\//.test(n))return n;let r=t.test(n)?n:`${n}.png`;return`${e().public.apiUrl}/files/n/${r}`}export{n as t};

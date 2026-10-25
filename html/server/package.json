@@ -4,7 +4,7 @@
   "type": "module",
   "private": true,
   "dependencies": {
-    "@babel/parser": "7.29.9",
+    "@babel/parser": "7.29.11",
     "@vue/compiler-core": "3.5.44",
     "@vue/compiler-dom": "3.5.44",
     "@vue/compiler-ssr": "3.5.44",
