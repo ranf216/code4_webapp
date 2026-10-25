@@ -1,8 +1,38 @@
 import { BaseApiClient } from './base'
 import type { ApiResponse } from './base'
-import type { LoginRequest, LoginResponse, MandatoryChangePasswordResponse } from './types/user'
+import type {
+  LoginRequest,
+  LoginResponse,
+  MandatoryChangePasswordResponse,
+  ForgotPasswordRequest,
+  ForgotPasswordResponse,
+  ResetPasswordRequest,
+  ResetPasswordResponse,
+} from './types/user'
 
 export class UserApi extends BaseApiClient {
+  async forgotPassword(
+    params: Omit<ForgotPasswordRequest, '#request'>,
+    options?: { showLoading?: boolean; loadingMessage?: string }
+  ): Promise<ApiResponse<ForgotPasswordResponse>> {
+    const request: ForgotPasswordRequest = {
+      ...params,
+      '#request': 'User/forgot_password',
+    }
+    return this.request<ForgotPasswordResponse>(request, options)
+  }
+
+  async resetPassword(
+    params: Omit<ResetPasswordRequest, '#request'>,
+    options?: { showLoading?: boolean; loadingMessage?: string }
+  ): Promise<ApiResponse<ResetPasswordResponse>> {
+    const request: ResetPasswordRequest = {
+      ...params,
+      '#request': 'User/reset_password',
+    }
+    return this.request<ResetPasswordResponse>(request, options)
+  }
+
   /**
    * User login
    * @param email User email

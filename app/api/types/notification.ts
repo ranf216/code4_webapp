@@ -9,6 +9,7 @@ export type NotificationType =
   | 'resident_like'
   | 'new_incident_report'
   | 'report_submitted'
+  | 'report_under_review'
   | 'report_approved'
   | 'report_changes_requested'
   | 'report_delivered'

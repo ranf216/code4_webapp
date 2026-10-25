@@ -1,18 +1,26 @@
 <script setup lang="ts">
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   show: boolean
   images: string[]
   initialIndex?: number
   alt?: string
-}>()
+  thumbnailUrl?: string
+  showThumbnailClose?: boolean
+  thumbnailSize?: number
+}>(), {
+  thumbnailSize: 100,
+})
 
 const emit = defineEmits<{
   close: []
+  remove: []
 }>()
 
+const isOpen = ref(props.show)
 const currentIndex = ref(props.initialIndex ?? 0)
 
 watch(() => props.show, (show) => {
+  isOpen.value = show
   if (show) {
     currentIndex.value = props.initialIndex ?? 0
   }
@@ -24,8 +32,17 @@ watch(() => props.initialIndex, (index) => {
   }
 })
 
-function close() {
+function openModal() {
+  isOpen.value = true
+}
+
+function closeModal() {
+  isOpen.value = false
   emit('close')
+}
+
+function removeThumbnail() {
+  emit('remove')
 }
 
 function nextImage() {
@@ -39,8 +56,8 @@ function prevImage() {
 }
 
 function onKeydown(e: KeyboardEvent) {
-  if (!props.show) return
-  if (e.key === 'Escape') close()
+  if (!isOpen.value) return
+  if (e.key === 'Escape') closeModal()
   if (e.key === 'ArrowRight') nextImage()
   if (e.key === 'ArrowLeft') prevImage()
 }
@@ -55,11 +72,25 @@ onUnmounted(() => {
 </script>
 
 <template>
+  <template v-if="thumbnailUrl">
+    <div class="thumbnail-preview" :style="{ width: `${thumbnailSize}px`, height: `${thumbnailSize}px` }">
+      <img :src="thumbnailUrl" :alt="alt || 'Preview image'" class="thumbnail-image" @click="openModal" />
+      <button
+        v-if="showThumbnailClose"
+        type="button"
+        class="thumbnail-close"
+        @click.stop="removeThumbnail"
+      >
+        <Icon name="lucide:x" :size="12" />
+      </button>
+    </div>
+  </template>
+
   <Teleport to="body">
     <Transition name="preview-fade">
-      <div v-if="show" class="image-preview-overlay" @click.self="close">
+      <div v-if="isOpen" class="image-preview-overlay" @click.self="closeModal">
         <!-- Close button -->
-        <button class="preview-close" @click="close">
+        <button class="preview-close" @click="closeModal">
           <Icon name="lucide:x" :size="24" />
         </button>
 
@@ -98,6 +129,44 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+.thumbnail-preview {
+  position: relative;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-elevated);
+  cursor: pointer;
+}
+
+.thumbnail-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.thumbnail-close {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.5);
+  color: #fff;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1;
+  transition: background 0.2s;
+}
+
+.thumbnail-close:hover {
+  background: rgba(0, 0, 0, 0.7);
+}
+
 .image-preview-overlay {
   position: fixed;
   inset: 0;

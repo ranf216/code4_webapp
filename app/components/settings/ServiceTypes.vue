@@ -236,7 +236,7 @@ function handleCancelMaintenanceTypeAdd() {
             <Icon name="lucide:search" :size="16" class="types-column__search-icon" />
             <input v-model="serviceSearchQuery" type="text" :placeholder="t('settings.types.search_placeholder')" class="types-column__search-input" />
           </div>
-          <AppButton :text="t('settings.types.add_new')" icon="lucide:plus" type="primary" size="sm" @click="showServiceAddForm = true" />
+          <AppButton :text="t('settings.types.add_new')" icon="lucide:plus" type="primary" size="sm" @click="showServiceAddForm = true" :class="'mt-0'" />
         </div>
 
         <div class="types-column__table-container">
@@ -284,7 +284,7 @@ function handleCancelMaintenanceTypeAdd() {
             <Icon name="lucide:search" :size="16" class="types-column__search-icon" />
             <input v-model="maintenanceSearchQuery" type="text" :placeholder="t('settings.types.search_placeholder')" class="types-column__search-input" />
           </div>
-          <AppButton :text="t('settings.types.add_new')" icon="lucide:plus" type="primary" size="sm" @click="showMaintenanceAddForm = true" />
+          <AppButton :text="t('settings.types.add_new')" icon="lucide:plus" type="primary" size="sm" @click="showMaintenanceAddForm = true" :class="'mt-0'" />
         </div>
 
         <div class="types-column__table-container">

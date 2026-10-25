@@ -1,8 +1,42 @@
 <script setup lang="ts">
+import { userApi } from '~/api/user'
+
 definePageMeta({ layout: 'auth' })
 
-const { t } = useTranslation()
+const { t, lang } = useTranslation()
 const auth = useAuth()
+const showForgotPassword = ref(false)
+const resetEmail = ref('')
+const resetEmailError = ref('')
+const resetSending = ref(false)
+const resetSent = ref(false)
+
+function openForgotPassword() {
+  resetEmail.value = email.value.trim()
+  resetEmailError.value = ''
+  resetSent.value = false
+  showForgotPassword.value = true
+}
+
+async function sendResetEmail() {
+  if (resetSending.value) return
+  resetEmail.value = resetEmail.value.trim()
+  resetEmailError.value = validateEmail(resetEmail.value)
+  if (resetEmailError.value) return
+  resetSending.value = true
+  try {
+    const response = await userApi.forgotPassword(
+      { email: resetEmail.value, language: lang.value },
+      { showLoading: false }
+    )
+    if (response.rc === 0) resetSent.value = true
+    else resetEmailError.value = t('auth.reset_email_error')
+  } catch {
+    resetEmailError.value = t('auth.reset_email_error')
+  } finally {
+    resetSending.value = false
+  }
+}
 
 // Form states
 const email = ref('')
@@ -96,6 +130,37 @@ watch(() => auth.error.value, (newError: string | null) => {
 </script>
 
 <template>
+  <AppDialogModal
+    :show="showForgotPassword"
+    :title="t('auth.forgot_password')"
+    max-width="440px"
+    @close="!resetSending && (showForgotPassword = false)"
+  >
+    <p v-if="resetSent" role="status">{{ t('auth.reset_email_sent') }}</p>
+    <form v-else id="forgot-password-form" class="login-form" novalidate @submit.prevent="sendResetEmail">
+      <p class="text-secondary text-sm">{{ t('auth.reset_email_instructions') }}</p>
+      <div class="form-field">
+        <label class="label" for="reset-email">{{ t('auth.email') }}</label>
+        <input
+          id="reset-email"
+          v-model="resetEmail"
+          class="input"
+          :class="{ 'input--error': resetEmailError }"
+          type="email"
+          autocomplete="email"
+          :disabled="resetSending"
+          :aria-invalid="!!resetEmailError"
+          aria-describedby="reset-email-error"
+          @input="resetEmailError = ''"
+        >
+        <span v-if="resetEmailError" id="reset-email-error" class="field-error" role="alert">{{ resetEmailError }}</span>
+      </div>
+    </form>
+    <template #footer>
+      <AppButton v-if="resetSent" :text="t('common.close')" @click="showForgotPassword = false" />
+      <AppButton v-else :text="t('auth.send_reset_link')" type="primary" :loading="resetSending" @click="sendResetEmail" />
+    </template>
+  </AppDialogModal>
   <div class="login-wrap">
     <!-- Brand -->
     <div class="login-brand">
@@ -138,7 +203,7 @@ watch(() => auth.error.value, (newError: string | null) => {
         <div class="form-field">
           <div class="label-row">
             <label class="label" for="password">{{ t('auth.password') }}</label>
-            <a href="#" class="text-accent text-sm">{{ t('auth.forgot_password') }}</a>
+            <a href="#" class="text-accent text-sm" @click.prevent="openForgotPassword">{{ t('auth.forgot_password') }}</a>
           </div>
           <div class="input-wrap">
             <Icon name="lucide:lock" :size="16" class="input-icon" />

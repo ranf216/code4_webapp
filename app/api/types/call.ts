@@ -11,6 +11,12 @@ export type CallStatus = 'new' | 'accepted' | 'resolved' | 'canceled'
 
 export type CallPriority = 'urgent' | 'important' | 'normal' | 'low'
 
+export interface CallTranscription {
+  file_name: string
+  transcription_text: string
+  created_on: string
+}
+
 export interface Call {
   call_id: number
   category: CallCategory
@@ -33,6 +39,8 @@ export interface Call {
   officer_comments: string | null
   reaction: number | null
   resident_comment: string | null
+  documents?: string[] | null
+  transcriptions?: CallTranscription[] | null
   resident_user_id: string | null
   resident_name: string | null
   officer_user_id: string | null
@@ -109,6 +117,14 @@ export interface CancelCallRequest {
 
 
 
+// Request: Call/add_call_document
+export interface AddCallDocumentRequest {
+  '#request': 'Call/add_call_document'
+  call_id: number
+  document_file_ids?: string[]
+  transcription_text?: string
+}
+
 // Request: Call/delete_test_call
 export interface DeleteTestCallRequest {
   '#request': 'Call/delete_test_call'
@@ -132,4 +148,6 @@ export const CallErrorCodes = {
   MAX_MEDIA_FILES_REACHED: 572,
   CALL_NOT_ASSIGNED_TO_OFFICER: 573,
   ONLY_TEST_CALLS_CAN_BE_DELETED: 574,
+  FILE_NOT_FOUND: 321,
+  INVALID_FILE_TYPE: 324,
 } as const

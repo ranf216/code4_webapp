@@ -35,6 +35,7 @@ const triggerStates = ref({
   poi_expiring_enabled: true,
   poi_expired_enabled: true,
   report_submitted_enabled: true,
+  report_under_review_enabled: true,
   report_approved_enabled: true,
   report_changes_enabled: true,
   report_delivered_enabled: true,
@@ -88,6 +89,7 @@ async function fetchSettings() {
         poi_expiring_enabled: response.poi_expiring_enabled,
         poi_expired_enabled: response.poi_expired_enabled,
         report_submitted_enabled: response.report_submitted_enabled,
+        report_under_review_enabled: response.report_under_review_enabled,
         report_approved_enabled: response.report_approved_enabled,
         report_changes_enabled: response.report_changes_enabled,
         report_delivered_enabled: response.report_delivered_enabled,
@@ -126,10 +128,11 @@ const triggerList: TriggerEntry[] = [
   { key: 'poi_inactivated_enabled', label: 'POI Record Inactivated', defaultTitle: 'A manager inactivated an Active record.', receivers: 'settings.notifications.receivers.all_officers', notifText: '#name, #record_type has been inactivated' },
   { key: 'poi_expiring_enabled', label: 'Record Expiring Soon', defaultTitle: 'A Trespass Order or Metro Red Card is within the configured renewal reminder window (default: 14 days).', receivers: 'settings.notifications.receivers.creating_manager', notifText: '#name, #record_type expired soon' },
   { key: 'poi_expired_enabled', label: 'Record Expired', defaultTitle: 'A Trespass Order or Metro Red Card reaches its expiry date.', receivers: 'settings.notifications.receivers.manager_officers', notifText: '#name, #record_type expired' },
-  { key: 'report_submitted_enabled', label: 'Incident Report submitted', defaultTitle: '', receivers: 'settings.notifications.receivers.responsible_manager', notifText: '' },
-  { key: 'report_approved_enabled', label: 'Incident Report Approved', defaultTitle: '', receivers: 'settings.notifications.receivers.report_officer', notifText: '' },
-  { key: 'report_changes_enabled', label: 'Incident Report required changes', defaultTitle: '', receivers: 'settings.notifications.receivers.report_officer', notifText: '' },
-  { key: 'report_delivered_enabled', label: 'Incident Report Delivered', defaultTitle: '', receivers: 'settings.notifications.receivers.call_client', notifText: '' },
+  { key: 'report_submitted_enabled', label: t('settings.notifications.triggers.incident_report_submitted'), defaultTitle: '', receivers: 'settings.notifications.receivers.responsible_manager', notifText: '' },
+  { key: 'report_under_review_enabled', label: t('settings.notifications.triggers.incident_report_under_review'), defaultTitle: '', receivers: 'settings.notifications.receivers.responsible_manager', notifText: '' },
+  { key: 'report_approved_enabled', label: t('settings.notifications.triggers.incident_report_approved'), defaultTitle: '', receivers: 'settings.notifications.receivers.report_officer', notifText: '' },
+  { key: 'report_changes_enabled', label: t('settings.notifications.triggers.incident_report_changes'), defaultTitle: '', receivers: 'settings.notifications.receivers.report_officer', notifText: '' },
+  { key: 'report_delivered_enabled', label: t('settings.notifications.triggers.incident_report_delivered'), defaultTitle: '', receivers: 'settings.notifications.receivers.call_client', notifText: '' },
 ]
 
 const allTriggersEnabled = computed(() => Object.values(triggerStates.value).every(Boolean))

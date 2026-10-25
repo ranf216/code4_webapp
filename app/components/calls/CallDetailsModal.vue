@@ -3,7 +3,7 @@ import { callApi } from '~/api/call'
 import FileUpload from '~/components/FileUpload.vue'
 import GoogleMap from '~/components/GoogleMap.vue'
 import { useAuthStore } from '~/stores/auth'
-import type { Call as ApiCall } from '~/api/types/call'
+import type { Call as ApiCall, CallTranscription } from '~/api/types/call'
 
 interface CallCategory {
   type: 'medical' | 'security' | 'panic' | 'concierge' | 'test'
@@ -47,6 +47,8 @@ interface Call {
   officerComments?: string
   likeReaction?: boolean
   residentComments?: string
+  documents?: string[]
+  transcriptions?: CallTranscription[]
 }
 
 const props = defineProps<{
@@ -112,6 +114,78 @@ const photoUploadRef = ref<InstanceType<typeof FileUpload> | null>(null)
 const videoUploadRef = ref<InstanceType<typeof FileUpload> | null>(null)
 
 const authStore = useAuthStore()
+
+// Documents & transcription upload (admin/manager)
+const docUploadRef = ref<InstanceType<typeof FileUpload> | null>(null)
+const pendingDocFiles = ref<File[]>([])
+const docTranscription = ref('')
+const savingDocs = ref(false)
+const docError = ref('')
+
+const hasDocChanges = computed(() => pendingDocFiles.value.length > 0 || docTranscription.value.trim().length > 0)
+
+function onDocFilesChange(files: File[]) {
+  pendingDocFiles.value = files
+  docError.value = ''
+}
+
+async function saveCallDocuments() {
+  if (!call.value || !hasDocChanges.value || savingDocs.value) return
+  savingDocs.value = true
+  docError.value = ''
+  try {
+    const fileIds = docUploadRef.value ? await docUploadRef.value.uploadAll() : []
+    const pendingFailed = pendingDocFiles.value.length > 0 && fileIds.length < pendingDocFiles.value.length
+    if (pendingFailed) {
+      docError.value = 'Some files failed to upload. Please try again.'
+      return
+    }
+    const text = docTranscription.value.trim()
+    await callApi.addCallDocument({
+      call_id: Number(call.value.id),
+      document_file_ids: fileIds.length ? fileIds : undefined,
+      transcription_text: text || undefined,
+    })
+    docUploadRef.value?.clear()
+    pendingDocFiles.value = []
+    docTranscription.value = ''
+    await fetchCallDetails()
+  } catch (err: any) {
+    docError.value = err.message || 'Failed to save documents'
+    console.error('Add call document failed:', err)
+  } finally {
+    savingDocs.value = false
+  }
+}
+
+function docFileIcon(name: string): string {
+  const ext = (name.split('?')[0] ?? name).split('.').pop()?.toLowerCase()
+  if (ext === 'pdf') return 'lucide:file-text'
+  if (ext === 'png' || ext === 'jpg' || ext === 'jpeg') return 'lucide:image'
+  if (ext === 'xlsx' || ext === 'csv') return 'lucide:file-spreadsheet'
+  return 'lucide:file'
+}
+
+function isDocLink(doc: string): boolean {
+  return /^https?:\/\//i.test(doc)
+}
+
+function docFileName(doc: string): string {
+  if (!isDocLink(doc)) return doc
+  const path = doc.split('?')[0] ?? doc
+  return decodeURIComponent(path.substring(path.lastIndexOf('/') + 1)) || doc
+}
+
+function downloadDocument(doc: string) {
+  const anchor = document.createElement('a')
+  anchor.href = doc
+  anchor.download = docFileName(doc)
+  anchor.target = '_blank'
+  anchor.rel = 'noopener'
+  document.body.appendChild(anchor)
+  anchor.click()
+  document.body.removeChild(anchor)
+}
 
 const canResolve = computed(() => call.value?.status === 'accepted' && (call.value?.category?.type !== 'panic' || authStore.isAdmin))
 const canCancel = computed(() => (call.value?.status === 'new' || call.value?.status === 'accepted') && call.value?.category?.type === 'concierge')
@@ -275,6 +349,8 @@ function mapCall(apiCall: ApiCall): Call {
     officerComments: apiCall.officer_comments || undefined,
     likeReaction: apiCall.reaction === 1,
     residentComments: apiCall.resident_comment || undefined,
+    documents: apiCall.documents || [],
+    transcriptions: apiCall.transcriptions || [],
   }
 }
 
@@ -295,6 +371,10 @@ async function fetchCallDetails() {
 watch(() => [props.show, props.call?.id], () => {
   if (props.show && props.call?.id) {
     fetchedCall.value = null
+    pendingDocFiles.value = []
+    docTranscription.value = ''
+    docError.value = ''
+    docUploadRef.value?.clear()
     fetchCallDetails()
   }
 }, { immediate: true })
@@ -526,13 +606,70 @@ function getPriorityClass(priority: string | null | undefined): string {
           <!-- Admin Only Section -->
           <div class="details-section admin-section">
             <h4 class="section-title">{{ t('calls.admin_only') }}</h4>
+
             <div class="info-item">
               <label>{{ t('calls.documents') }}</label>
-              <span class="placeholder-text">{{ t('calls.no_documents') }}</span>
+              <ul v-if="call.documents && call.documents.length > 0" class="doc-list">
+                <li v-for="(doc, idx) in call.documents" :key="idx" class="doc-item">
+                  <Icon :name="docFileIcon(docFileName(doc))" :size="15" class="doc-item__icon" />
+                  <span class="doc-item__name">{{ docFileName(doc) }}</span>
+                  <button
+                    v-if="isDocLink(doc)"
+                    type="button"
+                    class="doc-item__download"
+                    :title="t('calls.download_document')"
+                    @click="downloadDocument(doc)"
+                  >
+                    <Icon name="lucide:download" :size="14" />
+                  </button>
+                </li>
+              </ul>
+              <span v-else class="placeholder-text">{{ t('calls.no_documents') }}</span>
+              <FileUpload
+                ref="docUploadRef"
+                accept=".pdf,.xlsx,.csv,.txt,.png,.jpg,.jpeg"
+                :max-files="10"
+                :max-size-mb="20"
+                :call-api="true"
+                :thumbnails="false"
+                :hint="t('calls.documents_hint')"
+                @files-change="onDocFilesChange"
+              />
             </div>
+
             <div class="info-item">
               <label>{{ t('calls.transcription') }}</label>
-              <span class="placeholder-text">{{ t('calls.no_transcription') }}</span>
+              <ul v-if="call.transcriptions && call.transcriptions.length > 0" class="doc-list">
+                <li v-for="(tr, idx) in call.transcriptions" :key="idx" class="doc-item doc-item--column">
+                  <div class="doc-item__row">
+                    <Icon name="lucide:file-text" :size="15" class="doc-item__icon" />
+                    <span class="doc-item__name">{{ tr.file_name }}</span>
+                    <span class="doc-item__date">{{ formatDateTime(tr.created_on) }}</span>
+                  </div>
+                  <p class="doc-item__text">{{ tr.transcription_text }}</p>
+                </li>
+              </ul>
+              <span v-else class="placeholder-text">{{ t('calls.no_transcription') }}</span>
+              <textarea
+                v-model="docTranscription"
+                class="field-textarea"
+                rows="3"
+                :placeholder="t('calls.transcription_placeholder')"
+              ></textarea>
+            </div>
+
+            <div class="doc-actions">
+              <button
+                type="button"
+                class="doc-save-btn"
+                :disabled="!hasDocChanges || savingDocs"
+                @click="saveCallDocuments"
+              >
+                <Icon v-if="savingDocs" name="lucide:loader-2" :size="15" class="spinner" />
+                <Icon v-else name="lucide:upload" :size="15" />
+                {{ savingDocs ? t('calls.saving_documents') : t('calls.upload_documents') }}
+              </button>
+              <span v-if="docError" class="doc-error">{{ docError }}</span>
             </div>
           </div>
         </div>
@@ -914,6 +1051,112 @@ function getPriorityClass(priority: string | null | undefined): string {
 .placeholder-text {
   color: var(--color-text-muted);
   font-style: italic;
+}
+
+/* Documents & Transcriptions */
+.doc-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.doc-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-elevated);
+  font-size: var(--font-size-sm);
+}
+
+.doc-item--column {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.doc-item__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.doc-item__icon {
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+}
+
+.doc-item__name {
+  color: var(--color-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+.doc-item__download {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.doc-item__download:hover { color: var(--color-accent); }
+
+.doc-item__date {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+}
+
+.doc-item__text {
+  margin: var(--space-1) 0 0;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.doc-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+}
+
+.doc-save-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  border: none;
+  border-radius: var(--radius-md);
+  background: var(--color-accent);
+  color: #fff;
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  cursor: pointer;
+  transition: opacity var(--transition-base);
+}
+
+.doc-save-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.doc-error {
+  color: #ef4444;
+  font-size: var(--font-size-sm);
 }
 
 /* Responsive */

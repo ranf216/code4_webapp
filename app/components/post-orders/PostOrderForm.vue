@@ -969,15 +969,16 @@ async function handleArchiveConfirm() {
   align-items: center;
   gap: var(--space-2);
   height: 40px;
-  padding: 0 var(--space-5);
+  padding: 0 var(--space-4);
   background: var(--color-accent);
-  border: none;
+  border: 1px solid var(--color-accent);
   border-radius: var(--radius-md);
   color: #0a0c10;
   font-size: var(--font-size-sm);
   font-weight: 600;
   cursor: pointer;
   transition: opacity var(--transition-base);
+  margin: var(--space-2) var(--space-2) var(--space-2) 0;
 }
 
 .btn-primary:hover:not(:disabled) { opacity: 0.9; }
@@ -998,6 +999,7 @@ async function handleArchiveConfirm() {
   cursor: pointer;
   text-decoration: none;
   transition: all var(--transition-base);
+  margin: var(--space-2);
 }
 
 .btn-secondary:hover:not(:disabled) {

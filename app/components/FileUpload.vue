@@ -19,6 +19,7 @@ interface Props {
   maxSizeMb?: number
   maxVideoSeconds?: number
   callApi?: boolean
+  thumbnails?: boolean
 
   label?: string
   hint?: string
@@ -31,6 +32,7 @@ const props = withDefaults(defineProps<Props>(), {
   maxSizeMb: 20,
   maxVideoSeconds: 0,
   callApi: false,
+  thumbnails: true,
   label: '',
   hint: '',
 })
@@ -39,6 +41,7 @@ const emit = defineEmits<{
   'update:modelValue': [fileIds: string[]]
   'upload-success': [fileIds: string[]]
   'upload-error': [errors: string[]]
+  'files-change': [files: File[]]
 }>()
 
 const { uploadFile } = useFileApi()
@@ -54,7 +57,7 @@ const showVideoPreview = ref(false)
 const currentVideoUrl = ref('')
 
 const canAddMore = computed(() => attachedFiles.value.length < props.maxFiles)
-const hasThumbnails = computed(() => attachedFiles.value.some((f) => isImageFile(f.file) || isVideoFile(f.file)))
+const hasThumbnails = computed(() => props.thumbnails && attachedFiles.value.some((f) => isImageFile(f.file) || isVideoFile(f.file)))
 
 function fileIcon(file: File): string {
   if (file.type.startsWith('image/')) return 'lucide:image'
@@ -111,6 +114,7 @@ async function addFile(file: File) {
     errorMsg: null,
     progress: 0,
   })
+  emit('files-change', getFiles())
 }
 
 function onFileInputChange(event: Event) {
@@ -143,6 +147,7 @@ function removeFile(id: string) {
 
   attachedFiles.value = attachedFiles.value.filter((f) => f.id !== id)
   emitValue()
+  emit('files-change', getFiles())
 }
 
 function emitValue() {
@@ -206,6 +211,19 @@ function getFiles(): File[] {
   return attachedFiles.value.map((f) => f.file)
 }
 
+/**
+ * Clear all attached files and revoke preview URLs.
+ */
+function clear() {
+  Object.values(imagePreviews.value).forEach((url) => URL.revokeObjectURL(url))
+  Object.values(videoPreviews.value).forEach((url) => URL.revokeObjectURL(url))
+  imagePreviews.value = {}
+  videoPreviews.value = {}
+  attachedFiles.value = []
+  emitValue()
+  emit('files-change', [])
+}
+
 function isImageFile(file: File): boolean {
   return file.type.startsWith('image/')
 }
@@ -240,7 +258,7 @@ onUnmounted(() => {
   Object.values(videoPreviews.value).forEach((url) => URL.revokeObjectURL(url))
 })
 
-defineExpose({ uploadAll, getFiles })
+defineExpose({ uploadAll, getFiles, clear })
 </script>
 
 <template>
@@ -251,7 +269,7 @@ defineExpose({ uploadAll, getFiles })
     <div v-if="attachedFiles.length > 0" class="file-upload__list" :class="{ 'file-upload__list--thumbnails': hasThumbnails }">
       <template v-for="item in attachedFiles" :key="item.id">
         <div
-          v-if="!isImageFile(item.file) && !isVideoFile(item.file)"
+          v-if="!thumbnails || (!isImageFile(item.file) && !isVideoFile(item.file))"
           class="file-item"
           :class="`file-item--${item.status}`"
         >
@@ -477,6 +495,7 @@ defineExpose({ uploadAll, getFiles })
   color: var(--color-text-muted);
   cursor: pointer;
   flex-shrink: 0;
+  margin: 10px 0px;
 }
 .file-item__remove:hover { color: var(--color-critical); }
 

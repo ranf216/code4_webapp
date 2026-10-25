@@ -7,6 +7,7 @@ const props = withDefaults(defineProps<{
   okText?: string
   okDisabled?: boolean
   maxWidth?: string
+  variant?: 'message' | 'alert' | 'warning'
 }>(), {
   title: '',
   message: '',
@@ -14,6 +15,7 @@ const props = withDefaults(defineProps<{
   okText: 'OK',
   okDisabled: false,
   maxWidth: '500px',
+  variant: 'message',
 })
 
 const emit = defineEmits<{
@@ -48,8 +50,8 @@ function handleBackdropClick(event: MouseEvent) {
         <div class="modal" :style="{ maxWidth: maxWidth }">
           <!-- Header -->
           <div class="modal__header">
-            <h3 v-if="title" class="modal__title">{{ title }}</h3>
-            <button class="modal__close" @click="handleClose">
+            <h3 v-if="title" class="modal__title" :class="`modal__title--${variant}`">{{ title }}</h3>
+            <button class="modal__close mt-0" @click="handleClose">
               <Icon name="lucide:circle-x" :size="24" />
             </button>
           </div>
@@ -122,6 +124,9 @@ function handleBackdropClick(event: MouseEvent) {
   color: var(--color-text-primary);
   margin: 0;
 }
+.modal__title--message { color: var(--color-text-primary); }
+.modal__title--alert { color: var(--color-critical); }
+.modal__title--warning { color: var(--color-warn); }
 
 .modal__close {
   display: flex;
