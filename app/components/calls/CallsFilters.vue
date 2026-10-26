@@ -135,7 +135,7 @@ const hasActiveFilters = computed(() => {
       <!-- Clear button -->
       <div class="filter-field clear-field" v-if="hasActiveFilters">
         <label class="filter-label">&nbsp;</label>
-        <button class="clear-btn" @click="clearFilters">
+        <button class="clear-btn mt-0" @click="clearFilters">
           <Icon name="lucide:x" :size="14" />
           {{ t('calls.filters.clear') }}
         </button>

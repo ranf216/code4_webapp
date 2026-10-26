@@ -626,6 +626,7 @@ function handleCancel() {
                     :class="[`threat-btn--${lvl}`, { 'threat-btn--active': form.threatLevel === lvl }]"
                     type="button"
                     @click="form.threatLevel = lvl as PoiThreatLevel"
+                    @focus="form.threatLevel = lvl as PoiThreatLevel"
                   >
                     {{ t(`poi.threat_${lvl}`) }}
                   </button>
@@ -1153,7 +1154,7 @@ function handleCancel() {
   transition: all var(--transition-base);
   color: var(--color-text-muted);
 }
-.threat-btn--low.threat-btn--active     { background: var(--color-bg-overlay); color: var(--color-text-secondary); border-color: var(--color-border); }
+.threat-btn--low.threat-btn--active     { background: rgba(33,150,243,0.15); color: #64b5f6; border-color: #2196f3; }
 .threat-btn--medium.threat-btn--active  { background: rgba(234,179,8,0.15); color: #ca8a04; border-color: #ca8a04; }
 .threat-btn--high.threat-btn--active    { background: rgba(249,115,22,0.15); color: #ea580c; border-color: #ea580c; }
 .threat-btn--critical.threat-btn--active { background: rgba(239,68,68,0.15); color: #ef4444; border-color: #ef4444; }

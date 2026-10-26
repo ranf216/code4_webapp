@@ -154,6 +154,7 @@ function goToCall() {
 .feed-item {
   display: flex;
   flex-direction: column;
+  justify-content: center;
   gap: var(--space-1);
   padding: var(--space-3) var(--space-4);
   background: transparent;
@@ -161,6 +162,8 @@ function goToCall() {
   border-bottom: 1px solid var(--color-border);
   text-align: left;
   cursor: pointer;
+  line-height: 1.4;
+  margin-top: 0px;
 }
 
 .feed-item:last-child {
