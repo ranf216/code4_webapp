@@ -923,7 +923,7 @@ function moveFieldDown(section: TemplateSection, index: number) {
                 </span>
                 <div style="display: flex; align-items: center;">
                   <Icon name="lucide:globe" :size="13" class="global-checkbox__icon" />
-                  <span style="margin-top: var(--space-1)">{{t('tpl.community_global') }}</span>
+                  <span>{{t('tpl.community_global') }}</span>
                 </div>
               </label>
 
