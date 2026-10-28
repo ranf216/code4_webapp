@@ -2335,6 +2335,16 @@ function toggleStatus(status: ShiftStatus) {
   gap: var(--space-3);
 }
 
+.officer-allocation-section .section-heading > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.officer-allocation-section .section-heading .form-label {
+  color: var(--color-text-primary);
+}
+
 .btn--small {
   padding: var(--space-2) var(--space-3);
   font-size: var(--font-size-xs);

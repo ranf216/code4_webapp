@@ -167,7 +167,7 @@ onUnmounted(() => {
             {{ option.label }}
             <button
               type="button"
-              class="chip__remove"
+              class="chip__remove mt-0"
               :aria-label="`Remove ${option.label}`"
               @click.stop="removeValue(option.value)"
             >

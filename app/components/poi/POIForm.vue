@@ -82,6 +82,7 @@ let incidentSearchTimer: ReturnType<typeof setTimeout> | null = null
 const isEdit = computed(() => props.mode === 'edit')
 const pageTitle = computed(() => isEdit.value ? t('poi.form_title_edit') : t('poi.form_title_create'))
 const isEditable = computed(() => !props.record || props.record.status === 'draft' || props.record.status === 'active')
+const canPublishFromEdit = computed(() => isEdit.value && props.record?.status === 'draft')
 
 function capitalizeFirst(value: string): string {
   if (!value) return value
@@ -484,7 +485,12 @@ async function submitForm(publish: boolean) {
         Object.assign(updatePayload, payload)
       }
       await poiApi.updatePoiRecord(updatePayload)
-      toastStore.success(t('poi.update_success'))
+      if (publish) {
+        await poiApi.publishPoiRecord(props.record.record_id)
+        toastStore.success(t('poi.publish_success'))
+      } else {
+        toastStore.success(t('poi.update_success'))
+      }
     }
 
     router.push('/poi')
@@ -906,6 +912,15 @@ function handleCancel() {
             <AppButton
               :text="isEdit ? t('poi.save_changes') : t('poi.publish')"
               :icon="isEdit ? 'lucide:save' : 'lucide:send'"
+              type="primary"
+              size="sm"
+              :loading="isSubmitting"
+              @click="isEdit ? handleSaveDraft() : handlePublish()"
+            />
+            <AppButton
+              v-if="canPublishFromEdit"
+              :text="t('poi.publish')"
+              icon="lucide:send"
               type="primary"
               size="sm"
               :loading="isSubmitting"
