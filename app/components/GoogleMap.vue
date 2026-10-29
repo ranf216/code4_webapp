@@ -270,13 +270,15 @@ function renderOverlays() {
       background:${w.visited ? '#22c55e' : '#1f2937'};
       border:2px solid ${w.visited ? '#22c55e' : '#fff'};
       color:#fff;font-size:11px;font-weight:700;
-      font-family:sans-serif;position:relative;z-index:10;transform:translateY(-50%);
+      font-family:sans-serif;position:relative;z-index:10;
     `
     el.textContent = String(w.number)
     el.style.cursor = 'pointer'
     const wpMarker = new AdvancedMarkerElement({
       map,
       position: { lat: w.lat, lng: w.lng },
+      anchorLeft: '-50%',
+      anchorTop: '-50%',
       content: el,
       title: w.title ?? (w.visited ? `Waypoint ${w.number} - visited` : `Waypoint ${w.number} - pending`),
       gmpClickable: true,
@@ -293,11 +295,13 @@ function renderOverlays() {
       display:flex;align-items:center;justify-content:center;
       width:16px;height:16px;border-radius:4px;
       background:#3b82f6;border:1px solid #fff;
-      box-shadow:0 0 4px #3b82f6;position:relative;z-index:10;transform:translateY(-50%);
+      box-shadow:0 0 4px #3b82f6;position:relative;z-index:10;
     `
     trackOverlay(new AdvancedMarkerElement({
       map,
       position: { lat: p.lat, lng: p.lng },
+      anchorLeft: '-50%',
+      anchorTop: '-50%',
       content: el,
       title: p.type,
     }))
@@ -377,7 +381,6 @@ function renderOverlays() {
     el.style.cssText = `
       position:relative;width:34px;height:34px;padding:0;background:transparent;
       border:0;cursor:pointer;opacity:${item.active === false ? '.4' : '1'};
-      transform:translateY(-50%);
     `
     pin.style.cssText = `
       display:flex;align-items:center;justify-content:center;width:34px;height:34px;
@@ -397,6 +400,8 @@ function renderOverlays() {
     const marker = trackOverlay(new AdvancedMarkerElement({
       map,
       position,
+      anchorLeft: '-50%',
+      anchorTop: '-50%',
       content: el,
       title: item.label,
     }))
@@ -414,11 +419,13 @@ function renderOverlays() {
       width:18px;height:18px;border-radius:50%;
       background:#ef4444;border:2px solid #fff;
       box-shadow:0 0 0 0 rgba(239,68,68,0.7);
-      animation:pulse 1.5s infinite;position:relative;z-index:10;transform:translateY(-50%);
+      animation:pulse 1.5s infinite;position:relative;z-index:10;
     `
     trackOverlay(new AdvancedMarkerElement({
       map,
       position: { lat: c.lat, lng: c.lng },
+      anchorLeft: '-50%',
+      anchorTop: '-50%',
       content: el,
       title: `Emergency call ${c.id}`,
     }))
@@ -437,20 +444,20 @@ function renderOverlays() {
     // element bounds, otherwise the lat/lng point lands between pin and label
     // (huge visual offset when zoomed out).
     wrapper.style.cssText = `
-      position:relative;width:44px;height:44px;padding:0;background:transparent;
+      position:relative;width:36px;height:36px;padding:0;background:transparent;
       border:0;cursor:pointer;opacity:${m.status === 'grey' || m.status === 'offduty' ? '.65' : '1'};
-      z-index:100;transform:translateY(-50%);
+      z-index:100;
     `
     pin.style.cssText = `
       display:flex;align-items:center;justify-content:center;
-      width:44px;height:44px;border-radius:50%;box-sizing:border-box;
-      background:#111827;border:4px ${m.status === 'amber' || m.status === 'idle' || m.status === 'gps-lost' ? 'dashed' : 'solid'} ${color};
+      width:36px;height:36px;border-radius:50%;box-sizing:border-box;
+      background:#111827;border:3px ${m.status === 'amber' || m.status === 'idle' || m.status === 'gps-lost' ? 'dashed' : 'solid'} ${color};
       box-shadow:0 2px 12px rgba(0,0,0,.45);position:relative;flex-shrink:0;
     `
     avatar.style.cssText = `
-      display:flex;align-items:center;justify-content:center;width:32px;height:32px;
+      display:flex;align-items:center;justify-content:center;width:26px;height:26px;
       overflow:hidden;border-radius:50%;background:#1f2937;color:#fff;
-      font:700 11px sans-serif;
+      font:700 10px sans-serif;
     `
     if (m.image) {
       const image = document.createElement('img')
@@ -471,8 +478,8 @@ function renderOverlays() {
       const heading = document.createElement('span')
       heading.textContent = '▲'
       heading.style.cssText = `
-        position:absolute;top:-12px;left:15px;color:${color};font:700 12px sans-serif;
-        transform:rotate(${m.heading}deg);transform-origin:50% 18px;text-shadow:0 1px 2px rgba(0,0,0,.8);
+        position:absolute;top:-11px;left:11px;color:${color};font:700 12px sans-serif;
+        transform:rotate(${m.heading}deg);transform-origin:50% 15px;text-shadow:0 1px 2px rgba(0,0,0,.8);
       `
       pin.append(heading)
     }
@@ -482,7 +489,7 @@ function renderOverlays() {
       warning.textContent = '!'
       warning.style.cssText = `
         position:absolute;right:-5px;top:-5px;display:flex;align-items:center;justify-content:center;
-        width:17px;height:17px;border-radius:50%;background:#DC3545;border:2px solid #fff;
+        width:15px;height:15px;border-radius:50%;background:#DC3545;border:2px solid #fff;
         color:#fff;font:700 11px sans-serif;
       `
       pin.append(warning)
@@ -493,7 +500,7 @@ function renderOverlays() {
       callBadge.textContent = '●'
       callBadge.style.cssText = `
         position:absolute;right:-4px;bottom:-4px;display:flex;align-items:center;justify-content:center;
-        width:16px;height:16px;border-radius:50%;background:#0D6EFD;border:2px solid #fff;
+        width:14px;height:14px;border-radius:50%;background:#0D6EFD;border:2px solid #fff;
         color:#fff;font:700 8px sans-serif;
       `
       pin.append(callBadge)
@@ -518,6 +525,8 @@ function renderOverlays() {
     const marker = trackOverlay(new AdvancedMarkerElement({
       map,
       position: { lat: m.lat, lng: m.lng },
+      anchorLeft: '-50%',
+      anchorTop: '-50%',
       content: wrapper,
       title: m.status === 'amber'
         ? `${m.label || 'Officer'} — GPS signal stale — last update ${m.lastUpdate || 'unknown'}`
