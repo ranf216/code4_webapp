@@ -616,7 +616,7 @@ function getPriorityClass(priority: string | null | undefined): string {
                   <button
                     v-if="isDocLink(doc)"
                     type="button"
-                    class="doc-item__download"
+                    class="doc-item__download mt-0"
                     :title="t('calls.download_document')"
                     @click="downloadDocument(doc)"
                   >
@@ -1067,7 +1067,7 @@ function getPriorityClass(priority: string | null | undefined): string {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  padding: var(--space-1) var(--space-2);
+  padding: var(--space-2);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
   background: var(--color-bg-elevated);

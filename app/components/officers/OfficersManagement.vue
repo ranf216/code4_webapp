@@ -761,7 +761,7 @@ function toggleSort(col: 'first_name' | 'last_name' | 'community' | 'created_on'
         <Icon name="lucide:search" :size="14" />
         <input v-model="searchQuery" type="text" :placeholder="t('officers.search_placeholder')" />
         <Icon v-if="isSearching" name="lucide:loader-2" :size="14" class="animate-spin search-spinner" />
-        <button v-if="searchQuery" class="search-clear-btn" @click="searchQuery = ''">
+        <button v-if="searchQuery" class="search-clear-btn mt-0" @click="searchQuery = ''">
           <Icon name="lucide:x" :size="12" />
         </button>
       </div>

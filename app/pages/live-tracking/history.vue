@@ -40,7 +40,7 @@ const selectedPoint = computed(() => {
 })
 
 function onWaypointClick(index: number) {
-  selectedPointIndex.value = index
+  selectedPointIndex.value = waypointIndices.value[index] ?? null
 }
 
 function formatPointSpeed(value: number | null) {
@@ -115,6 +115,11 @@ ${trkpts}
 
 const SPEED_COLORS = { stationary: '#6C757D', walking: '#0D6EFD', vehicle: '#22c55e', call: '#DC3545' }
 
+// Rendering caps — full `points` is kept for stats/export/point detail
+// and for the route polyline (polylines render fine at thousands of points).
+// Waypoint markers are the expensive part, so they are capped.
+const WAYPOINT_MAX = 400
+
 function segmentColor(point: TrackingLocation) {
   if (point.call_id != null) return SPEED_COLORS.call
   const speed = point.speed ?? 0
@@ -122,6 +127,17 @@ function segmentColor(point: TrackingLocation) {
   if (speed <= 2.5) return SPEED_COLORS.walking
   return SPEED_COLORS.vehicle
 }
+
+// Indices of points that get a numbered waypoint marker (clickable → detail panel).
+const waypointIndices = computed<number[]>(() => {
+  const n = points.value.length
+  if (n <= WAYPOINT_MAX) return points.value.map((_, i) => i)
+  const result: number[] = []
+  for (let k = 0; k < WAYPOINT_MAX; k++) {
+    result.push(Math.round((k * (n - 1)) / (WAYPOINT_MAX - 1)))
+  }
+  return result
+})
 
 const routes = computed<HistoryRoute[]>(() => {
   const result: HistoryRoute[] = []
@@ -151,20 +167,23 @@ function formatHeading(value: number | null) {
   return `${compassDirections[Math.round(value / 45) % 8]} ${Math.round(value)}°`
 }
 
-const waypoints = computed(() => points.value.map((p, index) => ({
-  number: index + 1,
-  lat: p.latitude,
-  lng: p.longitude,
-  visited: true,
-  title: [
-    `Point ${index + 1}`,
-    utcToLocal(p.recorded_on).format('DD MMM YYYY HH:mm:ss'),
-    p.speed == null ? 'Speed: —' : p.speed < 0.5 ? 'Stationary' : `Speed: ${(p.speed * 3.6).toFixed(1)} km/h`,
-    `Accuracy: ${p.accuracy == null ? '—' : `±${Math.round(p.accuracy)} m`}`,
-    `Source: ${p.source}`,
-    p.call_id != null ? `Call #${p.call_id}` : '',
-  ].filter(Boolean).join('\n'),
-})))
+const waypoints = computed(() => waypointIndices.value.map((index) => {
+  const p = points.value[index]!
+  return {
+    number: index + 1,
+    lat: p.latitude,
+    lng: p.longitude,
+    visited: true,
+    title: [
+      `Point ${index + 1}`,
+      utcToLocal(p.recorded_on).format('DD MMM YYYY HH:mm:ss'),
+      p.speed == null ? 'Speed: —' : p.speed < 0.5 ? 'Stationary' : `Speed: ${(p.speed * 3.6).toFixed(1)} km/h`,
+      `Accuracy: ${p.accuracy == null ? '—' : `±${Math.round(p.accuracy)} m`}`,
+      `Source: ${p.source}`,
+      p.call_id != null ? `Call #${p.call_id}` : '',
+    ].filter(Boolean).join('\n'),
+  }
+}))
 
 const endpointMarkers = computed(() => {
   const first = points.value[0]

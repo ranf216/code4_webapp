@@ -161,6 +161,7 @@ function goToTasks() {
   border-bottom: 1px solid var(--color-border);
   text-align: left;
   cursor: pointer;
+  margin-top: 0px;
 }
 
 .feed-item:last-child {

@@ -2043,12 +2043,18 @@ function toggleStatus(status: ShiftStatus) {
   font-weight: 500;
   margin-top: var(--space-1);
   color: var(--color-text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .shift-site {
   color: var(--color-text-muted);
   font-size: var(--font-size-sm);
   margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .shift-meta {
@@ -2327,6 +2333,16 @@ function toggleStatus(status: ShiftStatus) {
   align-items: center;
   justify-content: space-between;
   gap: var(--space-3);
+}
+
+.officer-allocation-section .section-heading > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.officer-allocation-section .section-heading .form-label {
+  color: var(--color-text-primary);
 }
 
 .btn--small {

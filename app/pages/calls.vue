@@ -8,13 +8,12 @@ const { t } = useTranslation()
 const route = useRoute()
 const router = useRouter()
 
-type TabId = 'open' | 'history' | 'reports'
+type TabId = 'open' | 'history'
 
 // Tab configuration
 const tabs = [
   { id: 'open' as TabId, label: t('calls.tabs.open'), icon: 'lucide:phone-call' },
   { id: 'history' as TabId, label: t('calls.tabs.history'), icon: 'lucide:history' },
-  { id: 'reports' as TabId, label: t('calls.tabs.reports'), icon: 'lucide:file-text' },
 ] as const
 
 const validTabIds = tabs.map((tab) => tab.id) as TabId[]
@@ -60,11 +59,6 @@ function setTab(id: TabId) {
       <!-- History Tab -->
       <div v-else-if="activeTab === 'history'" class="content-card">
         <CallsHistory />
-      </div>
-
-      <!-- Incident Reports Tab -->
-      <div v-else-if="activeTab === 'reports'" class="content-card">
-        <IncidentReports />
       </div>
     </div>
   </div>

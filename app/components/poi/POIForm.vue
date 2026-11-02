@@ -82,6 +82,7 @@ let incidentSearchTimer: ReturnType<typeof setTimeout> | null = null
 const isEdit = computed(() => props.mode === 'edit')
 const pageTitle = computed(() => isEdit.value ? t('poi.form_title_edit') : t('poi.form_title_create'))
 const isEditable = computed(() => !props.record || props.record.status === 'draft' || props.record.status === 'active')
+const canPublishFromEdit = computed(() => isEdit.value && props.record?.status === 'draft')
 
 function capitalizeFirst(value: string): string {
   if (!value) return value
@@ -484,7 +485,12 @@ async function submitForm(publish: boolean) {
         Object.assign(updatePayload, payload)
       }
       await poiApi.updatePoiRecord(updatePayload)
-      toastStore.success(t('poi.update_success'))
+      if (publish) {
+        await poiApi.publishPoiRecord(props.record.record_id)
+        toastStore.success(t('poi.publish_success'))
+      } else {
+        toastStore.success(t('poi.update_success'))
+      }
     }
 
     router.push('/poi')
@@ -626,6 +632,7 @@ function handleCancel() {
                     :class="[`threat-btn--${lvl}`, { 'threat-btn--active': form.threatLevel === lvl }]"
                     type="button"
                     @click="form.threatLevel = lvl as PoiThreatLevel"
+                    @focus="form.threatLevel = lvl as PoiThreatLevel"
                   >
                     {{ t(`poi.threat_${lvl}`) }}
                   </button>
@@ -908,6 +915,15 @@ function handleCancel() {
               type="primary"
               size="sm"
               :loading="isSubmitting"
+              @click="isEdit ? handleSaveDraft() : handlePublish()"
+            />
+            <AppButton
+              v-if="canPublishFromEdit"
+              :text="t('poi.publish')"
+              icon="lucide:send"
+              type="primary"
+              size="sm"
+              :loading="isSubmitting"
               @click="handlePublish"
             />
           </div>
@@ -1153,7 +1169,7 @@ function handleCancel() {
   transition: all var(--transition-base);
   color: var(--color-text-muted);
 }
-.threat-btn--low.threat-btn--active     { background: var(--color-bg-overlay); color: var(--color-text-secondary); border-color: var(--color-border); }
+.threat-btn--low.threat-btn--active     { background: rgba(33,150,243,0.15); color: #64b5f6; border-color: #2196f3; }
 .threat-btn--medium.threat-btn--active  { background: rgba(234,179,8,0.15); color: #ca8a04; border-color: #ca8a04; }
 .threat-btn--high.threat-btn--active    { background: rgba(249,115,22,0.15); color: #ea580c; border-color: #ea580c; }
 .threat-btn--critical.threat-btn--active { background: rgba(239,68,68,0.15); color: #ef4444; border-color: #ef4444; }
