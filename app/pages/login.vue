@@ -164,7 +164,7 @@ watch(() => auth.error.value, (newError: string | null) => {
   <div class="login-wrap">
     <!-- Brand -->
     <div class="login-brand">
-      <div class="login-brand__badge">C4</div>
+      <img src="/logo-light.svg" alt="AXIS" class="login-brand__badge" />
       <span class="login-brand__name">AXIS</span>
     </div>
 
@@ -356,15 +356,6 @@ watch(() => auth.error.value, (newError: string | null) => {
 .login-brand__badge {
   width: 36px;
   height: 36px;
-  background: var(--color-accent);
-  border-radius: var(--radius-md);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #fff;
-  font-size: var(--font-size-sm);
-  font-weight: 700;
-  letter-spacing: 0.04em;
   flex-shrink: 0;
 }
 .login-brand__name {

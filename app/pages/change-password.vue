@@ -151,13 +151,7 @@ watch(confirmPassword, () => { confirmPasswordError.value = '' })
   <div class="change-password-container">
     <!-- Brand -->
     <div class="login-brand">
-      <div class="brand-logo">
-        <svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <rect width="48" height="48" rx="12" fill="#E5FF44" />
-          <path d="M24 12L32 24H16L24 12Z" fill="#0A0C10" />
-          <rect x="16" y="24" width="16" height="12" fill="#0A0C10" />
-        </svg>
-      </div>
+      <img src="/logo-light.svg" alt="AXIS" class="brand-logo" />
       <h1 class="brand-title">AXIS</h1>
       <p class="brand-tagline">{{ t('app.tagline') }}</p>
     </div>

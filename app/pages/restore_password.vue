@@ -46,7 +46,7 @@ async function resetPassword() {
 <template>
   <div class="reset-wrap">
     <div class="reset-brand">
-      <div class="reset-brand__badge">C4</div>
+      <img src="/logo-light.svg" alt="AXIS" class="reset-brand__badge" />
       <span class="reset-brand__name">AXIS</span>
     </div>
     <div class="card card--pad reset-card">
@@ -96,15 +96,6 @@ async function resetPassword() {
 .reset-brand__badge {
   width: 36px;
   height: 36px;
-  background: var(--color-accent);
-  border-radius: var(--radius-md);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #fff;
-  font-size: var(--font-size-sm);
-  font-weight: 700;
-  letter-spacing: 0.04em;
 }
 .reset-brand__name {
   font-size: var(--font-size-xl);

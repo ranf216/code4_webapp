@@ -133,13 +133,13 @@ function closePanicModal() {
   <aside class="sidebar">
     <!-- Brand -->
     <div class="sidebar__brand">
-      <Icon name="lucide:locate-fixed" :size="20" class="sidebar__brand-icon" />
+      <img src="/logo-light.svg" alt="AXIS" class="sidebar__brand-icon" />
       <span class="sidebar__name">AXIS</span>
     </div>
 
     <!-- Org info -->
     <div class="sidebar__org">
-      <div class="sidebar__org-avatar">C4</div>
+      <img src="/logo-light.svg" alt="Code 4 Operations" class="sidebar__org-avatar" />
       <div class="sidebar__org-info">
         <span class="sidebar__org-name">Code 4 Operations</span>
         <span class="sidebar__org-meta">6 communities · 65 officers</span>
@@ -261,9 +261,9 @@ function closePanicModal() {
   flex-shrink: 0;
 }
 .sidebar__brand-icon {
-  color: var(--color-text-primary);
+  width: 22px;
+  height: 22px;
   flex-shrink: 0;
-  opacity: 0.9;
 }
 .sidebar__name {
   font-size: var(--font-size-md);
@@ -290,14 +290,6 @@ function closePanicModal() {
 .sidebar__org-avatar {
   width: 22px;
   height: 22px;
-  background: linear-gradient(135deg, #1196ad 0%, #576bcf 100%);
-  border-radius: var(--radius-md);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: var(--font-size-sm);
-  font-weight: 800;
-  color: white;
   flex-shrink: 0;
 }
 .sidebar__org-info {
