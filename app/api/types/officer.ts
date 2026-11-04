@@ -20,16 +20,6 @@ export interface Officer {
   last_login: string | null
 }
 
-// Public officer object returned to residents
-export interface OfficerInfo {
-  user_id: string
-  first_name: string
-  last_name: string
-  title: string
-  description: string | null
-  image_url: string
-}
-
 // Officer evaluation object
 export interface OfficerEvaluation {
   evaluation_id: number
@@ -139,35 +129,6 @@ export interface AddOfficerEvaluationResponse {
 export interface DeleteOfficerEvaluationRequest {
   '#request': 'Officer/delete_officer_evaluation'
   evaluation_id: number
-}
-
-// Request: Officer/get_my_details
-export interface GetMyDetailsRequest {
-  '#request': 'Officer/get_my_details'
-}
-
-// Response: Officer/get_my_details
-export interface GetMyDetailsResponse {
-  officer: Officer
-}
-
-// Request: Officer/update_my_details
-export interface UpdateMyDetailsRequest {
-  '#request': 'Officer/update_my_details'
-  first_name?: string
-  last_name?: string
-  address?: string
-  email?: string
-}
-
-// Request: Officer/get_officers_info
-export interface GetOfficersInfoRequest {
-  '#request': 'Officer/get_officers_info'
-}
-
-// Response: Officer/get_officers_info
-export interface GetOfficersInfoResponse {
-  officers: OfficerInfo[]
 }
 
 // Officer module error codes

@@ -4,6 +4,7 @@ import { useTranslation } from '~/composables/useI18n'
 import { reportApi } from '~/api/report'
 import { useToastStore } from '~/stores/toast'
 import { useFileApi } from '~/composables/useFileApi'
+import { useReportMetadata } from '~/composables/useReportMetadata'
 import { utcToLocal } from '~/utils/dateTime'
 import { renderMarkdown } from '~/utils/markdown'
 import type {
@@ -29,6 +30,7 @@ type SectionUpdatePayload = {
 }
 
 const { t } = useTranslation()
+const { fetchReportMetadata, statusLabel, historyActionLabel } = useReportMetadata()
 const router = useRouter()
 const toastStore = useToastStore()
 
@@ -496,6 +498,7 @@ function stopTimers() {
 }
 
 onMounted(() => {
+  fetchReportMetadata()
   fetchReport()
   fetchHistory()
   startTimers()
@@ -532,7 +535,7 @@ function getStatusLabel(status: ReportStatus): string {
     approved: t('reports.status_approved'),
     delivered: t('reports.status_delivered'),
   }
-  return map[status] || status
+  return statusLabel(status, map[status] ?? status)
 }
 
 function getHistoryActionLabel(action: string): string {
@@ -548,7 +551,7 @@ function getHistoryActionLabel(action: string): string {
     delivered: t('reports.history_action_delivered'),
     pdf_regenerated: t('reports.history_action_pdf_regenerated'),
   }
-  return map[action] || action
+  return historyActionLabel(action, map[action] ?? action)
 }
 
 function renderFieldValue(field: ReportField): string {

@@ -1369,6 +1369,7 @@ const translations: Record<string, Record<string, string>> = {
     'settings.tabs.poi_trespass': 'POI & Trespass',
     'settings.tabs.gps_tracking': 'GPS & Tracking',
     'settings.tabs.working_hours': 'Working Hours',
+    'settings.tabs.shift': 'Shift',
     'settings.tabs.security': 'Account Settings',
     'settings.titles.service_types': 'Service & Incident Types',
     'settings.titles.asset_types': 'Asset Types',
@@ -1377,6 +1378,7 @@ const translations: Record<string, Record<string, string>> = {
     'settings.titles.poi_trespass': 'POI & Trespass Settings',
     'settings.titles.gps_tracking': 'GPS & Tracking Settings',
     'settings.titles.working_hours': 'Working Hours',
+    'settings.titles.shift': 'Shift Settings',
     'settings.titles.security': 'Account Settings',
 
     // POI & Trespass
@@ -1707,6 +1709,22 @@ const translations: Record<string, Record<string, string>> = {
     'settings.working_hours.max_hours_label': 'Max working hours per day',
     'settings.working_hours.max_hours_hint': 'Default: 8 hours. Allowed range: 1–24.',
     'settings.working_hours.hours_per_day': 'hours / day',
+    'settings.shift.page_title': 'Shift Settings',
+    'settings.shift.page_subtitle': 'Configure allocation limits, check-in windows, and shift reminders.',
+    'settings.shift.max_weekly_hours_label': 'Max Weekly Hours per Officer',
+    'settings.shift.max_weekly_hours_hint': 'Triggers an OVERTIME_WARNING when an allocation would exceed this limit. Default: 48h.',
+    'settings.shift.min_rest_gap_label': 'Min Rest Gap Between Shifts',
+    'settings.shift.min_rest_gap_hint': 'Triggers a REST_GAP_WARNING when rest between two shifts is below this value. Default: 8h.',
+    'settings.shift.early_checkin_label': 'Early Check-In Window',
+    'settings.shift.early_checkin_hint': 'How early an officer can check in before the shift start time. Default: 30 min.',
+    'settings.shift.starting_soon_label': 'Shift Starting Soon Lead Time',
+    'settings.shift.starting_soon_hint': 'Reminder is sent to allocated officers who have not checked in this many minutes before shift start. Default: 30 min.',
+    'settings.shift.auto_checkout_label': 'Auto Check-Out Grace Period',
+    'settings.shift.auto_checkout_hint': 'Officers are automatically checked out this many minutes after the shift ends. Default: 60 min.',
+    'settings.shift.hours': 'hours',
+    'settings.shift.restore_defaults': 'Restore Defaults',
+    'settings.shift.restore_defaults_title': 'Restore Default Settings',
+    'settings.shift.restore_defaults_confirm': 'This will reset all Shift settings to their factory defaults. This action cannot be undone.',
 
     // Users
     'users.management_title': 'Users Management',

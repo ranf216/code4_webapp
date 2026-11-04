@@ -232,6 +232,13 @@ const completeImageFileIds = ref<string[]>([])
 const completeVideoFileIds = ref<string[]>([])
 const completeImageUploadRef = ref<InstanceType<typeof FileUpload> | null>(null)
 const completeVideoUploadRef = ref<InstanceType<typeof FileUpload> | null>(null)
+const addMediaImageFileIds = ref<string[]>([])
+const addMediaVideoFileIds = ref<string[]>([])
+const addMediaDocumentFileIds = ref<string[]>([])
+const addMediaImageRef = ref<InstanceType<typeof FileUpload> | null>(null)
+const addMediaVideoRef = ref<InstanceType<typeof FileUpload> | null>(null)
+const addMediaDocRef = ref<InstanceType<typeof FileUpload> | null>(null)
+const addMediaHasFiles = ref(false)
 
 const authStore = useAuthStore()
 const toastStore = useToastStore()
@@ -393,6 +400,13 @@ async function fetchTaskDetail(taskId: number) {
 function closeTaskModal() {
   showTaskModal.value = false
   selectedTask.value = null
+  addMediaImageRef.value?.clear()
+  addMediaVideoRef.value?.clear()
+  addMediaDocRef.value?.clear()
+  addMediaImageFileIds.value = []
+  addMediaVideoFileIds.value = []
+  addMediaDocumentFileIds.value = []
+  addMediaHasFiles.value = false
 }
 
 function canAccept(task: Task): boolean {
@@ -624,8 +638,74 @@ async function saveEta() {
   }
 }
 
+function onAddMediaFilesChange() {
+  const total =
+    (addMediaImageRef.value?.getFiles().length ?? 0) +
+    (addMediaVideoRef.value?.getFiles().length ?? 0) +
+    (addMediaDocRef.value?.getFiles().length ?? 0)
+  addMediaHasFiles.value = total > 0
+}
+
+async function addMedia() {
+  if (!selectedTask.value || !addMediaHasFiles.value) return
+  isProcessing.value = true
+  try {
+    await addMediaImageRef.value?.uploadAll()
+    await addMediaVideoRef.value?.uploadAll()
+    await addMediaDocRef.value?.uploadAll()
+
+    await taskApi.addTaskMedia({
+      task_id: selectedTask.value.task_id,
+      media_file_ids: addMediaImageFileIds.value.length ? addMediaImageFileIds.value : undefined,
+      video_file_id: addMediaVideoFileIds.value[0] || undefined,
+      document_file_ids: addMediaDocumentFileIds.value.length ? addMediaDocumentFileIds.value : undefined,
+    })
+
+    addMediaImageRef.value?.clear()
+    addMediaVideoRef.value?.clear()
+    addMediaDocRef.value?.clear()
+    addMediaImageFileIds.value = []
+    addMediaVideoFileIds.value = []
+    addMediaDocumentFileIds.value = []
+    addMediaHasFiles.value = false
+
+    await fetchTaskDetail(selectedTask.value.task_id)
+    toastStore.success('Media added')
+  } catch (err: any) {
+    console.error('Add media failed:', err)
+    toastStore.error(err.message || 'Failed to add media')
+  } finally {
+    isProcessing.value = false
+  }
+}
+
 function isImageMedia(media: TaskMedia) {
   return media.media_type === 'image' && media.url
+}
+
+const showMediaPreview = ref(false)
+const previewMediaUrl = ref('')
+const previewMediaIsAudio = ref(false)
+
+const AUDIO_EXTENSIONS = /\.(mp3|m4a|aac|wav|ogg|oga|flac)$/i
+
+function isAudioMedia(media: TaskMedia) {
+  return !!media.url && AUDIO_EXTENSIONS.test(media.url)
+}
+
+function isVideoMedia(media: TaskMedia) {
+  return media.media_type === 'video' && !!media.url && !isAudioMedia(media)
+}
+
+function openMediaPreview(media: TaskMedia) {
+  previewMediaUrl.value = media.url
+  previewMediaIsAudio.value = isAudioMedia(media)
+  showMediaPreview.value = true
+}
+
+function closeMediaPreview() {
+  showMediaPreview.value = false
+  previewMediaUrl.value = ''
 }
 
 function openImagePreview(media: TaskMedia) {
@@ -882,13 +962,19 @@ async function handleAddTask() {
           <button class="btn btn--primary" :disabled="isProcessing" @click="addComment">Send</button>
         </div>
 
-        <div v-if="selectedTask.media && selectedTask.media.length > 0" class="task-detail__section">
+        <div v-if="(selectedTask.media && selectedTask.media.length > 0) || isOpenTask" class="task-detail__section">
           <h4 class="task-detail__section-title">Media</h4>
-          <div class="media-thumbnails">
+          <div v-if="selectedTask.media && selectedTask.media.length > 0" class="media-thumbnails">
             <template v-for="m in selectedTask.media" :key="m.media_id">
               <div v-if="isImageMedia(m)" class="media-thumb media-thumb--image" @click="openImagePreview(m)">
                 <span v-if="m.is_confirmation" class="media-confirmation">Confirmation</span>
                 <img :src="m.url" class="media-thumb__img" alt="Task image" />
+              </div>
+              <div v-else-if="isVideoMedia(m) || isAudioMedia(m)" class="media-thumb media-thumb--playable" @click="openMediaPreview(m)">
+                <span v-if="m.is_confirmation" class="media-confirmation">Confirmation</span>
+                <Icon :name="isAudioMedia(m) ? 'lucide:music' : 'lucide:play'" :size="20" class="media-play-icon" />
+                <span class="media-type">{{ isAudioMedia(m) ? 'audio' : m.media_type }}</span>
+                <span class="media-name">#{{ m.media_id }}</span>
               </div>
               <a v-else class="media-thumb" :href="m.url" target="_blank">
                 <span v-if="m.is_confirmation" class="media-confirmation">Confirmation</span>
@@ -896,6 +982,48 @@ async function handleAddTask() {
                 <span class="media-name">#{{ m.media_id }}</span>
               </a>
             </template>
+          </div>
+
+          <div v-if="isOpenTask" class="add-media">
+            <div class="form-group">
+              <label>Images</label>
+              <FileUpload
+                ref="addMediaImageRef"
+                v-model="addMediaImageFileIds"
+                :callApi="true"
+                accept="image/*"
+                :maxFiles="5"
+                hint="Max 5 images"
+                @files-change="onAddMediaFilesChange"
+              />
+            </div>
+            <div class="form-group">
+              <label>Video</label>
+              <FileUpload
+                ref="addMediaVideoRef"
+                v-model="addMediaVideoFileIds"
+                :callApi="true"
+                accept="video/*"
+                :maxFiles="1"
+                hint="Max 1 video"
+                @files-change="onAddMediaFilesChange"
+              />
+            </div>
+            <div class="form-group">
+              <label>Documents</label>
+              <FileUpload
+                ref="addMediaDocRef"
+                v-model="addMediaDocumentFileIds"
+                :callApi="true"
+                accept=".pdf,.xlsx,.csv,.txt,.png,.jpg,.jpeg"
+                :maxFiles="10"
+                :thumbnails="false"
+                @files-change="onAddMediaFilesChange"
+              />
+            </div>
+            <button class="btn btn--primary add-media__submit" :disabled="!addMediaHasFiles || isProcessing" @click="addMedia">
+              <Icon name="lucide:upload" :size="16" /> Send Media
+            </button>
           </div>
         </div>
 
@@ -1119,6 +1247,34 @@ async function handleAddTask() {
       </template>
     </AppDialogModal>
     <MImagePreview :show="showImagePreview" :images="previewImages" :initial-index="previewInitialIndex" alt="Task media" @close="showImagePreview = false" />
+
+    <!-- Video / Audio preview -->
+    <Teleport to="body">
+      <Transition name="preview-fade">
+        <div v-if="showMediaPreview" class="media-preview-overlay" @click.self="closeMediaPreview">
+          <button class="media-preview-close" @click="closeMediaPreview">
+            <Icon name="lucide:x" :size="24" />
+          </button>
+          <audio
+            v-if="previewMediaIsAudio"
+            :src="previewMediaUrl"
+            class="media-preview-audio"
+            controls
+            autoplay
+            @click.stop
+          ></audio>
+          <video
+            v-else
+            :src="previewMediaUrl"
+            class="media-preview-player"
+            controls
+            autoplay
+            playsinline
+            @click.stop
+          ></video>
+        </div>
+      </Transition>
+    </Teleport>
   </div>
 </template>
 
@@ -1745,6 +1901,82 @@ async function handleAddTask() {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-2);
+}
+
+.add-media {
+  margin-top: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px dashed var(--color-border);
+}
+
+.add-media__submit {
+  align-self: flex-start;
+}
+
+.media-thumb--playable {
+  cursor: pointer;
+  align-items: center;
+  justify-content: center;
+  min-height: 72px;
+}
+
+.media-play-icon {
+  color: var(--color-accent);
+}
+
+.media-preview-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.9);
+  padding: var(--space-8);
+}
+
+.media-preview-player {
+  max-width: 90vw;
+  max-height: 90vh;
+  border-radius: var(--radius-md);
+}
+
+.media-preview-audio {
+  width: min(480px, 90vw);
+}
+
+.media-preview-close {
+  position: absolute;
+  top: var(--space-4);
+  right: var(--space-4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.1);
+  color: white;
+  border: none;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.media-preview-close:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.preview-fade-enter-active,
+.preview-fade-leave-active {
+  transition: opacity 0.2s ease;
+}
+
+.preview-fade-enter-from,
+.preview-fade-leave-to {
+  opacity: 0;
 }
 
 .media-thumb {

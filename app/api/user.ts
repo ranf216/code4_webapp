@@ -50,34 +50,6 @@ export class UserApi extends BaseApiClient {
   }
 
   /**
-   * Get user profile (placeholder for future implementation)
-   * @param token Authentication token
-   * @param userId User ID (optional, defaults to current user)
-   */
-  async getProfile(token: string, userId?: string): Promise<ApiResponse<any>> {
-    const request = {
-      '#request': 'User/getProfile',
-      user_id: userId,
-    }
-    
-    return this.requestWithToken(request, token)
-  }
-
-  /**
-   * Update user profile (placeholder for future implementation)
-   * @param token Authentication token
-   * @param profileData Profile data to update
-   */
-  async updateProfile(token: string, profileData: any): Promise<ApiResponse<any>> {
-    const request = {
-      '#request': 'User/updateProfile',
-      ...profileData,
-    }
-    
-    return this.requestWithToken(request, token)
-  }
-
-  /**
    * Mandatory password change after first login with restricted token (X-token)
    * @param xToken Restricted token from login response when need_change_password is true
    * @param currentPassword Current password

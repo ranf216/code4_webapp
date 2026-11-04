@@ -139,7 +139,6 @@ function closePanicModal() {
 
     <!-- Org info -->
     <div class="sidebar__org">
-      <img src="/logo-light.svg" alt="Code 4 Operations" class="sidebar__org-avatar" />
       <div class="sidebar__org-info">
         <span class="sidebar__org-name">Code 4 Operations</span>
         <span class="sidebar__org-meta">6 communities · 65 officers</span>
@@ -286,11 +285,6 @@ function closePanicModal() {
 }
 .sidebar__org:hover {
   background: var(--color-bg-overlay);
-}
-.sidebar__org-avatar {
-  width: 22px;
-  height: 22px;
-  flex-shrink: 0;
 }
 .sidebar__org-info {
   display: flex;

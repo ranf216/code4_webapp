@@ -5,6 +5,7 @@ import { reportApi } from '~/api/report'
 import { communityApi } from '~/api/community'
 import { officerApi } from '~/api/officer'
 import { utcToLocal, localToUtc } from '~/utils/dateTime'
+import { useReportMetadata } from '~/composables/useReportMetadata'
 import type { ReportListItem, ReportStatus, ReportCategory } from '~/api/types/report'
 import type { Community } from '~/api/community'
 import type { Officer } from '~/api/types/officer'
@@ -13,6 +14,7 @@ type TabKey = 'all' | 'pending-review' | 'changes-requested' | 'approved' | 'del
 type SortBy = 'submitted_on' | 'created_on' | 'status' | 'title' | 'report_id'
 
 const { t } = useTranslation()
+const { metadata: reportMetadata, fetchReportMetadata, categoryLabel } = useReportMetadata()
 const router = useRouter()
 const route = useRoute()
 
@@ -56,12 +58,26 @@ const statusMapByTab: Record<TabKey, ReportStatus[] | undefined> = {
   delivered: ['delivered'],
 }
 
-const categoryOptions = computed(() => [
-  { value: '', label: t('reports.filters.all_categories') },
-  { value: 'incident', label: t('reports.category_incident') },
-  { value: 'daily_activity', label: t('reports.category_daily') },
-  { value: 'custom', label: t('reports.category_custom') },
-])
+const FALLBACK_CATEGORY_LABELS: Record<string, () => string> = {
+  incident: () => t('reports.category_incident'),
+  daily_activity: () => t('reports.category_daily'),
+  custom: () => t('reports.category_custom'),
+}
+
+const categoryOptions = computed(() => {
+  const options = [{ value: '', label: t('reports.filters.all_categories') }]
+  const apiCategories = reportMetadata.value?.categories
+  const keys = apiCategories && Object.keys(apiCategories).length
+    ? Object.keys(apiCategories)
+    : Object.keys(FALLBACK_CATEGORY_LABELS)
+  for (const key of keys) {
+    options.push({
+      value: key,
+      label: categoryLabel(key, FALLBACK_CATEGORY_LABELS[key]?.() ?? key),
+    })
+  }
+  return options
+})
 
 const reviewRequiredOptions = computed(() => [
   { value: '', label: t('calls.filters.all') },
@@ -281,6 +297,7 @@ watch(
 onMounted(() => {
   fetchCommunities()
   fetchOfficers()
+  fetchReportMetadata()
   fetchReports()
   startTimers()
 })

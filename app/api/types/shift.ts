@@ -244,8 +244,8 @@ export interface ShiftSettings {
   early_checkin_window_mins: number
 }
 
-export interface GetShiftSettingsResponse {
-  settings: ShiftSettings
+export interface GetShiftSettingsResponse extends ShiftSettings {
+  settings?: ShiftSettings
 }
 
 export interface UpdateShiftSettingsRequest extends Partial<ShiftSettings> {

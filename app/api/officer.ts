@@ -14,11 +14,6 @@ import type {
   AddOfficerEvaluationRequest,
   AddOfficerEvaluationResponse,
   DeleteOfficerEvaluationRequest,
-  GetMyDetailsRequest,
-  GetMyDetailsResponse,
-  UpdateMyDetailsRequest,
-  GetOfficersInfoRequest,
-  GetOfficersInfoResponse,
 } from './types/officer'
 
 export class OfficerApi extends BaseApiClient {
@@ -115,36 +110,6 @@ export class OfficerApi extends BaseApiClient {
     return this.request<void>(request)
   }
 
-  /**
-   * Officer (mobile): Get current officer's own profile details
-   */
-  async getMyDetails(): Promise<ApiResponse<GetMyDetailsResponse>> {
-    const request: GetMyDetailsRequest = {
-      '#request': 'Officer/get_my_details',
-    }
-    return this.request<GetMyDetailsResponse>(request)
-  }
-
-  /**
-   * Officer (mobile): Update current officer's own editable profile fields
-   */
-  async updateMyDetails(params: Omit<UpdateMyDetailsRequest, '#request'>): Promise<ApiResponse<void>> {
-    const request: UpdateMyDetailsRequest = {
-      '#request': 'Officer/update_my_details',
-      ...params,
-    }
-    return this.request<void>(request)
-  }
-
-  /**
-   * Resident (mobile): Get public officer information for the resident's community
-   */
-  async getOfficersInfo(): Promise<ApiResponse<GetOfficersInfoResponse>> {
-    const request: GetOfficersInfoRequest = {
-      '#request': 'Officer/get_officers_info',
-    }
-    return this.request<GetOfficersInfoResponse>(request)
-  }
 }
 
 // Export singleton instance
