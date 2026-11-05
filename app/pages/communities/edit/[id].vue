@@ -12,7 +12,7 @@ const communityId = route.params.id as string
     :show-search="true"
   />
   <div class="edit-community-page">
-    <EditForm :community-id="communityId" />
+    <CommunityEditForm :community-id="communityId" />
   </div>
 </template>
 

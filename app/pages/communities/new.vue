@@ -9,7 +9,7 @@ definePageMeta({ layout: 'default' })
     :show-search="true"
   />
   <div class="add-community-page">
-    <AddForm />
+    <CommunityAddForm />
   </div>
 </template>
 

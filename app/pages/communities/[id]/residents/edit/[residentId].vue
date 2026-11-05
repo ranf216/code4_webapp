@@ -38,7 +38,7 @@ const resident = ref<Resident>({
     :show-search="false"
   />
   <div class="edit-resident-page">
-    <EditForm
+    <ResidentEditForm
       :resident="resident"
       :community-id="communityId"
       :community-name="communityName"

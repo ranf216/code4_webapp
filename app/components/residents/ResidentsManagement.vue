@@ -2,7 +2,7 @@
 import { communityApi } from '~/api/community'
 import { residentApi } from '~/api/resident'
 import LoadingModal from '~/components/LoadingModal.vue'
-import ResidentsAddForm from '~/components/residents/AddForm.vue'
+import ResidentAddForm from '~/components/residents/ResidentAddForm.vue'
 import ResidentsEditModal from '~/components/residents/EditModal.vue'
 import { ApiError } from '~/api/base'
 import { useToastStore } from '~/stores/toast'
@@ -346,7 +346,7 @@ watch(() => route.query.resident_id, (residentId: typeof route.query.resident_id
       </table>
     </div>
 
-    <ResidentsAddForm
+    <ResidentAddForm
       :show="showAddModal"
       :community-id="communityId"
       :community-name="communityName"
