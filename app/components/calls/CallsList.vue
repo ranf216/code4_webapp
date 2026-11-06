@@ -418,7 +418,7 @@ watch(
             <!-- Officer / Assign -->
             <td class="col-officer">
               <div v-if="isNewCall(call)" class="assign-btn-wrapper">
-                <button class="assign-btn" @click.stop="openAssignModal(call)">
+                <button class="assign-btn mt-0" @click.stop="openAssignModal(call)">
                   <Icon name="lucide:user-plus" :size="14" />
                   {{ t('calls.assign') }}
                 </button>

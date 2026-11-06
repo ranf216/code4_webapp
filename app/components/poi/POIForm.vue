@@ -308,9 +308,30 @@ function handleMetroCard(event: Event) {
 }
 
 // ── Validation ──
+const missingFieldLabels = ref<string[]>([])
+
+const fieldLabelKeys: Record<string, string> = {
+  recordType: 'poi.section_record_type',
+  firstName: 'poi.field_first_name',
+  lastName: 'poi.field_last_name',
+  threatLevel: 'poi.field_threat_level',
+  summary: 'poi.field_summary',
+  sites: 'poi.field_sites',
+  trespassNoticeNumber: 'poi.field_notice_number',
+  trespassIssuingAuthority: 'poi.field_issuing_authority',
+  propertyAreaCovered: 'poi.field_property_area',
+  trespassIssueDate: 'poi.field_issue_date',
+  trespassExpiryDate: 'poi.field_expiry_date',
+  redCardNumber: 'poi.field_red_card_number',
+  metroIssuingAuthority: 'poi.field_issuing_authority',
+  metroIssueDate: 'poi.field_issue_date',
+  metroExpiryDate: 'poi.field_expiry_date',
+}
+
 function validate(): boolean {
   const e = errors as Record<string, string>
   Object.keys(e).forEach(k => delete e[k])
+  trespassDocError.value = ''
 
   if (!isEdit.value && !form.recordType) e.recordType = t('validation.required')
   if (!form.firstName.trim()) e.firstName = t('validation.required')
@@ -339,7 +360,11 @@ function validate(): boolean {
     if (!form.metroExpiryDate) e.metroExpiryDate = t('validation.required')
   }
 
-  return Object.keys(errors).length === 0 && !photoError.value && !trespassDocError.value
+  missingFieldLabels.value = Object.keys(e).map(key => t(fieldLabelKeys[key] ?? key))
+  if (photoError.value) missingFieldLabels.value.push(t('poi.section_photos'))
+  if (trespassDocError.value) missingFieldLabels.value.push(t('poi.field_notice_document'))
+
+  return missingFieldLabels.value.length === 0
 }
 
 async function uploadDoc(file: File | null): Promise<number | string | null> {
@@ -931,6 +956,21 @@ function handleCancel() {
       </template>
     </div>
   </div>
+
+  <AppModal
+    :show="missingFieldLabels.length > 0"
+    :title="t('poi.validation_missing_title')"
+    variant="warning"
+    cancel-text=""
+    :ok-text="t('common.close')"
+    max-width="440px"
+    @close="missingFieldLabels = []"
+    @ok="missingFieldLabels = []"
+  >
+    <ul class="missing-list">
+      <li v-for="label in missingFieldLabels" :key="label">{{ label }}</li>
+    </ul>
+  </AppModal>
 </template>
 
 <style scoped>
@@ -1358,4 +1398,14 @@ function handleCancel() {
   gap: var(--space-3);
 }
 
+/* ── Missing fields list (validation modal) ── */
+.missing-list {
+  margin: 0;
+  padding-left: var(--space-5);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
 </style>

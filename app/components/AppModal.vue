@@ -106,6 +106,10 @@ function handleBackdropClick(event: MouseEvent) {
   min-width: 400px;
   max-width: v-bind(maxWidth);
   width: 100%;
+  max-height: calc(100vh - 2 * var(--space-4));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
 }
 
@@ -116,6 +120,7 @@ function handleBackdropClick(event: MouseEvent) {
   gap: var(--space-3);
   padding: var(--space-4) var(--space-5);
   border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
 }
 
 .modal__title {
@@ -148,6 +153,9 @@ function handleBackdropClick(event: MouseEvent) {
 
 .modal__body {
   padding: var(--space-5);
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
 }
 
 .modal__message {
@@ -164,6 +172,7 @@ function handleBackdropClick(event: MouseEvent) {
   gap: var(--space-3);
   padding: var(--space-4) var(--space-5);
   border-top: 1px solid var(--color-border);
+  flex-shrink: 0;
 }
 
 .modal__btn {

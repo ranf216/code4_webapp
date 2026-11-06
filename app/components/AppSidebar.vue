@@ -1,8 +1,6 @@
 <script setup lang="ts">
 import { useAuthStore } from '~/stores/auth'
 import { AdminUserRole } from '~/api/types/adminUser'
-import PanicCallModal from './calls/PanicCallModal.vue'
-
 interface NavItem {
   key: string
   label: string
@@ -117,16 +115,6 @@ function handleLogout() {
   navigateTo('/login')
 }
 
-// Test Panic Call
-const showPanicModal = ref(false)
-
-function openTestPanicCall() {
-  showPanicModal.value = true
-}
-
-function closePanicModal() {
-  showPanicModal.value = false
-}
 </script>
 
 <template>
@@ -205,14 +193,6 @@ function closePanicModal() {
       </div>
     </nav>
 
-    <!-- Test Panic Call Button -->
-    <div class="sidebar__test-section">
-      <button class="test-panic-btn" @click="openTestPanicCall">
-        <Icon name="lucide:alert-triangle" :size="16" />
-        <span>{{ t('nav.test_panic_call') }}</span>
-      </button>
-    </div>
-
     <!-- Logout -->
     <div class="sidebar__footer">
       <button class="sidebar__logout" @click="handleLogout">
@@ -221,11 +201,6 @@ function closePanicModal() {
       </button>
     </div>
 
-    <!-- Panic Call Modal -->
-    <PanicCallModal
-      :show="showPanicModal"
-      @close="closePanicModal"
-    />
   </aside>
 </template>
 
@@ -399,44 +374,6 @@ function closePanicModal() {
   background: var(--color-critical-bg);
   border-color: transparent;
   color: var(--color-critical);
-}
-
-/* Test Section */
-.sidebar__test-section {
-  padding: var(--space-3) var(--space-6);
-  border-top: 1px solid var(--color-sidebar-border);
-}
-
-.test-panic-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-2);
-  width: 100%;
-  padding: var(--space-3) var(--space-4);
-  background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
-  border: none;
-  border-radius: var(--radius-lg);
-  color: white;
-  font-size: var(--font-size-sm);
-  font-weight: 500;
-  cursor: pointer;
-  transition: all var(--transition-base);
-}
-
-.test-panic-btn:hover {
-  background: linear-gradient(135deg, #f87171 0%, #ef4444 100%);
-  transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(239, 68, 68, 0.3);
-}
-
-.test-panic-btn :deep(svg) {
-  animation: pulse 2s infinite;
-}
-
-@keyframes pulse {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.7; transform: scale(1.1); }
 }
 
 /* Footer / Logout */
