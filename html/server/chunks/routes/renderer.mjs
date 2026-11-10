@@ -16,7 +16,7 @@ import 'node:path';
 import 'node:crypto';
 import 'node:url';
 
-//#region src/runtime/utils/response.ts
+// src/runtime/utils/response.ts
 /**
 * The response the renderer builds, keeping its body as the renderer produced it.
 *
@@ -99,7 +99,7 @@ function publicAssetsURL(...path) {
 	return path.length ? joinRelativeURL(publicBase, ...path) : publicBase;
 }
 
-//#region src/runtime/server/renderer/cache.ts
+// src/runtime/server/renderer/cache.ts
 function lazyCachedFunction(fn) {
 	let res = null;
 	return () => {
@@ -152,7 +152,7 @@ const rendererDiagnostics = /* #__PURE__ */ defineDiagnostics({
 	}
 });
 
-//#region src/runtime/server/renderer/build-files.ts
+// src/runtime/server/renderer/build-files.ts
 const APP_ROOT_OPEN_TAG = `<${appRootTag}${propsToString(appRootAttrs)}>`;
 const APP_ROOT_CLOSE_TAG = `</${appRootTag}>`;
 const getServerEntry = () => import('../virtual/entry.mjs').then((r) => r.default || r);
@@ -214,7 +214,7 @@ function renderSPATemplate() {
 	}
 }
 
-//#region src/runtime/server/renderer/instance.ts
+// src/runtime/server/renderer/instance.ts
 /**
 * Create the renderer state for a set of options.
 *
@@ -229,7 +229,7 @@ function createRendererInstance(options) {
 	};
 }
 
-//#region src/runtime/server/renderer/runtime.ts
+// src/runtime/server/renderer/runtime.ts
 /** The event to pass to application code and to the render hooks. */
 function appEvent(event) {
 	return event["~app"] ?? event;
@@ -238,7 +238,7 @@ function getRequestState(event) {
 	return event.context.nuxt;
 }
 
-//#region src/runtime/utils/renderer/options.ts
+// src/runtime/utils/renderer/options.ts
 globalThis.__buildAssetsURL = buildAssetsURL;
 globalThis.__publicAssetsURL = publicAssetsURL;
 /** The capabilities a nitropack v2 host provides to the Nuxt renderer. */
@@ -265,7 +265,7 @@ const rendererOptions = {
 */
 const rendererInstance = createRendererInstance(rendererOptions);
 
-//#region src/runtime/server/renderer/url.ts
+// src/runtime/server/renderer/url.ts
 /**
 * The fragment of a request URL, avoiding the lazy URL parse that reading `hash` triggers when
 * there is none. A fragment is never sent over the wire, so it can only appear on a URL the
@@ -275,7 +275,7 @@ function urlHash(url) {
 	return url.href.includes("#") ? url.hash : "";
 }
 
-//#region src/runtime/server/renderer/app.ts
+// src/runtime/server/renderer/app.ts
 new Set(NUXT_PRERENDER_NO_SSR_ROUTES);
 function createServerHead() {
 	return createHead(unheadOptions);
@@ -337,9 +337,9 @@ function encodeForwardSlashes(str) {
 	return str.replaceAll("/", "\\u002F");
 }
 
-const entryFileName = "B3I0ERqH.js";
+const entryFileName = "DpiqbxYN.js";
 
-//#region src/runtime/server/renderer/index.ts
+// src/runtime/server/renderer/index.ts
 const HAS_APP_TELEPORTS = !!(appTeleportAttrs.id);
 const APP_TELEPORT_OPEN_TAG = HAS_APP_TELEPORTS ? `<${appTeleportTag}${propsToString(appTeleportAttrs)}>` : "";
 const APP_TELEPORT_CLOSE_TAG = HAS_APP_TELEPORTS ? `</${appTeleportTag}>` : "";
@@ -401,7 +401,7 @@ async function renderRoute(instance, event, ssrError) {
 		await ssrContext.nuxt?.hooks.callHook("app:error", _err);
 		throw _err;
 	});
-	const inlinedStyles = [];
+	const [entryInlinedStyles, componentInlinedStyles] = [[], []];
 	await ssrContext.nuxt?.hooks.callHook("app:rendered", {
 		ssrContext,
 		renderResult: _rendered
@@ -417,7 +417,7 @@ async function renderRoute(instance, event, ssrError) {
 			innerHTML: { imports: { "#entry": path } }
 		}] });
 	}
-	if (inlinedStyles.length) ssrContext.head.push({ style: inlinedStyles });
+	if (entryInlinedStyles.length) ssrContext.head.push({ style: entryInlinedStyles });
 	const link = [];
 	const inlinedHrefs = [];
 	for (const resource of Object.values(styles)) {
@@ -428,6 +428,7 @@ async function renderRoute(instance, event, ssrError) {
 		});
 	}
 	if (link.length) ssrContext.head.push({ link });
+	if (componentInlinedStyles.length) ssrContext.head.push({ style: componentInlinedStyles });
 	const dependencyOptions = {
 		exclude: ssrContext["~lazyHydratedModules"]?.size ? ssrContext["~lazyHydratedModules"] : void 0,
 		scripts: !NO_SCRIPTS
