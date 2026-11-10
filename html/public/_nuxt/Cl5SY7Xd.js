@@ -1,0 +1,1 @@
+import{t as e}from"./lVzDzrC6.js";import"./DHNRq4QX.js";import{B as t,m as n,x as r,y as i}from"./D-7hg73j.js";import{t as a}from"./BDNMzG2s.js";var o={class:`poi-new-page`},s=a(r({__name:`new`,setup(r){return(r,a)=>{let s=e;return t(),n(`div`,o,[i(s,{mode:`create`})])}}}),[[`__scopeId`,`data-v-0dd24695`]]);export{s as default};

@@ -1,0 +1,1 @@
+import"./DHNRq4QX.js";import{c as e}from"./BFAyHUR-.js";import{B as t,m as n,x as r}from"./D-7hg73j.js";var i=r({__name:`posts`,setup(r){return e(`/map/posts`,{replace:!0}),(e,r)=>(t(),n(`div`))}});export{i as default};

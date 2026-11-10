@@ -1,0 +1,1 @@
+import{c as e}from"./BFAyHUR-.js";import{$ as t,B as n,m as r,x as i}from"./D-7hg73j.js";var a=i({__name:`index`,async setup(i){let a,o;return[a,o]=t(()=>e(`/login`,{replace:!0})),await a,o(),(e,t)=>(n(),r(`div`))}});export{a as default};
