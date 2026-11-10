@@ -311,10 +311,10 @@ const props = defineProps<{
             </td>
             <td class="col-actions">
               <div class="row-actions">
-                <button class="btn-icon" :title="t('common.edit')" @click="openEditModal(type)">
+                <button class="btn-icon mt-0" :title="t('common.edit')" @click="openEditModal(type)">
                   <Icon name="lucide:pencil" :size="14" />
                 </button>
-                <button class="btn-icon btn-icon--danger" :title="t('common.delete')" @click="handleDelete(type.id)">
+                <button class="btn-icon btn-icon--danger mt-0" :title="t('common.delete')" @click="handleDelete(type.id)">
                   <Icon name="lucide:trash-2" :size="14" />
                 </button>
               </div>

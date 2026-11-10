@@ -160,7 +160,7 @@ watch(confirmPassword, () => { confirmPasswordError.value = '' })
               />
               <button
                 type="button"
-                class="password-toggle-btn"
+                class="password-toggle-btn mt-0"
                 @click="showCurrentPassword = !showCurrentPassword"
               >
                 <Icon :name="showCurrentPassword ? 'lucide:eye-off' : 'lucide:eye'" :size="16" />
@@ -183,7 +183,7 @@ watch(confirmPassword, () => { confirmPasswordError.value = '' })
               />
               <button
                 type="button"
-                class="password-toggle-btn"
+                class="password-toggle-btn mt-0"
                 @click="showNewPassword = !showNewPassword"
               >
                 <Icon :name="showNewPassword ? 'lucide:eye-off' : 'lucide:eye'" :size="16" />
@@ -222,7 +222,7 @@ watch(confirmPassword, () => { confirmPasswordError.value = '' })
               />
               <button
                 type="button"
-                class="password-toggle-btn"
+                class="password-toggle-btn mt-0"
                 @click="showConfirmPassword = !showConfirmPassword"
               >
                 <Icon :name="showConfirmPassword ? 'lucide:eye-off' : 'lucide:eye'" :size="16" />

@@ -248,8 +248,8 @@ function handleCancelMaintenanceTypeAdd() {
                   <td><span class="type-name">{{ type.name }}</span></td>
                   <td class="col-actions">
                     <div class="types-column__actions-cell">
-                      <button class="btn-icon" @click="handleEditServiceType(type)"><Icon name="lucide:pencil" :size="14" /></button>
-                      <button class="btn-icon btn-icon--danger" @click="handleDeleteServiceType(type.id)"><Icon name="lucide:trash-2" :size="16" /></button>
+                      <button class="btn-icon mt-0" @click="handleEditServiceType(type)"><Icon name="lucide:pencil" :size="14" /></button>
+                      <button class="btn-icon btn-icon--danger mt-0" @click="handleDeleteServiceType(type.id)"><Icon name="lucide:trash-2" :size="16" /></button>
                     </div>
                   </td>
                 </template>
@@ -296,8 +296,8 @@ function handleCancelMaintenanceTypeAdd() {
                   <td><span class="type-name">{{ type.name }}</span></td>
                   <td class="col-actions">
                     <div class="types-column__actions-cell">
-                      <button class="btn-icon" @click="handleEditMaintenanceType(type)"><Icon name="lucide:pencil" :size="14" /></button>
-                      <button class="btn-icon btn-icon--danger" @click="handleDeleteMaintenanceType(type.id)"><Icon name="lucide:trash-2" :size="16" /></button>
+                      <button class="btn-icon mt-0" @click="handleEditMaintenanceType(type)"><Icon name="lucide:pencil" :size="14" /></button>
+                      <button class="btn-icon btn-icon--danger mt-0" @click="handleDeleteMaintenanceType(type.id)"><Icon name="lucide:trash-2" :size="16" /></button>
                     </div>
                   </td>
                 </template>

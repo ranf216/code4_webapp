@@ -862,22 +862,18 @@ async function handleAddTask() {
             <td class="col-date">{{ formatDate(task.last_update) }}</td>
             <td class="col-actions">
               <div class="action-badges">
-                <div class="action-row">
-                  <button class="action-badge action-badge--view" @click="viewTask(task)">
-                    {{ t('tasks.view') }}
-                  </button>
-                  <button v-if="canComplete(task)" class="action-badge action-badge--complete" @click="openCompleteModal(task)">
-                    {{ t('tasks.complete') }}
-                  </button>
-                </div>
-                <div class="action-row">
-                  <button v-if="canAccept(task)" class="action-badge action-badge--accept" @click="acceptTask(task)">
-                    {{ t('tasks.accept') }}
-                  </button>
-                  <button v-if="canReject(task)" class="action-badge action-badge--reject" @click="openRejectModal(task)">
-                    {{ t('tasks.reject') }}
-                  </button>
-                </div>
+                <button class="action-badge action-badge--view" @click="viewTask(task)">
+                  {{ t('tasks.view') }}
+                </button>
+                <button v-if="canComplete(task)" class="action-badge action-badge--complete" @click="openCompleteModal(task)">
+                  {{ t('tasks.complete') }}
+                </button>
+                <button v-if="canAccept(task)" class="action-badge action-badge--accept" @click="acceptTask(task)">
+                  {{ t('tasks.accept') }}
+                </button>
+                <button v-if="canReject(task)" class="action-badge action-badge--reject" @click="openRejectModal(task)">
+                  {{ t('tasks.reject') }}
+                </button>
               </div>
             </td>
           </tr>
@@ -1419,7 +1415,7 @@ async function handleAddTask() {
   padding: var(--space-3) var(--space-4);
   border-bottom: 1px solid var(--color-border);
   font-size: var(--font-size-sm);
-  vertical-align: top;
+  vertical-align: middle;
 }
 
 .tasks-table th:not(:last-child),
@@ -1475,27 +1471,21 @@ async function handleAddTask() {
 }
 
 .col-actions {
-  width: 15%;
+  width: 300px;
   text-align: center;
 }
 
 .action-badges {
   display: flex;
-  flex-direction: column;
-  /* gap: var(--space-1); */
-  align-items: center;
-}
-
-.action-row {
-  display: flex;
-  /* gap: var(--space-1); */
-  justify-content: center;
+  flex-wrap: nowrap;
+  gap: var(--space-2);
+  justify-content: flex-start;
 }
 
 .action-badge {
-  margin-top: var(--space-1);
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   padding: 4px 10px;
   border-radius: var(--radius-md);
   font-size: var(--font-size-xs);
@@ -1527,6 +1517,11 @@ async function handleAddTask() {
   background: rgba(16, 185, 129, 0.15);
   color: #10b981;
   border-color: rgba(16, 185, 129, 0.3);
+}
+
+.action-badge--accept,
+.action-badge--complete {
+  min-width: 92px;
 }
 
 .action-badge--reject {

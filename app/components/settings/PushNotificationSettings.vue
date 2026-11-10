@@ -254,7 +254,7 @@ async function handleReset() {
                   <span class="channel-desc">{{ t('settings.notifications.channel_in_app_desc') }}</span>
                 </div>
                 <button
-                  class="toggle-btn"
+                  class="toggle-btn mt-0"
                   :class="{ 'toggle-btn--on': channelInApp }"
                   @click="channelInApp = !channelInApp; markDirty()"
                 >

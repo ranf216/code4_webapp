@@ -166,7 +166,7 @@ async function handleReset() {
                   <span class="toggle-row-desc">{{ t('settings.poi.pdf_export_hint') }}</span>
                 </div>
                 <button
-                  class="toggle-btn"
+                  class="toggle-btn mt-0"
                   :class="{ 'toggle-btn--on': pdfExportEnabled }"
                   @click.stop="pdfExportEnabled = !pdfExportEnabled; markDirty()"
                 >

@@ -131,12 +131,6 @@ const cards = computed<KpiCard[]>(() => [
       </button>
     </div>
 
-    <!-- Recent feeds -->
-    <div class="feeds-grid">
-      <RecentCallsFeed :items="overview?.recent_calls ?? []" :total="overview?.active_calls_count" />
-      <RecentTasksFeed :items="overview?.recent_tasks ?? []" :total="overview?.open_tasks_count" />
-      <RecentReportsFeed :items="overview?.recent_reports ?? []" :total="overview?.open_reports_count" />
-    </div>
   </section>
 </template>
 
@@ -261,27 +255,15 @@ const cards = computed<KpiCard[]>(() => [
   pointer-events: none;
 }
 
-.feeds-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: var(--space-4);
-}
-
 @media (max-width: 1199px) {
   .kpi-grid {
     grid-template-columns: repeat(3, 1fr);
-  }
-  .feeds-grid {
-    grid-template-columns: repeat(2, 1fr);
   }
 }
 
 @media (max-width: 991px) {
   .kpi-grid {
     grid-template-columns: repeat(2, 1fr);
-  }
-  .feeds-grid {
-    grid-template-columns: 1fr;
   }
 }
 
