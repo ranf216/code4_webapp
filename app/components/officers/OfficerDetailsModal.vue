@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { Officer, OfficerEvaluation } from '~/api/types/officer'
+import { localDateOnly } from '~/utils/dateTime'
 
 const props = defineProps<{
   show: boolean
@@ -24,7 +25,7 @@ const email = computed(() => props.officer?.email?.endsWith('@placeholder.local'
 const registrationDate = computed(() => props.officer?.created_on?.split(' ')[0] || '')
 
 function formatDate(value: string) {
-  return value ? new Date(value).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }) : '—'
+  return value ? localDateOnly(value).format('MMM D, YYYY') : '—'
 }
 </script>
 

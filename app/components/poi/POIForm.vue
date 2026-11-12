@@ -106,12 +106,7 @@ const genderOptions = computed<{ value: PoiGender | ''; label: string }[]>(() =>
 
 function formatDateInput(dateStr: string | null | undefined): string {
   if (!dateStr) return ''
-  const d = new Date(dateStr)
-  if (Number.isNaN(d.getTime())) return dateStr
-  const year = d.getFullYear()
-  const month = `${d.getMonth() + 1}`.padStart(2, '0')
-  const day = `${d.getDate()}`.padStart(2, '0')
-  return `${year}-${month}-${day}`
+  return dateStr.slice(0, 10)
 }
 
 function buildInitialForm(): POIFormData {

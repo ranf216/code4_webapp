@@ -5,6 +5,7 @@ import { shiftApi } from '~/api/shift'
 import { ShiftErrorCodes } from '~/api/types/shift'
 import type { AllocationBoardOfficer, AllocationBoardShift, ShiftConflictWarning } from '~/api/types/shift'
 import { useTranslation } from '~/composables/useI18n'
+import { todayLocalDate } from '~/utils/dateTime'
 
 interface BoardCommunity {
   community_id: number
@@ -21,7 +22,7 @@ const emit = defineEmits<{ (e: 'close'): void }>()
 const { t } = useTranslation()
 
 const selectedCommunityId = ref<number | ''>(props.communityId || props.communities[0]?.community_id || '')
-const boardDate = ref(new Date().toISOString().slice(0, 10))
+const boardDate = ref(todayLocalDate())
 const officers = ref<AllocationBoardOfficer[]>([])
 const shifts = ref<AllocationBoardShift[]>([])
 const draggedOfficerId = ref<string | null>(null)

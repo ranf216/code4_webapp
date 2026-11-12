@@ -4,7 +4,8 @@ import { useTranslation } from '~/composables/useI18n'
 import { reportApi } from '~/api/report'
 import { communityApi } from '~/api/community'
 import { officerApi } from '~/api/officer'
-import { utcToLocal, localToUtc } from '~/utils/dateTime'
+import moment from 'moment'
+import { utcToLocal } from '~/utils/dateTime'
 import { useReportMetadata } from '~/composables/useReportMetadata'
 import type { ReportListItem, ReportStatus, ReportCategory } from '~/api/types/report'
 import type { Community } from '~/api/community'
@@ -110,8 +111,8 @@ function buildRequestParams() {
     category: (filterCategory.value || undefined) as ReportCategory | undefined,
     review_required: reviewRequired,
     search_text: searchQuery.value.trim() || undefined,
-    from_date: filterFromDate.value ? localToUtc(filterFromDate.value + ' 00:00').format('YYYY-MM-DD') : undefined,
-    to_date: filterToDate.value ? localToUtc(filterToDate.value + ' 23:59').format('YYYY-MM-DD') : undefined,
+    from_date: filterFromDate.value || undefined,
+    to_date: filterToDate.value || undefined,
     sort_by: sortBy.value,
     sort_dir: sortDir.value,
     page: page.value,
@@ -238,7 +239,7 @@ function getLockCountdown(report: ReportListItem): string {
   const lock = report.review_lock
   if (!lock?.expires_on) return ''
   const expires = utcToLocal(lock.expires_on)
-  const now = utcToLocal(new Date().toISOString())
+  const now = moment()
   const diff = expires.diff(now)
   if (diff <= 0) return '00:00'
   const minutes = Math.floor(diff / 60000)

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { PostOrder } from '~/api/types/postOrder'
+import { utcToLocal } from '~/utils/dateTime'
 
 interface PostDetail {
   id: string
@@ -50,9 +51,8 @@ const priorityIcon = computed(() => priorityMeta.value.icon)
 
 function formatDate(value?: string): string {
   if (!value) return '—'
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value
-  return date.toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })
+  const date = utcToLocal(value)
+  return date.isValid() ? date.format('MMM D, YYYY h:mm A') : value
 }
 
 const coordinates = computed(() => props.post.location.lat != null && props.post.location.lng != null

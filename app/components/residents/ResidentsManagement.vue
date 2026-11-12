@@ -8,6 +8,7 @@ import { ApiError } from '~/api/base'
 import { useToastStore } from '~/stores/toast'
 import type { Resident as ApiResident } from '~/api/types/resident'
 import type { Resident } from '~/types/resident'
+import { utcToLocal } from '~/utils/dateTime'
 
 const props = defineProps<{
   communityId: string
@@ -42,7 +43,7 @@ function mapApiResident(resident: ApiResident): Resident {
     mobile: resident.phone_num || '',
     email: resident.email?.endsWith('@placeholder.local') ? '' : resident.email || '',
     address: resident.address || '',
-    registrationDate: resident.created_on || '',
+    registrationDate: resident.created_on ? utcToLocal(resident.created_on).format('YYYY-MM-DD') : '',
     active: resident.is_active,
     communicationTest: resident.communication_test,
     vehicleNumbers: resident.vehicles || [],

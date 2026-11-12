@@ -4,6 +4,7 @@ import FileUpload from '~/components/FileUpload.vue'
 import GoogleMap from '~/components/GoogleMap.vue'
 import { useAuthStore } from '~/stores/auth'
 import type { Call as ApiCall, CallTranscription } from '~/api/types/call'
+import { utcToLocal } from '~/utils/dateTime'
 
 interface CallCategory {
   type: 'medical' | 'security' | 'panic' | 'concierge' | 'test'
@@ -65,14 +66,7 @@ const emit = defineEmits<{
 
 function formatDateTime(iso: string | undefined | null): string {
   if (!iso) return '—'
-  const d = new Date(iso)
-  return d.toLocaleString(undefined, {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
+  return utcToLocal(iso).format('MMM D, YYYY hh:mm A')
 }
 
 const { t } = useTranslation()

@@ -41,7 +41,7 @@ function formatDate(iso: string) {
       <Icon name="lucide:history" :size="18" />
       <h3 class="history-card__title">{{ t('post_orders.history_title') }}</h3>
       <span class="history-card__count">{{ entries.length }} {{ t('post_orders.history_versions') }}</span>
-      <button class="icon-btn" :title="collapsed ? 'Expand' : 'Collapse'" @click.stop="collapsed = !collapsed">
+      <button class="icon-btn mt-0" :title="collapsed ? 'Expand' : 'Collapse'" @click.stop="collapsed = !collapsed">
         <Icon :name="collapsed ? 'lucide:chevron-down' : 'lucide:chevron-up'" :size="15" />
       </button>
     </div>
@@ -82,7 +82,7 @@ function formatDate(iso: string) {
             <td class="cell-muted">{{ formatDate(entry.effectiveDate) }}</td>
             <td class="cell-summary">{{ entry.changeSummary }}</td>
             <td class="col-actions">
-              <button class="view-btn" :title="t('common.view')" @click="emit('view', entry)">
+              <button class="view-btn mt-0" :title="t('common.view')" @click="emit('view', entry)">
                 <Icon name="lucide:eye" :size="14" />
                 {{ t('common.view') }}
               </button>

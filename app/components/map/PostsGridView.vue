@@ -9,6 +9,7 @@ import type { Community } from '~/api/community'
 import type { Post as ApiPost, PostPriority } from '~/api/types/asset'
 import type { PostOrder } from '~/api/types/postOrder'
 import type { PostFormData } from './AddPostModal.vue'
+import { utcToLocal } from '~/utils/dateTime'
 
 interface GridPost {
   id: string
@@ -109,9 +110,8 @@ function mapApiPost(post: ApiPost): GridPost {
 
 function formatDateTime(value?: string | null): string {
   if (!value) return '—'
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value
-  return date.toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+  const date = utcToLocal(value)
+  return date.isValid() ? date.format('MMM D, YYYY hh:mm A') : value
 }
 
 function truncate(value: string, max = 60): string {

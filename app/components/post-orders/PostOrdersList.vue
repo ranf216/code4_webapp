@@ -5,7 +5,7 @@ import { postOrderApi } from '~/api/postOrder'
 import { communityApi } from '~/api/community'
 import type { Community } from '~/api/community'
 import { useToastStore } from '~/stores/toast'
-import { utcToLocal } from '~/utils/dateTime'
+import { utcToLocal, todayLocalDate } from '~/utils/dateTime'
 import type { PostOrder, PostOrderStatus } from '~/api/types/postOrder'
 
 type SortBy = 'community_name' | 'post_name' | 'status' | 'last_published_on'
@@ -38,8 +38,7 @@ const statusOptions = computed(() => [
   { value: 'archived', label: t('post_orders.status_archived') },
 ])
 
-const todayLocal = new Date()
-const todayStr = `${todayLocal.getFullYear()}-${String(todayLocal.getMonth() + 1).padStart(2, '0')}-${String(todayLocal.getDate()).padStart(2, '0')}`
+const todayStr = todayLocalDate()
 
 const currentPage = computed(() => Math.floor(offset.value / limit.value) + 1)
 const totalPages = computed(() => Math.max(1, Math.ceil(totalCount.value / limit.value)))

@@ -5,6 +5,7 @@ import { officerApi } from '~/api/officer'
 import { communityApi } from '~/api/community'
 import type { Officer as ApiOfficer } from '~/api/types/officer'
 import { useToastStore } from '~/stores/toast'
+import { utcToLocal, todayLocalDate, localDateOnly } from '~/utils/dateTime'
 
 const props = defineProps<{
   communityId?: string
@@ -71,7 +72,7 @@ function mapApiOfficer(o: ApiOfficer): Officer {
     title: o.title,
     picture: o.image_url || '',
     description: o.description || '',
-    registrationDate: o.created_on ? o.created_on.split(' ')[0]! : '',
+    registrationDate: o.created_on ? utcToLocal(o.created_on).format('YYYY-MM-DD') : '',
     lastLogin: o.last_login,
     roles: o.roles || [],
     certifications: o.certification_badges || [],
@@ -631,7 +632,7 @@ async function openEvaluationsTab() {
 
 function openInlineEvalForm() {
   inlineEvalForm.text = ''
-  inlineEvalForm.date = new Date().toISOString().split('T')[0]!
+  inlineEvalForm.date = todayLocalDate()
   inlineEvalError.value = ''
   showInlineEvalForm.value = true
 }
@@ -704,8 +705,7 @@ const evalList = computed((): OfficerEvaluation[] => {
 
 function formatEvalDate(dateStr: string): string {
   if (!dateStr) return ''
-  const d = new Date(dateStr)
-  return d.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
+  return localDateOnly(dateStr).format('MMMM D, YYYY')
 }
 
 async function handleDeleteEval() {

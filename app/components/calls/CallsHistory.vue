@@ -4,6 +4,7 @@ import type { Call as ApiCall, GetCallsRequest, CallPriority, CallStatus } from 
 import CallsFilters from './CallsFilters.vue'
 import CallDetailsModal from './CallDetailsModal.vue'
 import { useNotificationSocket } from '~/composables/useNotificationSocket'
+import { utcToLocal } from '~/utils/dateTime'
 
 const { t } = useTranslation()
 const { latestNotification } = useNotificationSocket()
@@ -218,12 +219,11 @@ onMounted(() => {
 })
 
 function formatTime(iso: string): string {
-  const d = new Date(iso)
-  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  return utcToLocal(iso).format('HH:mm')
 }
 
 function timeSince(iso: string): string {
-  const seconds = Math.floor((Date.now() - new Date(iso).getTime()) / 1000)
+  const seconds = Math.floor((Date.now() - utcToLocal(iso).valueOf()) / 1000)
   if (seconds < 60) return `${seconds}s`
   const minutes = Math.floor(seconds / 60)
   if (minutes < 60) return `${minutes}m`
@@ -232,13 +232,7 @@ function timeSince(iso: string): string {
 }
 
 function formatDateTime(iso: string): string {
-  return new Date(iso).toLocaleString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
+  return utcToLocal(iso).format('MMM D, YYYY hh:mm A')
 }
 
 // Local filters for fields not supported by get_calls API
@@ -257,7 +251,7 @@ const filteredHistoryCalls = computed(() => {
       }
       return true
     })
-    .sort((a: HistoryCall, b: HistoryCall) => new Date(b.createdOn).getTime() - new Date(a.createdOn).getTime())
+    .sort((a: HistoryCall, b: HistoryCall) => utcToLocal(b.createdOn).valueOf() - utcToLocal(a.createdOn).valueOf())
 })
 
 function getPriorityClass(priority: string | null | undefined): string {

@@ -10,6 +10,7 @@ import FileUpload from '~/components/FileUpload.vue'
 import MImagePreview from '~/components/MImagePreview.vue'
 import type { Officer } from '~/api/types/officer'
 import type { Task as ApiTask, TaskMedia } from '~/api/types/task'
+import { utcToLocal, utcToLocalInputValue, localToApiUtc } from '~/utils/dateTime'
 
 const { t } = useTranslation()
 const route = useRoute()
@@ -169,12 +170,7 @@ const statusBadge: Record<string, 'taskStatus'> = {
 // Format date
 function formatDate(dateStr: string | null | undefined): string {
   if (!dateStr) return '—'
-  return new Date(dateStr).toLocaleDateString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
+  return utcToLocal(dateStr).format('MMM D, hh:mm A')
 }
 
 const filteredTasks = computed(() => tasks.value)
@@ -621,7 +617,7 @@ async function confirmReassign() {
 function startEditEta() {
   if (!selectedTask.value) return
   editEtaMode.value = true
-  editableEta.value = selectedTask.value.eta ? new Date(selectedTask.value.eta).toISOString().slice(0, 16) : ''
+  editableEta.value = utcToLocalInputValue(selectedTask.value.eta)
 }
 
 async function saveEta() {
@@ -629,7 +625,7 @@ async function saveEta() {
   try {
     await taskApi.updateTask({
       task_id: selectedTask.value.task_id,
-      eta: editableEta.value ? new Date(editableEta.value).toISOString() : undefined,
+      eta: editableEta.value ? localToApiUtc(editableEta.value) : undefined,
     })
     editEtaMode.value = false
     await fetchTaskDetail(selectedTask.value.task_id)
@@ -862,16 +858,16 @@ async function handleAddTask() {
             <td class="col-date">{{ formatDate(task.last_update) }}</td>
             <td class="col-actions">
               <div class="action-badges">
-                <button class="action-badge action-badge--view" @click="viewTask(task)">
+                <button class="action-badge action-badge--view mt-0" @click="viewTask(task)">
                   {{ t('tasks.view') }}
                 </button>
-                <button v-if="canComplete(task)" class="action-badge action-badge--complete" @click="openCompleteModal(task)">
+                <button v-if="canComplete(task)" class="action-badge action-badge--complete mt-0" @click="openCompleteModal(task)">
                   {{ t('tasks.complete') }}
                 </button>
-                <button v-if="canAccept(task)" class="action-badge action-badge--accept" @click="acceptTask(task)">
+                <button v-if="canAccept(task)" class="action-badge action-badge--accept mt-0" @click="acceptTask(task)">
                   {{ t('tasks.accept') }}
                 </button>
-                <button v-if="canReject(task)" class="action-badge action-badge--reject" @click="openRejectModal(task)">
+                <button v-if="canReject(task)" class="action-badge action-badge--reject mt-0" @click="openRejectModal(task)">
                   {{ t('tasks.reject') }}
                 </button>
               </div>
@@ -1396,7 +1392,7 @@ async function handleAddTask() {
 
 .tasks-table {
   width: 100%;
-  min-width: 1280px;
+  min-width: 1560px;
   border-collapse: collapse;
   table-layout: fixed;
 }
@@ -1428,37 +1424,36 @@ async function handleAddTask() {
 }
 
 .col-id {
-  width: 7%;
+  width: 90px;
   font-family: monospace;
   color: var(--color-accent);
 }
 
 .col-desc {
-  width: 14%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .col-type {
-  width: 9%;
+  width: 120px;
 }
 
 .col-priority,
 .col-status {
-  width: 7%;
+  width: 110px;
 }
 
 .col-assignee {
-  width: 11%;
+  width: 190px;
 }
 
 .col-community {
-  width: 12%;
+  width: 190px;
 }
 
 .col-date {
-  width: 9%;
+  width: 160px;
   white-space: nowrap;
 }
 
@@ -1486,9 +1481,9 @@ async function handleAddTask() {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 4px 10px;
+  padding: 6px 10px;
   border-radius: var(--radius-md);
-  font-size: var(--font-size-xs);
+  font-size: var(--font-size-sm);
   font-weight: 600;
   text-transform: uppercase;
   border: 1px solid;

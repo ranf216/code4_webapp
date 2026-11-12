@@ -4,6 +4,7 @@ import { residentApi } from '~/api/resident'
 import { ApiError } from '~/api/base'
 import LoadingModal from '~/components/LoadingModal.vue'
 import { useToastStore } from '~/stores/toast'
+import { todayLocalDate } from '~/utils/dateTime'
 
 const props = defineProps<{
   show: boolean
@@ -280,7 +281,7 @@ watch(() => props.show, (show: boolean) => {
           </div>
           <div class="info-row">
             <span class="info-label">{{ t('residents.registration_date') }}:</span>
-            <span class="info-value">{{ new Date().toISOString().split('T')[0] }}</span>
+            <span class="info-value">{{ todayLocalDate() }}</span>
           </div>
         </div>
       </div>

@@ -5,6 +5,7 @@ import { officerApi } from '~/api/officer'
 import ImageUpload from '~/components/ImageUpload.vue'
 import CommunityBoundaryMap from '~/components/communities/CommunityBoundaryMap.vue'
 import type { CommunityEditFormData } from '~/types/community'
+import { utcToLocal } from '~/utils/dateTime'
 
 
 const props = defineProps<{
@@ -114,7 +115,7 @@ async function loadCommunity() {
       form.name = c.name
       form.area = c.area
       form.active = c.is_active
-      form.registrationDate = c.created_on ? c.created_on.split('T')[0] : ''
+      form.registrationDate = c.created_on ? utcToLocal(c.created_on).format('YYYY-MM-DD') : ''
       form.mapBoundaries = c.map_boundaries || ''
       initialMapBoundaries.value = form.mapBoundaries || ''
       if (c.latitude != null && c.longitude != null) {

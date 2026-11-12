@@ -6,7 +6,8 @@ import Badge from '~/components/Badge.vue'
 import CallDetailsModal from '~/components/calls/CallDetailsModal.vue'
 import { poiApi } from '~/api/poi'
 import { useToastStore } from '~/stores/toast'
-import { utcToLocal } from '~/utils/dateTime'
+import moment from 'moment'
+import { utcToLocal, localDateOnly } from '~/utils/dateTime'
 import type { PoiRecord } from '~/api/types/poi'
 
 const { t } = useTranslation()
@@ -76,7 +77,7 @@ function goEdit() {
 
 function formatDate(value: string | null | undefined): string {
   if (!value) return '—'
-  const local = utcToLocal(value)
+  const local = localDateOnly(value)
   return local.isValid() ? local.format('DD MMM YYYY') : '—'
 }
 
@@ -86,21 +87,15 @@ function formatDateTime(value: string | null | undefined): string {
   return local.isValid() ? local.format('DD MMM YYYY HH:mm') : '—'
 }
 
-function parseLocalDate(dateStr: string): Date {
-  return new Date(`${dateStr}T00:00:00`)
-}
-
 function isExpired(dateStr: string | null | undefined): boolean {
   if (!dateStr) return false
-  return parseLocalDate(dateStr).getTime() < new Date().setHours(0, 0, 0, 0)
+  return localDateOnly(dateStr).isBefore(moment().startOf('day'))
 }
 
 function isExpiringSoon(dateStr: string | null | undefined): boolean {
   if (!dateStr || isExpired(dateStr)) return false
-  const soon = new Date()
-  soon.setDate(soon.getDate() + 14)
-  soon.setHours(0, 0, 0, 0)
-  return parseLocalDate(dateStr).getTime() <= soon.getTime()
+  const soon = moment().add(14, 'days').endOf('day')
+  return localDateOnly(dateStr).isSameOrBefore(soon)
 }
 
 function getInitials(r: PoiRecord): string {
@@ -331,7 +326,7 @@ function closeCallDetails() {
             <div class="hero-card__meta">
               <span><strong>{{ t('poi.col_id') }}:</strong> {{ record.record_id }}</span>
               <span><strong>{{ t('poi.col_updated') }}:</strong> {{ formatDateTime(record.last_update) }}</span>
-              <span v-if="record.created_by_name"><strong>{{ t('poi.detail_created_by') }}:</strong> {{ record.created_by_name }}, {{ formatDate(record.created_on) }}</span>
+              <span v-if="record.created_by_name"><strong>{{ t('poi.detail_created_by') }}:</strong> {{ record.created_by_name }}, {{ formatDateTime(record.created_on) }}</span>
             </div>
           </div>
         </div>

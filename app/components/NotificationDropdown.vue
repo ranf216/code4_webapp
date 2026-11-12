@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import moment from 'moment'
 import { notificationApi } from '~/api/notification'
-import { utcToLocal } from '~/utils/dateTime'
+import { utcToLocal, localToApiUtc } from '~/utils/dateTime'
 import { resolveNotificationEntityPath } from '~/utils/notification'
 import { useNotificationBadge } from '~/composables/useNotificationBadge'
 import { useNotificationSocket } from '~/composables/useNotificationSocket'
@@ -88,7 +88,7 @@ async function handleMarkAllRead() {
     if (response.rc === 0) {
       notifications.value.forEach((n) => {
         n.is_read = true
-        n.read_on = new Date().toISOString()
+        n.read_on = localToApiUtc(moment())
       })
       resetBadge()
       toastStore.success(t('notifications.all_marked_read'), 2500)
@@ -137,7 +137,7 @@ async function handleItemClick(item: Notification) {
     try {
       await notificationApi.markAsRead(item.notification_id, { showLoading: false })
       item.is_read = true
-      item.read_on = new Date().toISOString()
+      item.read_on = localToApiUtc(moment())
       decrement()
     } catch {
       // Continue with navigation even if mark fails
@@ -410,7 +410,7 @@ defineExpose({ toggle, close, isOpen })
 /* Notification item */
 .notif-item {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: var(--space-2);
   padding: var(--space-3) var(--space-4);
   border-bottom: 1px solid var(--color-border);
@@ -439,7 +439,6 @@ defineExpose({ toggle, close, isOpen })
   height: 8px;
   border-radius: 50%;
   flex-shrink: 0;
-  margin-top: 6px;
   background: transparent;
 }
 
@@ -450,7 +449,6 @@ defineExpose({ toggle, close, isOpen })
 .notif-item__icon {
   color: var(--color-text-muted);
   flex-shrink: 0;
-  margin-top: 2px;
 }
 
 .notif-item--unread .notif-item__icon {
@@ -469,7 +467,7 @@ defineExpose({ toggle, close, isOpen })
 
 .notif-item__top {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: var(--space-2);
 }

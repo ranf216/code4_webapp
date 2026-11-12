@@ -236,7 +236,7 @@ async function loadHistory() {
     const response = await postOrderApi.getVersionHistory(postOrderIdNum.value, { showLoading: false })
     historyEntries.value = (response.versions || [])
       .slice()
-      .sort((a: PostOrderVersionSummary, b: PostOrderVersionSummary) => new Date(b.published_on).getTime() - new Date(a.published_on).getTime())
+      .sort((a: PostOrderVersionSummary, b: PostOrderVersionSummary) => utcToLocal(b.published_on).valueOf() - utcToLocal(a.published_on).valueOf())
       .map((v: PostOrderVersionSummary) => ({
         versionId: v.version_id,
         version: v.version,

@@ -6,7 +6,7 @@ import AppDialogModal from '~/components/AppDialogModal.vue'
 import { poiApi } from '~/api/poi'
 import { communityApi } from '~/api/community'
 import { useToastStore } from '~/stores/toast'
-import { utcToLocal } from '~/utils/dateTime'
+import { utcToLocal, localDateOnly } from '~/utils/dateTime'
 import type { Community } from '~/api/community'
 import type {
   PoiListRecord,
@@ -243,35 +243,22 @@ const pageNumbers = computed(() => {
   return pages
 })
 
-function parseLocalDate(dateStr: string) {
-  const parts = dateStr.split('-').map(Number)
-  const year = parts[0] ?? 0
-  const month = parts[1] ?? 1
-  const day = parts[2] ?? 1
-  return new Date(year, month - 1, day)
-}
-
 function formatDate(dateStr: string | null | undefined): string {
   if (!dateStr) return '—'
-  const d = parseLocalDate(dateStr)
-  return d.toLocaleDateString('en-AU', { day: '2-digit', month: 'short', year: 'numeric' })
+  const d = localDateOnly(dateStr)
+  return d.isValid() ? d.format('DD MMM YYYY') : '—'
 }
 
 function isExpired(dateStr: string | null | undefined): boolean {
   if (!dateStr) return false
-  const d = parseLocalDate(dateStr)
-  const now = new Date()
-  now.setHours(0, 0, 0, 0)
-  return d < now
+  return localDateOnly(dateStr).isBefore(moment().startOf('day'))
 }
 
 function isExpiringSoon(dateStr: string | null | undefined): boolean {
   if (!dateStr) return false
-  const d = parseLocalDate(dateStr)
-  const now = new Date()
-  now.setHours(0, 0, 0, 0)
-  const diff = d.getTime() - now.getTime()
-  return diff >= 0 && diff <= 14 * 24 * 60 * 60 * 1000
+  const d = localDateOnly(dateStr)
+  const diff = d.diff(moment().startOf('day'), 'days')
+  return diff >= 0 && diff <= 14
 }
 
 function formatLastUpdated(dateStr: string | null | undefined): string {

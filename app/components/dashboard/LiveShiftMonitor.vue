@@ -3,6 +3,7 @@ import { shiftApi } from '~/api/shift'
 import { trackingApi } from '~/api/tracking'
 import type { Shift as ApiShift, ShiftCheckin, ShiftDetails } from '~/api/types/shift'
 import type { LiveTrackingOfficer } from '~/api/types/tracking'
+import { utcToLocal, todayLocalDate } from '~/utils/dateTime'
 
 interface MonitorOfficer {
   id: string
@@ -36,10 +37,7 @@ let refreshTimer: ReturnType<typeof setInterval> | null = null
 let clockTimer: ReturnType<typeof setInterval> | null = null
 
 function todayString(): string {
-  const date = new Date()
-  const month = String(date.getMonth() + 1).padStart(2, '0')
-  const day = String(date.getDate()).padStart(2, '0')
-  return `${date.getFullYear()}-${month}-${day}`
+  return todayLocalDate()
 }
 
 function parseLocalDateTime(value: string): number {
@@ -48,8 +46,8 @@ function parseLocalDateTime(value: string): number {
 
 function formatTime(value: string | null): string {
   if (!value) return '—'
-  const date = new Date(value.replace(' ', 'T'))
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  const date = utcToLocal(value)
+  return date.isValid() ? date.format('HH:mm') : value
 }
 
 function elapsedTime(shift: ApiShift): string {

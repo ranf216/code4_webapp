@@ -5,7 +5,7 @@ import { notificationApi } from '~/api/notification'
 import { useNotificationBadge } from '~/composables/useNotificationBadge'
 import { useToastStore } from '~/stores/toast'
 import { getNotificationTypeIcon, resolveNotificationEntityPath } from '~/utils/notification'
-import { utcToLocal } from '~/utils/dateTime'
+import { utcToLocal, localToApiUtc } from '~/utils/dateTime'
 import type { Notification } from '~/api/types/notification'
 
 definePageMeta({ layout: 'default' })
@@ -77,7 +77,7 @@ async function handleMarkAllRead() {
     if (response.rc === 0) {
       notifications.value.forEach((n) => {
         n.is_read = true
-        n.read_on = new Date().toISOString()
+        n.read_on = localToApiUtc(moment())
       })
       resetBadge()
       toastStore.success(t('notifications.all_marked_read'), 2500)
@@ -95,7 +95,7 @@ async function handleMarkAsRead(item: Notification, event?: MouseEvent) {
   try {
     await notificationApi.markAsRead(item.notification_id, { showLoading: false })
     item.is_read = true
-    item.read_on = new Date().toISOString()
+    item.read_on = localToApiUtc(moment())
   } catch {
     // silently continue
   }

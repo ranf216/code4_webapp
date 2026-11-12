@@ -9,6 +9,7 @@ import type { Call } from '~/api/types/call'
 import type { Officer } from '~/api/types/officer'
 import type { Resident } from '~/api/types/resident'
 import type { GetOfficerLocationResponse } from '~/api/types/tracking'
+import { utcToLocal } from '~/utils/dateTime'
 
 const props = defineProps<{
   show: boolean
@@ -91,8 +92,8 @@ const mapCenter = computed(() => {
 
 function formatDateTime(value: string | null | undefined): string {
   if (!value) return '—'
-  const date = new Date(value.replace(' ', 'T'))
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString()
+  const date = utcToLocal(value)
+  return date.isValid() ? date.format('MMM D, YYYY hh:mm A') : value
 }
 
 async function loadPanicCall() {

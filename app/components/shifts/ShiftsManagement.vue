@@ -12,6 +12,7 @@ import type { Shift as ApiShift, ShiftCheckin, ShiftConflictWarning, ShiftStatus
 import type { Officer } from '~/api/types/officer'
 import { shifts, generateRoute, saveRoute, type Shift, type Waypoint } from '~/composables/useShifts'
 import { useToastStore } from '~/stores/toast'
+import { utcToLocal, todayLocalDate } from '~/utils/dateTime'
 
 const { t } = useTranslation()
 const toastStore = useToastStore()
@@ -72,7 +73,7 @@ const emptyShiftForm = (): ShiftForm => ({
   communityId: '',
   community: '',
   site: '',
-  date: new Date().toISOString().split('T')[0] || '',
+  date: todayLocalDate(),
   start_time: '08:00',
   end_time: '16:00',
   officers: [],
@@ -187,14 +188,13 @@ function toApiTime(time: string): string {
 
 function formatLocalDateTime(value: string | null): string {
   if (!value) return t('shifts.still_active')
-  const date = new Date(value.replace(' ', 'T'))
-  if (Number.isNaN(date.getTime())) return value
-  return date.toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' })
+  const date = utcToLocal(value)
+  return date.isValid() ? date.format('MMM D, YYYY hh:mm A') : value
 }
 
 function formatLiveHours(checkin: { checkInOn: string; totalHours: number | null; checkOutOn: string | null }): string {
   if (checkin.totalHours != null) return `${checkin.totalHours.toFixed(2)}h`
-  const start = new Date(checkin.checkInOn.replace(' ', 'T')).getTime()
+  const start = utcToLocal(checkin.checkInOn).valueOf()
   if (Number.isNaN(start)) return '—'
   const minutes = Math.max(0, Math.floor((nowTimestamp.value - start) / 60000))
   return `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, '0')}m`
@@ -1129,7 +1129,7 @@ function toggleStatus(status: ShiftStatus) {
       <div v-if="viewMode === 'week'" class="week-view" :style="{ minWidth: `${weekMinWidth}px` }">
         <div class="week-header" :style="{ gridTemplateColumns: weekGridTemplateColumns }">
           <div class="week-header-cell time-column">{{ t('shifts.time') }}</div>
-          <div v-for="day in weekDays" :key="day.dateStr" class="week-header-cell" :class="{ 'week-header-cell--today': day.dateStr === new Date().toISOString().split('T')[0] }">
+          <div v-for="day in weekDays" :key="day.dateStr" class="week-header-cell" :class="{ 'week-header-cell--today': day.dateStr === todayLocalDate() }">
             <div class="day-label">{{ day.label }}</div>
             <div class="day-number">{{ day.date.getDate() }}</div>
           </div>
@@ -1204,7 +1204,7 @@ function toggleStatus(status: ShiftStatus) {
             :key="day.dateStr"
             class="month-cell"
             :class="{
-              'month-cell--today': day.dateStr === new Date().toISOString().split('T')[0],
+              'month-cell--today': day.dateStr === todayLocalDate(),
               'month-cell--other': day.date.getMonth() !== currentDate.getMonth(),
             }"
             @click="currentDate = day.date; viewMode = 'week'"

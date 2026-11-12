@@ -5,6 +5,7 @@ import CallsFilters from './CallsFilters.vue'
 import CallDetailsModal from './CallDetailsModal.vue'
 import AssignCallModal from './AssignCallModal.vue'
 import { useNotificationSocket } from '~/composables/useNotificationSocket'
+import { utcToLocal } from '~/utils/dateTime'
 
 const { t } = useTranslation()
 const { latestNotification } = useNotificationSocket()
@@ -219,7 +220,7 @@ watch(() => route.query.call_id, (callId: typeof route.query.call_id) => {
 })
 
 function timeSince(iso: string): string {
-  const seconds = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 1000))
+  const seconds = Math.max(0, Math.floor((Date.now() - utcToLocal(iso).valueOf()) / 1000))
   if (seconds < 60) return `${seconds} sec ago`
   const minutes = Math.floor(seconds / 60)
   if (minutes < 60) return `${minutes} min ago`
@@ -234,13 +235,7 @@ function timeSince(iso: string): string {
 }
 
 function formatDateTime(iso: string): string {
-  return new Date(iso).toLocaleString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
+  return utcToLocal(iso).format('MMM D, YYYY hh:mm A')
 }
 
 // Local filters for fields not supported by get_calls API, with emergency/panic sticky sorting
@@ -263,7 +258,7 @@ const filteredCalls = computed(() => {
       const aUrgent = ['medical', 'security', 'panic'].includes(a.category.type) && a.status === 'new' ? 1 : 0
       const bUrgent = ['medical', 'security', 'panic'].includes(b.category.type) && b.status === 'new' ? 1 : 0
       if (aUrgent !== bUrgent) return bUrgent - aUrgent
-      return new Date(b.createdOn).getTime() - new Date(a.createdOn).getTime()
+      return utcToLocal(b.createdOn).valueOf() - utcToLocal(a.createdOn).valueOf()
     })
 })
 

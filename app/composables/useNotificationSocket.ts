@@ -3,6 +3,8 @@ import { useAuthStore } from '~/stores/auth'
 import { useToastStore } from '~/stores/toast'
 import { useNotificationBadge } from './useNotificationBadge'
 import { NotificationConfig } from '~/utils/config'
+import moment from 'moment'
+import { localToApiUtc } from '~/utils/dateTime'
 import type { Notification, NotificationType } from '~/api/types/notification'
 
 const SOCKET_URL = NotificationConfig.socketUrl
@@ -37,7 +39,7 @@ function normalizeMessage(data: any): SocketMessage | null {
 }
 
 function createNotificationFromMessage(msg: SocketMessage): Notification {
-  const now = new Date().toISOString()
+  const now = localToApiUtc(moment())
   let payload: Notification['payload'] = null
   if (msg.payload) {
     try {

@@ -6,6 +6,7 @@ import type { Community } from '~/api/community'
 import CallDetailsModal from '../calls/CallDetailsModal.vue'
 import AssignCallModal from '../calls/AssignCallModal.vue'
 import { useNotificationSocket } from '~/composables/useNotificationSocket'
+import { utcToLocal } from '~/utils/dateTime'
 
 const { t } = useTranslation()
 const { latestNotification } = useNotificationSocket()
@@ -78,7 +79,7 @@ const sortedCalls = computed<ActiveCall[]>(() => {
     const aUrgent = a.isEmergency && a.status === 'new' ? 1 : 0
     const bUrgent = b.isEmergency && b.status === 'new' ? 1 : 0
     if (aUrgent !== bUrgent) return bUrgent - aUrgent
-    return new Date(b.createdOn).getTime() - new Date(a.createdOn).getTime()
+    return utcToLocal(b.createdOn).valueOf() - utcToLocal(a.createdOn).valueOf()
   })
 })
 
@@ -151,12 +152,11 @@ function getCategoryInfo(category: ApiCallCategory): CallCategory {
 }
 
 function formatTime(createdOn: string): string {
-  const d = new Date(createdOn)
-  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  return utcToLocal(createdOn).format('HH:mm')
 }
 
 function timeSince(createdOn: string): string {
-  const seconds = Math.floor((Date.now() - new Date(createdOn).getTime()) / 1000)
+  const seconds = Math.floor((Date.now() - utcToLocal(createdOn).valueOf()) / 1000)
   if (seconds < 60) return `${seconds}s`
   const minutes = Math.floor(seconds / 60)
   if (minutes < 60) return `${minutes}m`
@@ -165,13 +165,7 @@ function timeSince(createdOn: string): string {
 }
 
 function formatDateTime(iso: string): string {
-  return new Date(iso).toLocaleString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
+  return utcToLocal(iso).format('MMM D, YYYY hh:mm A')
 }
 
 function mapCall(apiCall: ApiCall): ActiveCall {

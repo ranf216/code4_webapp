@@ -3,6 +3,7 @@ import { AdminUserRole, type AdminUserRoleValue, type UpdateAdminUserParams } fr
 import { adminUserApi } from '~/api/adminUser'
 import { useAuthStore } from '~/stores/auth'
 import { useToastStore } from '~/stores/toast'
+import { utcToLocal, todayLocalDate } from '~/utils/dateTime'
 
 const { t } = useTranslation()
 const authStore = useAuthStore()
@@ -27,11 +28,7 @@ function isValidEmail(email: string): boolean {
 
 function formatDate(iso: string): string {
   if (!iso) return '—'
-  return new Date(iso).toLocaleDateString('en-US', {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-  })
+  return utcToLocal(iso).format('MMM D, YYYY')
 }
 
 // Users data from API
@@ -1035,7 +1032,7 @@ const totalUsers = computed(() => totalCount.value)
         <div class="form-section form-section--info">
           <div class="info-row">
             <span class="info-label">{{ t('users.registration_date') }}:</span>
-            <span class="info-value">{{ new Date().toISOString().slice(0, 10) }}</span>
+            <span class="info-value">{{ todayLocalDate() }}</span>
           </div>
           <div class="info-row">
             <span class="info-label">{{ t('users.status') }}:</span>

@@ -47,7 +47,7 @@ function formatDateTime(utc: string | null | undefined): string {
       <span class="compliance-card__count">
         {{ pct !== null ? `${pct}%` : '—' }}
       </span>
-      <button class="icon-btn" :title="collapsed ? 'Expand' : 'Collapse'" @click.stop="collapsed = !collapsed">
+      <button class="icon-btn mt-0" :title="collapsed ? 'Expand' : 'Collapse'" @click.stop="collapsed = !collapsed">
         <Icon :name="collapsed ? 'lucide:chevron-down' : 'lucide:chevron-up'" :size="15" />
       </button>
     </div>

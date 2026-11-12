@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { localDateOnly } from '~/utils/dateTime'
 
 interface MapPoint {
   x: number
@@ -100,9 +101,9 @@ const acreage = computed(() => {
 
 const replacementStatus = computed<'overdue' | 'due_soon' | null>(() => {
   if (!props.asset.replacementDate) return null
-  const replacement = new Date(props.asset.replacementDate)
-  if (Number.isNaN(replacement.getTime())) return null
-  const diffDays = (replacement.getTime() - Date.now()) / 86400000
+  const replacement = localDateOnly(props.asset.replacementDate)
+  if (!replacement.isValid()) return null
+  const diffDays = (replacement.valueOf() - Date.now()) / 86400000
   if (diffDays < 0) return 'overdue'
   if (diffDays <= 30) return 'due_soon'
   return null

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { useTranslation } from '~/composables/useI18n'
+import { todayLocalDate } from '~/utils/dateTime'
 
 const props = defineProps<{
   show: boolean
@@ -23,7 +24,7 @@ const { t } = useTranslation()
 
 const versionType = ref<'minor' | 'major'>('minor')
 const changeSummary = ref('')
-const effectiveDate = ref(new Date().toISOString().slice(0, 10))
+const effectiveDate = ref(todayLocalDate())
 const notifyOfficers = ref(true)
 
 // First publish always produces v1.0 regardless of the selected type
