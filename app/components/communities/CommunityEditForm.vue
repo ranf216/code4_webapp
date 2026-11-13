@@ -2,6 +2,7 @@
 import { onMounted, onUnmounted } from 'vue'
 import { communityApi } from '~/api/community'
 import { officerApi } from '~/api/officer'
+import { residentApi } from '~/api/resident'
 import ImageUpload from '~/components/ImageUpload.vue'
 import CommunityBoundaryMap from '~/components/communities/CommunityBoundaryMap.vue'
 import type { CommunityEditFormData } from '~/types/community'
@@ -104,6 +105,60 @@ function removeOfficerFromCommunity(officerId: string) {
   communityOfficers.value = communityOfficers.value.filter((o: CommunityOfficer) => o.id !== officerId)
 }
 
+interface CommunityResident {
+  id: string
+  fullName: string
+  phone: string
+  email: string
+  active: boolean
+}
+
+const communityResidents = ref<CommunityResident[]>([])
+const isLoadingResidents = ref(false)
+
+async function loadCommunityResidents() {
+  isLoadingResidents.value = true
+  try {
+    const response = await residentApi.getResidents({ community_id: Number(props.communityId), include_inactive: true })
+    if (response.rc === 0 && response.residents) {
+      communityResidents.value = response.residents.map((r: any) => ({
+        id: r.user_id,
+        fullName: [r.first_name, r.last_name].filter(Boolean).join(' '),
+        phone: r.phone_num || '',
+        email: r.email || '',
+        active: r.is_active,
+      }))
+    }
+  } catch (err) {
+    console.error('Error loading community residents:', err)
+  } finally {
+    isLoadingResidents.value = false
+  }
+}
+
+const showAddResidentModal = ref(false)
+
+interface PickerResident {
+  id: string
+  fullName: string
+  phone: string
+  email: string
+  active: boolean
+  communityName: string | null
+}
+
+function handleResidentPickerConfirm(residents: PickerResident[]) {
+  const existingMap = new Map(communityResidents.value.map((r: CommunityResident) => [r.id, r]))
+  communityResidents.value = residents.map((r) =>
+    existingMap.get(r.id) ?? { id: r.id, fullName: r.fullName, phone: r.phone, email: r.email, active: r.active }
+  )
+  showAddResidentModal.value = false
+}
+
+function removeResidentFromCommunity(residentId: string) {
+  communityResidents.value = communityResidents.value.filter((r: CommunityResident) => r.id !== residentId)
+}
+
 async function loadCommunity() {
   isLoading.value = true
   loadError.value = null
@@ -145,6 +200,7 @@ onMounted(async () => {
   }
   await loadCommunity()
   await loadCommunityOfficers()
+  await loadCommunityResidents()
 })
 
 onUnmounted(() => {
@@ -181,14 +237,6 @@ function removePost(index: number) {
   form.posts.splice(index, 1)
 }
 
-function removeOfficer(index: number) {
-  form.officers.splice(index, 1)
-}
-
-function removeResident(index: number) {
-  form.residents.splice(index, 1)
-}
-
 function validate(): boolean {
   errors.name = !form.name.trim() ? t('validation.required') : ''
   errors.area = !form.area.trim() ? t('validation.required') : ''
@@ -207,12 +255,15 @@ async function handleSubmit() {
   try {
     const officerIds = communityOfficers.value.map((o: CommunityOfficer) => o.id).filter((id): id is string => !!id)
     const officersPayload = officerIds.length ? officerIds : ['0']
+    const residentIds = communityResidents.value.map((r: CommunityResident) => r.id).filter((id): id is string => !!id)
+    const residentsPayload = residentIds.length ? residentIds : ['0']
     const payload: {
       community_id: number
       name: string
       area: string
       is_active: boolean
       officers: string[]
+      residents: string[]
       map_image?: string
       map_boundaries?: string
     } = {
@@ -221,6 +272,7 @@ async function handleSubmit() {
       area: form.area.trim(),
       is_active: form.active,
       officers: officersPayload,
+      residents: residentsPayload,
     }
 
     const mapImageBase64 = extractBase64FromDataUrl(form.mapImage || '')
@@ -371,7 +423,7 @@ async function handleSubmit() {
               </div>
               <button
                 type="button"
-                class="community-officer-remove"
+                class="community-officer-remove mt-0"
                 :title="t('communities.remove_officer')"
                 :disabled="isRemovingOfficer === officer.id"
                 @click="removeOfficerFromCommunity(officer.id)"
@@ -396,25 +448,40 @@ async function handleSubmit() {
         <div class="form-section">
           <h3 class="form-section__title">{{ t('communities.residents') }}</h3>
 
-          <!-- Residents List -->
-          <div v-if="form.residents.length" class="items-list">
-            <div
-              v-for="(resident, index) in form.residents"
-              :key="index"
-              class="item-row"
-            >
-              <span class="item-row__name">{{ resident }}</span>
-              <button type="button" class="item-row__remove" @click="removeResident(index)">
-                <Icon name="lucide:x" :size="14" />
+          <div v-if="isLoadingResidents" class="officers-loading">
+            <Icon name="lucide:loader-2" :size="16" class="spin" />
+            <span>{{ t('common.loading') }}</span>
+          </div>
+
+          <div v-else-if="communityResidents.length" class="community-officers-list">
+            <div v-for="resident in communityResidents" :key="resident.id" class="community-officer-card">
+              <div class="community-officer-avatar community-officer-avatar--initials">
+                {{ getOfficerInitials(resident.fullName) }}
+              </div>
+              <div class="community-officer-info">
+                <div class="community-officer-name-row">
+                  <span class="community-officer-name">{{ resident.fullName }}</span>
+                  <span :class="['community-officer-status', resident.active ? 'community-officer-status--active' : 'community-officer-status--inactive']">{{ resident.active ? t('common.active') : t('common.inactive') }}</span>
+                </div>
+                <span class="community-officer-title">{{ resident.phone }}</span>
+                <span class="community-officer-phone">{{ resident.email }}</span>
+              </div>
+              <button
+                type="button"
+                class="community-officer-remove mt-0"
+                :title="t('communities.remove_resident')"
+                @click="removeResidentFromCommunity(resident.id)"
+              >
+                <Icon name="lucide:user-minus" :size="14" />
               </button>
             </div>
           </div>
+
           <span v-else class="form-field__hint">{{ t('communities.no_residents') }}</span>
 
-          <!-- Add Residents Button -->
-          <div class="form-row form-row--inline">
-            <button type="button" class="form-field__button form-field__button--secondary">
-              <Icon name="lucide:plus" :size="16" />
+          <div class="community-officers-actions">
+            <button type="button" class="community-officers-add-btn" @click="showAddResidentModal = true">
+              <Icon name="lucide:user-plus" :size="15" />
               <span>{{ t('communities.add_residents') }}</span>
             </button>
           </div>
@@ -516,6 +583,14 @@ async function handleSubmit() {
       :preselected-ids="communityOfficers.map((o) => o.id)"
       @close="showAddOfficerModal = false"
       @confirm="handleOfficerPickerConfirm"
+    />
+
+    <!-- Add Resident Modal -->
+    <ResidentPickerModal
+      :show="showAddResidentModal"
+      :preselected-ids="communityResidents.map((r) => r.id)"
+      @close="showAddResidentModal = false"
+      @confirm="handleResidentPickerConfirm"
     />
 
   </form>

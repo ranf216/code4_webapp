@@ -218,6 +218,7 @@ function clearBoundary() {
   font-size: var(--font-size-xs);
   color: var(--color-text-muted);
   font-style: italic;
+  margin-top: var(--space-3);
 }
 
 .boundary-map__canvas {

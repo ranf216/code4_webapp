@@ -3,6 +3,7 @@ import { ref } from 'vue'
 import { communityApi } from '~/api/community'
 import ImageUpload from '~/components/ImageUpload.vue'
 import OfficerPickerModal from '~/components/communities/OfficerPickerModal.vue'
+import ResidentPickerModal from '~/components/communities/ResidentPickerModal.vue'
 import CommunityBoundaryMap from '~/components/communities/CommunityBoundaryMap.vue'
 import { getPlacePredictions, getPlaceDetails, type PlacePrediction, type PlaceDetails } from '~/composables/useGooglePlaces'
 
@@ -37,6 +38,27 @@ interface AddFormOfficer {
 
 const selectedOfficers = ref<AddFormOfficer[]>([])
 const showOfficerPicker = ref(false)
+
+interface AddFormResident {
+  id: string
+  fullName: string
+  phone: string
+  email: string
+  active: boolean
+  communityName?: string | null
+}
+
+const selectedResidents = ref<AddFormResident[]>([])
+const showResidentPicker = ref(false)
+
+function removeResident(id: string) {
+  selectedResidents.value = selectedResidents.value.filter((r) => r.id !== id)
+}
+
+function handleResidentPickerConfirm(residents: AddFormResident[]) {
+  selectedResidents.value = residents
+  showResidentPicker.value = false
+}
 
 function getInitials(name: string): string {
   return name.split(' ').map((p: string) => p[0] || '').join('').toUpperCase().slice(0, 2)
@@ -134,10 +156,12 @@ async function handleSubmit() {
   submitError.value = null
   try {
     const officerIds = selectedOfficers.value.map((o) => o.id).filter((id): id is string => !!id)
+    const residentIds = selectedResidents.value.map((r) => r.id).filter((id): id is string => !!id)
     const payload: {
       name: string
       area: string
       officers?: string[]
+      residents?: string[]
       latitude?: number
       longitude?: number
       location_name?: string
@@ -147,6 +171,7 @@ async function handleSubmit() {
       name: form.name.trim(),
       area: form.area.trim(),
       ...(officerIds.length ? { officers: officerIds } : {}),
+      ...(residentIds.length ? { residents: residentIds } : {}),
     }
 
     if (selectedArea.value) {
@@ -303,7 +328,23 @@ async function handleSubmit() {
 
           <div class="form-field">
             <label class="form-field__label">{{ t('communities.residents') }}</label>
-            <button type="button" class="form-field__button form-field__button--secondary" disabled>
+
+            <div v-if="selectedResidents.length" class="add-form-officers-list">
+              <div v-for="resident in selectedResidents" :key="resident.id" class="add-form-officer-card">
+                <div class="add-form-officer-avatar add-form-officer-avatar--initials">
+                  {{ getInitials(resident.fullName) }}
+                </div>
+                <div class="add-form-officer-info">
+                  <span class="add-form-officer-name">{{ resident.fullName }}</span>
+                  <span class="add-form-officer-title">{{ resident.phone || resident.email }}</span>
+                </div>
+                <button type="button" class="add-form-officer-remove" @click="removeResident(resident.id)">
+                  <Icon name="lucide:x" :size="13" />
+                </button>
+              </div>
+            </div>
+
+            <button type="button" class="add-form-officers-btn" @click="showResidentPicker = true">
               <Icon name="lucide:user-plus" :size="16" />
               <span>{{ t('communities.add_residents') }}</span>
             </button>
@@ -356,6 +397,14 @@ async function handleSubmit() {
       :preselected-ids="selectedOfficers.map((o) => o.id)"
       @close="showOfficerPicker = false"
       @confirm="handleOfficerPickerConfirm"
+    />
+
+    <!-- Resident Picker Modal -->
+    <ResidentPickerModal
+      :show="showResidentPicker"
+      :preselected-ids="selectedResidents.map((r) => r.id)"
+      @close="showResidentPicker = false"
+      @confirm="handleResidentPickerConfirm"
     />
 
   </form>

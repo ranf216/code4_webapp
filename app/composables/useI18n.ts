@@ -320,6 +320,8 @@ const translations: Record<string, Record<string, string>> = {
     'communities.residents': 'Residents / Clients',
     'communities.add_residents': 'Add Residents',
     'communities.residents_hint': 'Add residents to this community',
+    'communities.remove_officer': 'Remove Officer',
+    'communities.remove_resident': 'Remove Resident',
     'communities.map_section': 'Community Map',
     'communities.enable_map': 'Enable 2D Map',
     'communities.map_dropzone': 'Upload community map',

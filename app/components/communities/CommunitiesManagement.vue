@@ -279,8 +279,9 @@ const statusOptions = [
           </option>
         </select>
 
-        <NuxtLink to="/communities/new" class="communities-management__add-link">
-          <AppButton :text="t('communities.add_community')" icon="lucide:plus" type="primary" />
+        <NuxtLink to="/communities/new" class="communities-management__add-btn">
+          <Icon name="lucide:plus" :size="16" />
+          <span>{{ t('communities.add_community') }}</span>
         </NuxtLink>
       </div>
     </div>
@@ -523,7 +524,7 @@ const statusOptions = [
 /* Header */
 .communities-management__header {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: var(--space-4);
 }
@@ -617,6 +618,7 @@ const statusOptions = [
   font-size: var(--font-size-sm);
   font-weight: 600;
   cursor: pointer;
+  text-decoration: none;
   transition: opacity var(--transition-base);
 }
 
@@ -710,7 +712,7 @@ const statusOptions = [
   padding: var(--space-4);
   color: var(--color-text-secondary);
   border-bottom: 1px solid var(--color-border);
-  vertical-align: top;
+  vertical-align: middle;
 }
 
 .communities-management__table tbody tr:hover {

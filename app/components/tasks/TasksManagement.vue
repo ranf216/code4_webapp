@@ -1128,6 +1128,7 @@ async function handleAddTask() {
             class="form-input"
             rows="3"
             maxlength="500"
+            style="resize: none"
           ></textarea>
           <p class="field-hint" style="font-size: var(--font-size-xs); color: var(--color-text-muted); text-align: right; margin-top: var(--space-1);">{{ newTaskForm.description.length }}/500</p>
         </div>
