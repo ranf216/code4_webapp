@@ -65,15 +65,6 @@ const permissionGroups = computed(() => [
   { label: 'Equipment', values: props.post.permissions?.required_equipment || [] },
 ])
 const hasRequirements = computed(() => permissionGroups.value.some(group => group.values.length))
-const miniMapMarkers = computed(() => props.post.location.lat != null && props.post.location.lng != null ? [{
-  id: props.post.id,
-  lat: props.post.location.lat,
-  lng: props.post.location.lng,
-  type: 'post' as const,
-  label: props.post.name,
-  color: priorityColor.value,
-  active: props.post.active,
-}] : [])
 </script>
 
 <template>
@@ -101,14 +92,6 @@ const miniMapMarkers = computed(() => props.post.location.lat != null && props.p
 
     <div class="drawer-section">
       <h4 class="section-title">Location</h4>
-      <div v-if="miniMapMarkers.length" class="mini-map">
-        <GoogleMap
-          :center="{ lat: post.location.lat!, lng: post.location.lng! }"
-          :zoom="17"
-          :workspace-markers="miniMapMarkers"
-          height="120px"
-        />
-      </div>
       <div class="location-coords mono">{{ coordinates }}</div>
     </div>
 
@@ -205,7 +188,6 @@ const miniMapMarkers = computed(() => props.post.location.lat != null && props.p
 .drawer-close { display: flex; padding: var(--space-1); color: var(--color-text-muted); background: none; border: 0; cursor: pointer; }
 .drawer-section { display: flex; flex-direction: column; gap: var(--space-2); }
 .section-title { margin: 0; color: var(--color-text-muted); font-size: var(--font-size-xs); font-weight: 600; letter-spacing: .05em; text-transform: uppercase; }
-.mini-map { position: relative; height: 120px; overflow: hidden; border: 1px solid var(--color-border); border-radius: var(--radius-md); }
 .location-coords, .empty-requirements { margin: 0; color: var(--color-text-muted); font-size: var(--font-size-xs); }
 .detail-rows, .requirements { display: flex; flex-direction: column; }
 .detail-row, .requirement-group { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-3); padding: var(--space-2) 0; border-bottom: 1px solid var(--color-border); }

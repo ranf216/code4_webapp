@@ -67,30 +67,6 @@ const coordinates = computed(() => hasGeoLocation.value
   ? `${props.asset.location.lat!.toFixed(6)}, ${props.asset.location.lng!.toFixed(6)}`
   : '—')
 
-const miniMapMarkers = computed(() => hasGeoLocation.value ? [{
-  id: props.asset.id,
-  lat: props.asset.location.lat!,
-  lng: props.asset.location.lng!,
-  type: 'asset' as const,
-  label: props.asset.assetType,
-  color: assetColor.value,
-  shape: props.asset.shape,
-  radius: props.asset.radius,
-  points: props.asset.points
-    ?.filter((point): point is MapPoint & { lat: number; lng: number } => point.lat != null && point.lng != null)
-    .map(point => ({ lat: point.lat, lng: point.lng })),
-}] : [])
-
-const miniMapZoom = computed(() => {
-  if (props.asset.shape === 'circle' && props.asset.radius) {
-    const lat = Math.abs(props.asset.location.lat ?? 0)
-    const metersPerPixel = (props.asset.radius * 2.6) / 120
-    const zoom = Math.log2((156543.03392 * Math.cos(lat * Math.PI / 180)) / metersPerPixel)
-    return Math.min(19, Math.max(11, Math.round(zoom)))
-  }
-  return props.asset.shape === 'line' ? 16 : 17
-})
-
 const acreage = computed(() => {
   if (props.asset.shape !== 'circle') return null
   if (props.asset.acres != null && props.asset.acres > 0) return props.asset.acres.toFixed(4)
@@ -136,14 +112,6 @@ const lifecycleFields = computed(() => [
     <!-- Location mini-view -->
     <div class="drawer-section">
       <h4 class="section-title">{{ t('map.location') }}</h4>
-      <div v-if="miniMapMarkers.length" class="mini-map">
-        <GoogleMap
-          :center="{ lat: asset.location.lat!, lng: asset.location.lng! }"
-          :zoom="miniMapZoom"
-          :workspace-markers="miniMapMarkers"
-          height="120px"
-        />
-      </div>
       <div class="location-coords mono">{{ coordinates }}</div>
     </div>
 
@@ -283,15 +251,6 @@ const lifecycleFields = computed(() => [
   text-transform: uppercase;
   letter-spacing: 0.05em;
   margin: 0;
-}
-
-/* Mini map */
-.mini-map {
-  position: relative;
-  height: 120px;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  overflow: hidden;
 }
 
 .location-coords {

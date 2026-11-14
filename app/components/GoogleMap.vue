@@ -88,6 +88,7 @@ const props = withDefaults(defineProps<{
   height?: string
   drawingMode?: 'place' | 'circle' | 'line' | 'polygon' | null
   drawingPoints?: GeoPoint[]
+  drawingClosed?: boolean
   drawingCircleCenter?: GeoPoint | null
   drawingCircleRadius?: number
 }>(), {
@@ -158,14 +159,17 @@ function renderDrawingPreview() {
   }
   if ((props.drawingMode === 'line' || props.drawingMode === 'polygon') && props.drawingPoints.length) {
     const isPolygon = props.drawingMode === 'polygon'
-    drawingPathPreview = new google.maps.Polyline({
+    const pathOptions = {
       map: mapInstance,
-      path: props.drawingPoints,
+      clickable: false,
       geodesic: true,
       strokeColor: isPolygon ? '#DC3545' : '#0D6EFD',
       strokeOpacity: 0.9,
       strokeWeight: isPolygon ? 2 : 3,
-    })
+    }
+    drawingPathPreview = isPolygon && props.drawingClosed && props.drawingPoints.length >= 3
+      ? new google.maps.Polygon({ ...pathOptions, paths: props.drawingPoints, fillColor: '#DC3545', fillOpacity: 0.12 })
+      : new google.maps.Polyline({ ...pathOptions, path: props.drawingPoints })
     if (advancedMarkerCtor) {
       drawingPointMarkers = props.drawingPoints.map((point, index) => {
         const dot = document.createElement('div')
@@ -174,12 +178,25 @@ function renderDrawingPreview() {
           background:${isPolygon ? '#DC3545' : '#0D6EFD'};border:2px solid #fff;
           box-shadow:0 1px 4px rgba(0,0,0,.45);
         `
-        return new advancedMarkerCtor!({
+        dot.addEventListener('click', (event) => {
+          event.stopPropagation()
+          if (isPolygon && index === 0 && props.drawingPoints.length >= 3) emit('draw-double-click')
+        })
+        dot.addEventListener('dblclick', (event) => {
+          event.stopPropagation()
+          emit('draw-double-click')
+        })
+        const marker = new advancedMarkerCtor!({
           map: mapInstance,
           position: point,
           content: dot,
           title: `Point ${index + 1}`,
         })
+        if (!isPolygon || index !== 0) {
+          dot.style.pointerEvents = 'none'
+          marker.style.pointerEvents = 'none'
+        }
+        return marker
       })
     }
   }
@@ -188,6 +205,7 @@ function renderDrawingPreview() {
       map: mapInstance,
       center: props.drawingCircleCenter,
       radius: props.drawingCircleRadius,
+      clickable: false,
       fillColor: '#0D6EFD',
       fillOpacity: 0.18,
       strokeColor: '#0D6EFD',
@@ -310,6 +328,7 @@ function renderOverlays() {
   for (const item of props.workspaceMarkers) {
     const color = item.color ?? (item.type === 'asset' ? '#0D6EFD' : item.type === 'post' ? '#0D6EFD' : '#198754')
     const position = { lat: item.lat, lng: item.lng }
+    const isDrawing = !!props.drawingMode
     const emitItemClick = () => emit('workspace-marker-click', item)
 
     if (item.shape === 'circle' && item.radius) {
@@ -317,6 +336,7 @@ function renderOverlays() {
         map,
         center: position,
         radius: item.radius,
+        clickable: !isDrawing,
         fillColor: color,
         fillOpacity: 0.16,
         strokeColor: color,
@@ -331,6 +351,7 @@ function renderOverlays() {
         map,
         path: item.points,
         geodesic: true,
+        clickable: !isDrawing,
         strokeColor: color,
         strokeOpacity: 0.85,
         strokeWeight: 3,
@@ -343,6 +364,7 @@ function renderOverlays() {
       const polygon = trackOverlay(new google.maps.Polygon({
         map,
         paths: item.points,
+        clickable: !isDrawing,
         fillColor: color,
         fillOpacity: 0.2,
         strokeColor: color,
@@ -381,6 +403,7 @@ function renderOverlays() {
     el.style.cssText = `
       position:relative;width:34px;height:34px;padding:0;background:transparent;
       border:0;cursor:pointer;opacity:${item.active === false ? '.4' : '1'};
+      pointer-events:${isDrawing ? 'none' : 'auto'};
     `
     pin.style.cssText = `
       display:flex;align-items:center;justify-content:center;width:34px;height:34px;
@@ -545,7 +568,7 @@ function renderOverlays() {
 }
 
 watch(
-  () => [props.drawingMode, props.drawingPoints, props.drawingCircleCenter, props.drawingCircleRadius] as const,
+  () => [props.drawingMode, props.drawingPoints, props.drawingClosed, props.drawingCircleCenter, props.drawingCircleRadius] as const,
   () => {
     mapInstance?.setOptions({
       draggableCursor: props.drawingMode ? 'crosshair' : undefined,
@@ -558,7 +581,7 @@ watch(
 )
 
 watch(
-  () => [props.boundaries, props.routes, props.waypoints, props.posts, props.workspaceMarkers, props.emergencyCalls, props.markers] as const,
+  () => [props.boundaries, props.routes, props.waypoints, props.posts, props.workspaceMarkers, props.emergencyCalls, props.markers, props.drawingMode] as const,
   () => renderOverlays(),
   { deep: true },
 )

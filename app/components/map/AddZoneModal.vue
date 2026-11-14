@@ -5,6 +5,7 @@ interface ModalLocation { x: number; y: number; lat?: number; lng?: number }
 
 const props = defineProps<{
   show: boolean
+  saving?: boolean
   location?: ModalLocation | null
   points?: ModalLocation[]
   initialData?: ZoneFormData | null
@@ -93,7 +94,8 @@ function handleSave() {
     :show="show"
     :title="isEditing ? t('map.edit_zone_title') : t('map.add_zone_title')"
     :cancel-text="t('common.cancel')"
-    :ok-text="t('common.save')"
+    :ok-text="saving ? t('common.saving') : t('common.save')"
+    :ok-disabled="saving"
     @close="emit('close')"
     @cancel="emit('close')"
     @ok="handleSave"

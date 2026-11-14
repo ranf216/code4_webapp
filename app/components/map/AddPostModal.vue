@@ -4,6 +4,7 @@ import type { PostPermissions } from '~/api/types/asset'
 
 const props = defineProps<{
   show: boolean
+  saving?: boolean
   location?: { x: number; y: number; lat?: number; lng?: number } | null
   priorities?: string[]
   initialData?: PostFormData | null
@@ -174,7 +175,8 @@ const locationLabel = computed(() => {
     :show="show"
     :title="isEditing ? t('map.edit_post_title') : t('map.add_post_title')"
     :cancel-text="t('common.cancel')"
-    :ok-text="t('common.save')"
+    :ok-text="saving ? t('common.saving') : t('common.save')"
+    :ok-disabled="saving"
     @close="emit('close')"
     @cancel="emit('close')"
     @ok="handleSave"

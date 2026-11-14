@@ -35,6 +35,42 @@ const hasMap = ref(true)
 const activeShape = ref<'place' | 'circle' | 'line' | 'polygon' | null>(null)
 const drawEntityType = ref<'asset' | 'post' | 'zone' | null>(null)
 const isBatchMode = ref(false)
+const isAdding = ref(false)
+const isSavingItem = ref(false)
+const drawingConfirmation = ref<'reset' | 'type' | 'community' | null>(null)
+const pendingEntityType = ref<'asset' | 'post' | 'zone' | null>(null)
+const pendingCommunityId = ref('')
+const hasPendingDrawing = computed(() => !!pendingLocation.value || pendingPoints.value.length > 0 || !!circleCenter.value)
+const communityModel = computed({
+  get: () => selectedCommunityId.value,
+  set: (value: string) => {
+    if (value === selectedCommunityId.value) return
+    if (isAdding.value) {
+      pendingCommunityId.value = value
+      drawingConfirmation.value = 'community'
+    } else selectedCommunityId.value = value
+  },
+})
+function supportsShape(type: 'asset' | 'post' | 'zone', shape: string) {
+  return type === 'zone' ? ['place', 'polygon'].includes(shape) : ['place', 'circle', 'line'].includes(shape)
+}
+function dismissDrawingConfirmation() {
+  drawingConfirmation.value = null
+  pendingEntityType.value = null
+  pendingCommunityId.value = ''
+}
+function confirmDrawingChange() {
+  if (drawingConfirmation.value === 'reset') resetPendingShape()
+  else if (drawingConfirmation.value === 'type' && pendingEntityType.value) {
+    resetPendingShape()
+    activeShape.value = null
+    drawEntityType.value = pendingEntityType.value
+  } else if (drawingConfirmation.value === 'community') {
+    resetDraw()
+    selectedCommunityId.value = pendingCommunityId.value
+  }
+  dismissDrawingConfirmation()
+}
 const pendingLocation = ref<MapPoint | null>(null)
 const pendingPoints = ref<MapPoint[]>([])
 const pendingCircleRadius = ref<number | null>(null)
@@ -47,6 +83,16 @@ const mapBase = ref<'google' | 'image'>('google')
 const showUploadMapModal = ref(false)
 const isUploadingMap = ref(false)
 const useImageMap = computed(() => mapBase.value === 'image' && !!mapImageUrl.value)
+const mapCanvasEl = ref<HTMLElement | null>(null)
+const mapZoom = ref(1)
+const mapPanX = ref(0)
+const mapPanY = ref(0)
+const isPanningMap = ref(false)
+const MIN_MAP_ZOOM = 1
+const MAX_MAP_ZOOM = 5
+const mapWorldStyle = computed(() => ({
+  transform: `translate(${mapPanX.value}px, ${mapPanY.value}px) scale(${mapZoom.value})`,
+}))
 const mapBaseOptions = computed(() => [
   { label: t('map.google_map'), value: 'google' },
   { label: t('map.community_image'), value: 'image', disabled: !mapImageUrl.value },
@@ -70,14 +116,15 @@ watch(searchQuery, (value) => {
   }, 300)
 })
 
-const selectedAssetTypes = ref<string[]>([])
+const assetTypeOptions = ref(['Camera', 'Gate', 'Door', 'Alarm', 'Fence', 'Other'])
+const selectedAssetTypes = ref<string[]>([...assetTypeOptions.value])
 const openAssetTypeFilter = ref(false)
 const assetTypeFilterRef = ref<HTMLElement | null>(null)
-const assetTypeOptions = ref(['Camera', 'Gate', 'Door', 'Alarm', 'Fence', 'Other'])
 const assetTypeIds = ref<Record<string, string>>({})
 const getAssetTypeKey = (name: string) => assetTypeIds.value[name] || name.trim().toLowerCase().replace(/[\s/]+/g, '_')
 const selectedAssetTypesLabel = computed(() => {
-  if (selectedAssetTypes.value.length === 0 || selectedAssetTypes.value.length === assetTypeOptions.value.length) return t('map.all')
+  if (selectedAssetTypes.value.length === 0) return t('map.none')
+  if (selectedAssetTypes.value.length === assetTypeOptions.value.length) return t('map.all')
   if (selectedAssetTypes.value.length === 1) return selectedAssetTypes.value[0]
   return `${selectedAssetTypes.value.length} selected`
 })
@@ -101,7 +148,7 @@ const drawEntityTypeModel = computed({
 const drawEntityOptions = computed(() => [
   { label: t('map.asset'), value: 'asset' },
   { label: t('map.post'), value: 'post' },
-  { label: t('map.zone'), value: 'zone' },
+  { label: t('map.map_zone'), value: 'zone' },
 ])
 const postPriorityOptions = ref(['Urgent', 'Important', 'Normal', 'Low'])
 
@@ -357,7 +404,7 @@ const visibleItems = computed((): MapItem[] => {
     if (item.type === 'post' && !layers.posts) return false
     if (item.type === 'zone' && !layers.zones) return false
 
-    if (item.type === 'asset' && selectedAssetTypes.value.length && !selectedAssetTypes.value.includes(item.assetType)) return false
+    if (item.type === 'asset' && !selectedAssetTypes.value.includes(item.assetType)) return false
     if (item.type === 'zone' && selectedZoneType.value !== 'all' && item.zoneType !== selectedZoneType.value) return false
 
     if (q) {
@@ -498,6 +545,80 @@ function percentFromEvent(event: MouseEvent, target: HTMLElement): MapPoint {
   return { x, y }
 }
 
+// Image map zoom / pan
+function clampMapPan(width: number, height: number) {
+  mapPanX.value = Math.min(0, Math.max(width - width * mapZoom.value, mapPanX.value))
+  mapPanY.value = Math.min(0, Math.max(height - height * mapZoom.value, mapPanY.value))
+}
+
+function resetMapZoom() {
+  mapZoom.value = 1
+  mapPanX.value = 0
+  mapPanY.value = 0
+  isPanningMap.value = false
+}
+
+function zoomImageMapAt(nextZoom: number, originX: number, originY: number) {
+  const canvas = mapCanvasEl.value
+  if (!canvas) return
+  const zoom = Math.min(MAX_MAP_ZOOM, Math.max(MIN_MAP_ZOOM, nextZoom))
+  const worldX = (originX - mapPanX.value) / mapZoom.value
+  const worldY = (originY - mapPanY.value) / mapZoom.value
+  mapZoom.value = zoom
+  mapPanX.value = originX - worldX * zoom
+  mapPanY.value = originY - worldY * zoom
+  clampMapPan(canvas.clientWidth, canvas.clientHeight)
+}
+
+function handleImageMapWheel(event: WheelEvent) {
+  if (!useImageMap.value || !mapCanvasEl.value) return
+  const rect = mapCanvasEl.value.getBoundingClientRect()
+  zoomImageMapAt(
+    mapZoom.value * Math.exp(-event.deltaY * 0.0015),
+    event.clientX - rect.left,
+    event.clientY - rect.top,
+  )
+}
+
+function handleZoomButton(direction: 1 | -1) {
+  const canvas = mapCanvasEl.value
+  if (!canvas) return
+  zoomImageMapAt(mapZoom.value * (direction > 0 ? 1.25 : 0.8), canvas.clientWidth / 2, canvas.clientHeight / 2)
+}
+
+let panStartX = 0
+let panStartY = 0
+let panOriginX = 0
+let panOriginY = 0
+
+function handleMapPanMove(event: MouseEvent) {
+  if (!isPanningMap.value || !mapCanvasEl.value) return
+  mapPanX.value = panOriginX + (event.clientX - panStartX)
+  mapPanY.value = panOriginY + (event.clientY - panStartY)
+  clampMapPan(mapCanvasEl.value.clientWidth, mapCanvasEl.value.clientHeight)
+}
+
+function handleMapPanEnd() {
+  isPanningMap.value = false
+  window.removeEventListener('mousemove', handleMapPanMove)
+  window.removeEventListener('mouseup', handleMapPanEnd)
+}
+
+function handleMapPanStart(event: MouseEvent) {
+  if (!useImageMap.value || activeShape.value) return
+  if ((event.target as HTMLElement).closest('.map-marker, button, a')) return
+  isPanningMap.value = true
+  panStartX = event.clientX
+  panStartY = event.clientY
+  panOriginX = mapPanX.value
+  panOriginY = mapPanY.value
+  window.addEventListener('mousemove', handleMapPanMove)
+  window.addEventListener('mouseup', handleMapPanEnd)
+  event.preventDefault()
+}
+
+watch(mapImageUrl, resetMapZoom)
+
 function resetPendingShape() {
   pendingPoints.value = []
   pendingLocation.value = null
@@ -508,15 +629,18 @@ function resetPendingShape() {
 }
 
 function selectDrawEntityType(type: 'asset' | 'post' | 'zone') {
-  if (drawEntityType.value === type) return
+  if (drawEntityType.value === type || isBatchMode.value) return
+  if (activeShape.value && !supportsShape(type, activeShape.value)) {
+    pendingEntityType.value = type
+    drawingConfirmation.value = 'type'
+    return
+  }
   drawEntityType.value = type
-  if (type !== 'zone' && activeShape.value === 'polygon') activeShape.value = null
-  resetPendingShape()
 }
 
 function selectShape(shape: 'place' | 'circle' | 'line' | 'polygon') {
   if (isLimitReached.value || !drawEntityType.value) return
-  if (shape === 'polygon' && drawEntityType.value !== 'zone') return
+  if (!supportsShape(drawEntityType.value, shape) || (isBatchMode.value && shape !== 'place')) return
   activeShape.value = activeShape.value === shape ? null : shape
   resetPendingShape()
 }
@@ -542,7 +666,7 @@ function handleCanvasMousemove(event: MouseEvent) {
   const radiusPx = Math.hypot(dx, dy)
   const radiusPercent = (radiusPx / ((rect.width + rect.height) / 2)) * 100
   const radiusMeters = Math.max(1, Math.round(radiusPercent * metersPerPercent.value))
-  circleRadiusPx.value = radiusPx
+  circleRadiusPx.value = radiusPx / mapZoom.value
   pendingCircleRadius.value = radiusMeters
 }
 
@@ -717,8 +841,7 @@ function finishDrawing() {
 }
 
 function cancelDrawing() {
-  resetPendingShape()
-  activeShape.value = null
+  resetDraw()
 }
 
 function undoLastDraw() {
@@ -739,12 +862,19 @@ function undoLastDraw() {
 }
 
 function handleKeydown(event: KeyboardEvent) {
-  if (event.key === 'Escape' && (activeShape.value || pendingPoints.value.length || circleCenter.value)) {
+  if (isSavingItem.value) return
+  const editorOpen = showAddAssetModal.value || showAddPostModal.value || showAddZoneModal.value
+  const otherModalOpen = showDeleteModal.value || showCannotDeletePostModal.value || showUploadMapModal.value || showLimitWarning.value
+  if (event.key === 'Escape') {
+    if (otherModalOpen) return
     event.preventDefault()
-    cancelDrawing()
+    if (drawingConfirmation.value) dismissDrawingConfirmation()
+    else if (editorOpen) closeEditor()
+    else if (showTypeSelect.value) showTypeSelect.value = false
+    else if (isAdding.value) cancelDrawing()
     return
   }
-  if ((event.ctrlKey || event.metaKey) && event.key === 'z') {
+  if (!editorOpen && !otherModalOpen && !drawingConfirmation.value && !showTypeSelect.value && isAdding.value && hasPendingDrawing.value && (event.ctrlKey || event.metaKey) && event.key === 'z') {
     event.preventDefault()
     undoLastDraw()
   }
@@ -760,6 +890,8 @@ async function initializeMapWorkspace() {
     if (metadataAssetTypes.length) {
       assetTypeOptions.value = metadataAssetTypes.map((type: AssetTypeMeta) => type.name)
       assetTypeIds.value = Object.fromEntries(metadataAssetTypes.map((type: AssetTypeMeta) => [type.name, type.id]))
+      selectedAssetTypes.value = assetTypeOptions.value.filter(type => selectedAssetTypes.value.includes(type))
+      if (!selectedAssetTypes.value.length) selectedAssetTypes.value = [...assetTypeOptions.value]
     }
     const metadataPriorities: PostPriorityMeta[] = metadataResponse.post_priorities || []
     if (metadataPriorities.length) postPriorityOptions.value = metadataPriorities.map((priority: PostPriorityMeta) => priority.name)
@@ -792,6 +924,7 @@ onMounted(() => {
 onUnmounted(() => {
   window.removeEventListener('click', closeAssetTypeFilter)
   window.removeEventListener('keydown', handleKeydown)
+  handleMapPanEnd()
 })
 
 function toggleLayer(key: string) {
@@ -827,9 +960,11 @@ const editingItem = ref<MapItem | null>(null)
 
 function selectItemType(type: 'asset' | 'post' | 'zone') {
   showTypeSelect.value = false
-  if (type === 'asset') showAddAssetModal.value = true
-  else if (type === 'post') showAddPostModal.value = true
-  else showAddZoneModal.value = true
+  resetPendingShape()
+  activeShape.value = null
+  isBatchMode.value = false
+  drawEntityType.value = type
+  isAdding.value = true
 }
 
 function openDrawnEntityModal() {
@@ -851,7 +986,27 @@ function pendingApiLocation(): AssetLocation | null {
   return point
 }
 
-async function handleAddAsset(data: AssetFormData) {
+async function saveItem(action: () => Promise<void>) {
+  if (isSavingItem.value) return
+  isSavingItem.value = true
+  try {
+    await action()
+  } finally {
+    isSavingItem.value = false
+  }
+}
+
+function handleAddAsset(data: AssetFormData) {
+  return saveItem(() => saveAsset(data))
+}
+function handleAddPost(data: PostFormData) {
+  return saveItem(() => savePost(data))
+}
+function handleAddZone(data: ZoneFormData) {
+  return saveItem(() => saveZone(data))
+}
+
+async function saveAsset(data: AssetFormData) {
   const location = pendingApiLocation()
   const communityId = Number(data.communityId || selectedCommunityId.value)
   const shape = activeShape.value
@@ -864,7 +1019,7 @@ async function handleAddAsset(data: AssetFormData) {
         installation_date: data.installationDate || undefined,
         replacement_date: data.replacementDate || undefined,
       })
-      editingItem.value = null
+      closeEditor(true)
       selectedItem.value = null
       toastStore.success('Asset updated successfully')
       await loadMapData()
@@ -887,7 +1042,7 @@ async function handleAddAsset(data: AssetFormData) {
         replacement_date: data.replacementDate || undefined,
       })
       toastStore.success('Assets created successfully')
-      resetDraw()
+      closeEditor(true)
       await loadMapData()
     } catch (error) {
       console.error('Failed to create assets:', error)
@@ -907,7 +1062,7 @@ async function handleAddAsset(data: AssetFormData) {
       replacement_date: data.replacementDate || undefined,
     })
     toastStore.success('Asset created successfully')
-    resetDraw()
+    closeEditor(true)
     await loadMapData()
   } catch (error) {
     console.error('Failed to create asset:', error)
@@ -915,7 +1070,7 @@ async function handleAddAsset(data: AssetFormData) {
   }
 }
 
-async function handleAddPost(data: PostFormData) {
+async function savePost(data: PostFormData) {
   postSaveError.value = ''
   const location = pendingApiLocation()
   const communityId = Number(data.communityId || selectedCommunityId.value)
@@ -931,7 +1086,7 @@ async function handleAddPost(data: PostFormData) {
         permissions: data.permissions,
         is_active: data.active,
       })
-      closeEditor()
+      closeEditor(true)
       selectedItem.value = null
       toastStore.success('Post updated successfully')
       await loadMapData()
@@ -958,9 +1113,8 @@ async function handleAddPost(data: PostFormData) {
       permissions: data.permissions,
       is_active: data.active,
     })
-    closeEditor()
+    closeEditor(true)
     toastStore.success('Post created successfully')
-    resetDraw()
     await loadMapData()
   } catch (error) {
     if (error instanceof ApiError && error.rc === 753) {
@@ -972,7 +1126,7 @@ async function handleAddPost(data: PostFormData) {
   }
 }
 
-async function handleAddZone(data: ZoneFormData) {
+async function saveZone(data: ZoneFormData) {
   if (editingItem.value?.type === 'zone') {
     try {
       await assetApi.updateMapZone({
@@ -980,7 +1134,7 @@ async function handleAddZone(data: ZoneFormData) {
         zone_type: data.zoneType,
         name: data.name,
       })
-      closeEditor()
+      closeEditor(true)
       selectedItem.value = null
       toastStore.success('Map zone updated successfully')
       await loadMapData()
@@ -1000,9 +1154,8 @@ async function handleAddZone(data: ZoneFormData) {
       name: data.name,
       location,
     })
-    closeEditor()
+    closeEditor(true)
     toastStore.success('Map zone created successfully')
-    resetDraw()
     await loadMapData()
   } catch (error) {
     console.error('Failed to create map zone:', error)
@@ -1020,6 +1173,7 @@ function resetDraw() {
   activeShape.value = null
   drawEntityType.value = null
   isBatchMode.value = false
+  isAdding.value = false
 }
 
 function openAddNew() {
@@ -1034,6 +1188,7 @@ function startBatchMode() {
   resetPendingShape()
   editingItem.value = null
   isBatchMode.value = true
+  isAdding.value = true
   drawEntityType.value = 'asset'
   activeShape.value = 'place'
 }
@@ -1081,12 +1236,14 @@ const editingZoneData = computed<ZoneFormData | null>(() => editingItem.value?.t
   communityId: selectedCommunityId.value,
 } : null)
 
-function closeEditor() {
+function closeEditor(force = false) {
+  if (isSavingItem.value && !force) return
+  const wasEditing = !!editingItem.value
   showAddAssetModal.value = false
   showAddPostModal.value = false
   showAddZoneModal.value = false
   editingItem.value = null
-  pendingLocation.value = null
+  if (!wasEditing) resetPendingShape()
   postSaveError.value = ''
 }
 
@@ -1216,7 +1373,7 @@ async function handleUploadMapSave(data: { communityId: string; file: File }) {
     <div class="map-toolbar">
       <div class="toolbar-section">
         <label class="toolbar-label">{{ t('communities.community') }}</label>
-        <select v-model="selectedCommunityId" class="toolbar-select">
+        <select v-model="communityModel" class="toolbar-select">
           <option v-for="c in communities" :key="c.community_id" :value="String(c.community_id)">{{ c.name }}</option>
         </select>
       </div>
@@ -1253,7 +1410,7 @@ async function handleUploadMapSave(data: { communityId: string; file: File }) {
       <div ref="assetTypeFilterRef" class="toolbar-section multi-select-section">
         <label class="toolbar-label">{{ t('map.asset_type') }}</label>
         <button
-          class="toolbar-select multi-select-trigger"
+          class="toolbar-select multi-select-trigger mt-0"
           :class="{ open: openAssetTypeFilter }"
           @click.stop="openAssetTypeFilter = !openAssetTypeFilter"
         >
@@ -1273,7 +1430,7 @@ async function handleUploadMapSave(data: { communityId: string; file: File }) {
       </div>
 
       <div class="toolbar-section">
-        <label class="toolbar-label">{{ t('map.zone') }}</label>
+        <label class="toolbar-label">{{ t('map.map_zone') }}</label>
         <select v-model="selectedZoneType" class="toolbar-select">
           <option value="all">{{ t('map.all') }}</option>
           <option value="entry_exit">{{ t('map.entry_exit') }}</option>
@@ -1303,6 +1460,7 @@ async function handleUploadMapSave(data: { communityId: string; file: File }) {
           type="secondary"
           icon="lucide:list"
           size="sm"
+          class="mt-0"
           @click="router.push('/map/posts')"
         />
         <AppButton
@@ -1310,6 +1468,7 @@ async function handleUploadMapSave(data: { communityId: string; file: File }) {
           type="secondary"
           icon="lucide:upload"
           size="sm"
+          class="mt-0"
           @click="showUploadMapModal = true"
         />
       </div>
@@ -1320,11 +1479,12 @@ async function handleUploadMapSave(data: { communityId: string; file: File }) {
       <div class="map-area">
         <!-- Shape toolbar -->
         <div class="shape-toolbar">
+          <template v-if="isAdding">
           <span class="toolbar-label">{{ t('map.entity_type') }}:</span>
           <AppSegmentedControl
             v-model="drawEntityTypeModel"
             class="entity-type-selector"
-            :options="drawEntityOptions"
+            :options="isBatchMode ? drawEntityOptions.filter(option => option.value === 'asset') : drawEntityOptions"
             :aria-label="t('map.entity_type')"
           />
 
@@ -1340,6 +1500,7 @@ async function handleUploadMapSave(data: { communityId: string; file: File }) {
             <span>{{ t('map.shape_dot') }}</span>
           </button>
           <button
+            v-if="drawEntityType !== 'zone' && !isBatchMode"
             :class="['tool-btn', { active: activeShape === 'circle', disabled: isLimitReached || !drawEntityType }]"
             :disabled="isLimitReached || !drawEntityType"
             @click="selectShape('circle')"
@@ -1348,6 +1509,7 @@ async function handleUploadMapSave(data: { communityId: string; file: File }) {
             <span>{{ t('map.shape_circle') }}</span>
           </button>
           <button
+            v-if="drawEntityType !== 'zone' && !isBatchMode"
             :class="['tool-btn', { active: activeShape === 'line', disabled: isLimitReached || !drawEntityType }]"
             :disabled="isLimitReached || !drawEntityType"
             @click="selectShape('line')"
@@ -1356,6 +1518,7 @@ async function handleUploadMapSave(data: { communityId: string; file: File }) {
             <span>{{ t('map.shape_line') }}</span>
           </button>
           <button
+            v-if="drawEntityType === 'zone'"
             :class="['tool-btn', { active: activeShape === 'polygon', disabled: isLimitReached || drawEntityType !== 'zone' }]"
             :disabled="isLimitReached || drawEntityType !== 'zone'"
             @click="selectShape('polygon')"
@@ -1369,12 +1532,16 @@ async function handleUploadMapSave(data: { communityId: string; file: File }) {
             <Icon name="lucide:check" :size="16" />
             <span>{{ t('map.finish') }}</span>
           </button>
-          <button v-if="activeShape" class="tool-btn" @click="cancelDrawing">
+          <button class="tool-btn" :disabled="!hasPendingDrawing" @click="drawingConfirmation = 'reset'">
+            <Icon name="lucide:rotate-ccw" :size="16" />
+            <span>{{ t('map.reset_drawing') }}</span>
+          </button>
+          <button class="tool-btn" @click="cancelDrawing">
             <Icon name="lucide:x" :size="16" />
             <span>{{ t('common.cancel') }}</span>
           </button>
 
-          <button class="tool-btn" :disabled="!activeShape && !pendingPoints.length && !circleCenter" @click="undoLastDraw">
+          <button class="tool-btn" :disabled="!hasPendingDrawing" @click="undoLastDraw">
             <Icon name="lucide:undo-2" :size="16" />
             <span>{{ t('map.undo') }}</span>
           </button>
@@ -1387,6 +1554,8 @@ async function handleUploadMapSave(data: { communityId: string; file: File }) {
             </button>
           </div>
 
+          </template>
+          <template v-else>
           <AppButton
             class="add-btn"
             :text="t('map.add_new')"
@@ -1404,12 +1573,15 @@ async function handleUploadMapSave(data: { communityId: string; file: File }) {
             :disabled="isLimitReached"
             @click="startBatchMode"
           />
+          </template>
         </div>
 
         <!-- Map canvas -->
         <div
+          ref="mapCanvasEl"
           class="map-canvas"
           :class="{ 'cursor-crosshair': !!activeShape }"
+          @wheel.prevent="handleImageMapWheel"
         >
           <div v-if="!hasMap" class="map-empty" @click.stop>
             <Icon name="lucide:map" :size="48" class="map-empty__icon" />
@@ -1419,29 +1591,16 @@ async function handleUploadMapSave(data: { communityId: string; file: File }) {
           </div>
 
           <template v-else>
-            <div class="map-base-layer" :class="{ 'non-interactive': !!activeShape && useImageMap }">
-              <img v-if="useImageMap" :src="mapImageUrl || ''" alt="Community map" class="map-bg-image">
-              <GoogleMap
-                v-else
-                :key="googleMapKey"
-                :center="mapCenter"
-                :zoom="15"
-                :workspace-markers="workspaceMarkers"
-                :boundaries="communityBoundaryOverlay"
-                :drawing-mode="activeShape"
-                :drawing-points="drawingGeoPoints"
-                :drawing-circle-center="drawingCircleCenter"
-                :drawing-circle-radius="pendingCircleRadius || 0"
-                height="100%"
-                @workspace-marker-click="handleWorkspaceMarkerClick"
-                @draw-click="handleGoogleMapClick"
-                @draw-double-click="handleCanvasDblclick"
-                @draw-mousedown="handleGoogleMapMousedown"
-                @draw-mousemove="handleGoogleMapMousemove"
-                @draw-mouseup="handleGoogleMapMouseup"
-                @draw-point-remove="removePendingPoint"
-              />
-            </div>
+            <div
+              v-if="useImageMap"
+              class="map-world"
+              :class="{ 'map-world--panning': isPanningMap, 'map-world--pannable': !activeShape }"
+              :style="mapWorldStyle"
+              @mousedown="handleMapPanStart"
+            >
+              <div class="map-base-layer" :class="{ 'non-interactive': !!activeShape }">
+                <img :src="mapImageUrl || ''" alt="Community map" class="map-bg-image">
+              </div>
 
             <div
               v-if="activeShape && useImageMap"
@@ -1455,7 +1614,7 @@ async function handleUploadMapSave(data: { communityId: string; file: File }) {
 
             <svg v-if="useImageMap && pendingPoints.length" class="drawing-overlay" viewBox="0 0 100 100" preserveAspectRatio="none">
               <polyline
-                v-if="activeShape === 'line'"
+                v-if="activeShape === 'line' || (activeShape === 'polygon' && !showAddZoneModal)"
                 :points="pendingPoints.map(p => `${p.x},${p.y}`).join(' ')"
                 fill="none"
                 stroke="var(--color-accent)"
@@ -1498,11 +1657,44 @@ async function handleUploadMapSave(data: { communityId: string; file: File }) {
               :key="item.id"
               class="map-marker"
               :class="getMarkerClass(item)"
-              :style="{ left: item.location.x + '%', top: item.location.y + '%' }"
+              :style="{ left: item.location.x + '%', top: item.location.y + '%', pointerEvents: activeShape ? 'none' : 'auto' }"
               @click.stop="selectedItem = item"
             >
               <Icon :name="getMarkerIcon(item)" :size="16" />
               <span class="marker-label">{{ getItemName(item) }}</span>
+            </div>
+            </div>
+
+            <div v-else class="map-base-layer">
+              <GoogleMap
+                :key="googleMapKey"
+                :center="mapCenter"
+                :zoom="15"
+                :workspace-markers="workspaceMarkers"
+                :boundaries="communityBoundaryOverlay"
+                :drawing-mode="activeShape"
+                :drawing-points="drawingGeoPoints"
+                :drawing-closed="activeShape === 'polygon' && showAddZoneModal"
+                :drawing-circle-center="drawingCircleCenter"
+                :drawing-circle-radius="pendingCircleRadius || 0"
+                height="100%"
+                @workspace-marker-click="handleWorkspaceMarkerClick"
+                @draw-click="handleGoogleMapClick"
+                @draw-double-click="handleCanvasDblclick"
+                @draw-mousedown="handleGoogleMapMousedown"
+                @draw-mousemove="handleGoogleMapMousemove"
+                @draw-mouseup="handleGoogleMapMouseup"
+                @draw-point-remove="removePendingPoint"
+              />
+            </div>
+
+            <div v-if="useImageMap" class="map-zoom-controls">
+              <button class="zoom-btn" :disabled="mapZoom >= MAX_MAP_ZOOM" @click="handleZoomButton(1)">
+                <Icon name="lucide:plus" :size="16" />
+              </button>
+              <button class="zoom-btn" :disabled="mapZoom <= MIN_MAP_ZOOM" @click="handleZoomButton(-1)">
+                <Icon name="lucide:minus" :size="16" />
+              </button>
             </div>
 
             <div v-if="isBatchMode" class="batch-count-chip">
@@ -1510,7 +1702,7 @@ async function handleUploadMapSave(data: { communityId: string; file: File }) {
               {{ pendingPoints.length }} / {{ BATCH_LIMIT }}
             </div>
 
-            <div v-if="!drawEntityType || activeShape" class="map-hint">
+            <div v-if="isAdding" class="map-hint">
               <Icon name="lucide:mouse-pointer-click" :size="14" />
               <span v-if="!drawEntityType">{{ t('map.hint_select_entity') }}</span>
               <span v-else-if="!activeShape">{{ t('map.hint_select_shape') }}</span>
@@ -1583,6 +1775,18 @@ async function handleUploadMapSave(data: { communityId: string; file: File }) {
       </aside>
     </div>
 
+    <AppModal
+      :show="drawingConfirmation !== null"
+      variant="warning"
+      :title="drawingConfirmation ? t(`map.${drawingConfirmation}_confirm_title`) : ''"
+      :message="drawingConfirmation ? t(`map.${drawingConfirmation}_confirm_message`) : ''"
+      :cancel-text="t('common.cancel')"
+      :ok-text="t('common.confirm')"
+      @close="dismissDrawingConfirmation"
+      @cancel="dismissDrawingConfirmation"
+      @ok="confirmDrawingChange"
+    />
+
     <!-- Type select modal -->
     <AppModal
       :show="showTypeSelect"
@@ -1604,8 +1808,8 @@ async function handleUploadMapSave(data: { communityId: string; file: File }) {
         </button>
         <button class="type-select__btn" @click="selectItemType('zone')">
           <Icon name="lucide:shield-alert" :size="28" class="type-select__icon type-select__icon--zone" />
-          <span class="type-select__label">{{ t('map.zone') }}</span>
-          <span class="type-select__hint">{{ t('map.zone_hint') }}</span>
+          <span class="type-select__label">{{ t('map.map_zone') }}</span>
+          <span class="type-select__hint">{{ t('map.entry_exit') }} / {{ t('map.zone') }}</span>
         </button>
       </div>
     </AppModal>
@@ -1613,6 +1817,8 @@ async function handleUploadMapSave(data: { communityId: string; file: File }) {
     <!-- Add asset/post modals -->
     <AddAssetModal
       :show="showAddAssetModal"
+      :saving="isSavingItem"
+      :close-on-save="false"
       :location="pendingLocation"
       :asset-types="assetTypeOptions"
       :initial-data="editingAssetData"
@@ -1624,6 +1830,7 @@ async function handleUploadMapSave(data: { communityId: string; file: File }) {
     />
     <AddPostModal
       :show="showAddPostModal"
+      :saving="isSavingItem"
       :location="pendingLocation"
       :priorities="postPriorityOptions"
       :initial-data="editingPostData"
@@ -1638,6 +1845,7 @@ async function handleUploadMapSave(data: { communityId: string; file: File }) {
     <!-- Add zone modal -->
     <AddZoneModal
       :show="showAddZoneModal"
+      :saving="isSavingItem"
       :location="pendingLocation"
       :points="pendingPoints"
       :initial-data="editingZoneData"
@@ -1845,6 +2053,7 @@ async function handleUploadMapSave(data: { communityId: string; file: File }) {
   font-size: var(--font-size-xs);
   cursor: pointer;
   transition: all var(--transition-base);
+  margin-top: 0px;
 }
 
 .layer-toggle.active {
@@ -1924,6 +2133,7 @@ async function handleUploadMapSave(data: { communityId: string; file: File }) {
   font-size: var(--font-size-xs);
   cursor: pointer;
   transition: all var(--transition-base);
+  margin-top: 0px;
 }
 
 .tool-btn:hover:not(:disabled) {
@@ -1997,6 +2207,55 @@ async function handleUploadMapSave(data: { communityId: string; file: File }) {
 
 .map-base-layer.non-interactive {
   pointer-events: none;
+}
+
+.map-world {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  transform-origin: 0 0;
+  will-change: transform;
+}
+
+.map-world--pannable {
+  cursor: grab;
+}
+
+.map-world--panning {
+  cursor: grabbing;
+  user-select: none;
+}
+
+.map-zoom-controls {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  z-index: 15;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.zoom-btn {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text-primary);
+  cursor: pointer;
+}
+
+.zoom-btn:hover:not(:disabled) {
+  background: var(--color-bg-overlay);
+}
+
+.zoom-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
 
 .drawing-hit-area {

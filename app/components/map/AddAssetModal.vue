@@ -8,15 +8,17 @@ interface FormLocation {
   lng?: number
 }
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   show: boolean
+  saving?: boolean
+  closeOnSave?: boolean
   location?: FormLocation | null
   assetTypes?: string[]
   initialData?: AssetFormData | null
   communities?: { community_id: number; name: string }[]
   communityId?: string
   shape?: 'place' | 'circle' | 'line'
-}>()
+}>(), { closeOnSave: true })
 
 const emit = defineEmits<{
   close: []
@@ -89,8 +91,9 @@ function validate(): boolean {
 
 function handleSave() {
   if (!validate()) return
+  if (props.saving) return
   emit('save', { ...form })
-  emit('close')
+  if (props.closeOnSave) emit('close')
 }
 </script>
 
@@ -99,7 +102,8 @@ function handleSave() {
     :show="show"
     :title="props.initialData?.id ? t('map.edit_asset_title') : t('map.add_asset_title')"
     :cancel-text="t('common.cancel')"
-    :ok-text="t('common.save')"
+    :ok-text="saving ? t('common.saving') : t('common.save')"
+    :ok-disabled="saving"
     @close="emit('close')"
     @cancel="emit('close')"
     @ok="handleSave"
@@ -134,7 +138,7 @@ function handleSave() {
           <label class="field-label">{{ t('map.shape') }}</label>
           <div class="shape-radio-group">
             <label
-              v-for="option in shapeOptions"
+              v-for="option in shapeOptions.filter((option) => option.value === form.shape)"
               :key="option.value"
               class="shape-radio"
               :class="{ 'shape-radio--checked': form.shape === option.value }"
